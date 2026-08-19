@@ -1,0 +1,140 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>Вавилон-5 — Сады</title>
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="theme-color" content="#070b14">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<link rel="stylesheet" href="style.css">
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js" } }
+</script>
+</head>
+<body>
+
+<div id="stage"></div>
+
+<div id="hud">
+  <div id="brand"><b>ВАВИЛОН-5</b>Сады · цилиндр О'Нилла</div>
+
+  <div id="topbar">
+    <div class="btn glass" id="bDay" title="День / ночь" aria-label="День или ночь">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.4"/><path d="M12 2.6v2.4M12 19v2.4M21.4 12H19M5 12H2.6M18.6 5.4l-1.7 1.7M7.1 16.9l-1.7 1.7M18.6 18.6l-1.7-1.7M7.1 7.1L5.4 5.4"/></svg>
+    </div>
+    <div class="btn glass" id="bTp" title="Телепорты" aria-label="Телепорты">
+      <svg viewBox="0 0 24 24"><path d="M12 21s7-6.1 7-11a7 7 0 1 0-14 0c0 4.9 7 11 7 11z"/><circle cx="12" cy="10" r="2.6"/></svg>
+    </div>
+    <div class="btn glass" id="bSet" title="Настройки" aria-label="Настройки">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.1"/><path d="M19.4 14.5a1.6 1.6 0 0 0 .33 1.77l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.6 1.6 0 0 0-1.77-.33 1.6 1.6 0 0 0-1 1.47V21a2 2 0 1 1-4 0v-.11a1.6 1.6 0 0 0-1.05-1.46 1.6 1.6 0 0 0-1.77.33l-.06.06A2 2 0 1 1 4.4 17l.06-.06a1.6 1.6 0 0 0 .33-1.77 1.6 1.6 0 0 0-1.47-1H3a2 2 0 1 1 0-4h.11a1.6 1.6 0 0 0 1.46-1.05 1.6 1.6 0 0 0-.33-1.77L4.2 7.3A2 2 0 1 1 7 4.46l.06.06a1.6 1.6 0 0 0 1.77.33H9a1.6 1.6 0 0 0 1-1.47V3a2 2 0 1 1 4 0v.11a1.6 1.6 0 0 0 1 1.47 1.6 1.6 0 0 0 1.77-.33l.06-.06A2 2 0 1 1 19.6 7l-.06.06a1.6 1.6 0 0 0-.33 1.77V9a1.6 1.6 0 0 0 1.47 1H21a2 2 0 1 1 0 4h-.11a1.6 1.6 0 0 0-1.47 1z"/></svg>
+    </div>
+    <div class="btn glass" id="bHelp" title="Справка" aria-label="Справка">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9.2"/><path d="M9.3 9.2a2.8 2.8 0 0 1 5.4.9c0 1.9-2.7 2.4-2.7 4"/><path d="M12 17.4h.01"/></svg>
+    </div>
+    <div class="btn glass" id="bFs" title="Во весь экран" aria-label="Во весь экран">
+      <svg viewBox="0 0 24 24"><path d="M3.5 9V3.5H9M15 3.5h5.5V9M20.5 15v5.5H15M9 20.5H3.5V15"/></svg>
+    </div>
+  </div>
+
+  <div id="pad">
+    <div class="btn glass" id="bUp" aria-label="Подъём"><svg viewBox="0 0 24 24"><path d="M12 19V5M5.5 11.5 12 5l6.5 6.5"/></svg></div>
+    <div class="btn glass" id="bDn" aria-label="Спуск"><svg viewBox="0 0 24 24"><path d="M12 5v14M5.5 12.5 12 19l6.5-6.5"/></svg></div>
+    <div class="btn glass" id="bSpd" aria-label="Скорость"><svg viewBox="0 0 24 24"><path d="M4 15a8 8 0 1 1 16 0"/><path d="M12 15l4.2-4.6"/><circle cx="12" cy="15" r="1.3"/></svg></div>
+  </div>
+
+  <div id="stickBase"></div>
+  <div id="stickKnob"></div>
+  <div id="fps" class="glass"></div>
+</div>
+
+<section class="sheet glass" id="tp">
+  <div class="grip"></div>
+  <div class="btn close" id="tpClose"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></div>
+  <h2>Куда лететь</h2>
+  <div id="tpList"></div>
+</section>
+
+<section class="sheet glass" id="set">
+  <div class="grip"></div>
+  <div class="btn close" id="setClose"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></div>
+  <h2>Настройки</h2>
+  <div class="row">
+    <label>Качество<small>Плотность мира и разрешение текстур</small></label>
+    <select id="sQual"><option value="AUTO">АВТО</option><option value="LOW">НИЗКОЕ</option><option value="HIGH">ВЫСОКОЕ</option></select>
+  </div>
+  <div class="row">
+    <label>Чувствительность обзора<small id="sSensV">1.00×</small></label>
+    <input type="range" id="sSens" min="30" max="250" value="100">
+  </div>
+  <div class="row">
+    <label>Скорость вращения<small id="sRotV">оборот за 240 с</small></label>
+    <input type="range" id="sRot" min="0" max="100" value="19">
+  </div>
+  <div class="row">
+    <label>Зерно генерации<small id="sSeedV">заводское</small></label>
+    <div class="seed">
+      <input type="number" id="sSeed" min="0" max="4294967295" step="1" value="1337" aria-label="Зерно генерации">
+      <div class="btn sm glass" id="sSeedRnd" title="Случайное зерно" aria-label="Случайное зерно">
+        <svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="17" height="17" rx="3.5"/><circle cx="8.6" cy="8.6" r="1.15" fill="currentColor" stroke="none"/><circle cx="15.4" cy="15.4" r="1.15" fill="currentColor" stroke="none"/><circle cx="15.4" cy="8.6" r="1.15" fill="currentColor" stroke="none"/><circle cx="8.6" cy="15.4" r="1.15" fill="currentColor" stroke="none"/></svg>
+      </div>
+      <div class="btn sm glass" id="sSeedDef" title="Вернуть заводское" aria-label="Вернуть заводское зерно">
+        <svg viewBox="0 0 24 24"><path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1"/><path d="M3.2 4.4v4.3h4.3"/></svg>
+      </div>
+    </div>
+  </div>
+  <div class="row">
+    <label>Ветер в кронах<small id="sWindV">100%</small></label>
+    <input type="range" id="sWind" min="0" max="200" value="100">
+  </div>
+  <div class="row">
+    <label>Авто-цикл дня и ночи<small>Смена каждые 90 секунд</small></label>
+    <div class="sw" id="sCycle"></div>
+  </div>
+  <div class="row">
+    <label>Счётчик кадров<small>FPS и вызовы отрисовки</small></label>
+    <div class="sw" id="sFps"></div>
+  </div>
+</section>
+
+<section class="sheet glass" id="help">
+  <div class="grip"></div>
+  <div class="btn close" id="helpClose"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></div>
+  <h2>Управление</h2>
+  <div class="cols">
+    <div>
+      <h3>Десктоп</h3>
+      <p>Клик по сцене — захват мыши, обзор мышью</p>
+      <p><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> или стрелки — полёт</p>
+      <p><kbd>R</kbd> / <kbd>F</kbd> — вверх и вниз</p>
+      <p><kbd>Shift</kbd> — ускорение ×3</p>
+      <p>Колесо — базовая скорость 5…40</p>
+      <p><kbd>Esc</kbd> — отпустить мышь</p>
+    </div>
+    <div>
+      <h3>Мобильные</h3>
+      <p>Левая половина — джойстик, появляется под пальцем</p>
+      <p>Правая половина — обзор свайпом</p>
+      <p>Кнопки ▲ ▼ у правого края — вверх и вниз</p>
+      <p>Кнопка со спидометром — переключить скорость</p>
+      <p>Касание во время перелёта — отмена</p>
+    </div>
+  </div>
+</section>
+
+<div id="intro">
+  <div class="eyebrow">Цилиндр О'Нилла · 3 км × 1 км</div>
+  <h1>Вавилон-5<em>Сады</em></h1>
+  <p>Земля свёрнута в кольцо над головой. Светящаяся ось держит станцию на себе, силовые фермы уходят от неё к корпусу, по монорельсу идёт лифт. Летите куда хотите.</p>
+  <button id="go">Начать</button>
+</div>
+
+<div id="fatal"><div>
+  <b>Нужен WebGL</b><br>
+  Браузер не смог создать графический контекст. Откройте страницу в свежем Chrome, Safari или Firefox и проверьте, что аппаратное ускорение включено.
+</div></div>
+
+<script type="module" src="js/main.js"></script>
+</body>
+</html>

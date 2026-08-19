@@ -1,0 +1,7 @@
+{
+  "name": "babylon5-gardens",
+  "private": true,
+  "type": "module",
+  "scripts": { "test": "node test.mjs", "start": "python3 -m http.server 8000" },
+  "devDependencies": { "three": "0.165.0" }
+}
