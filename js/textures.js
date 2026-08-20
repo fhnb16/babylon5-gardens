@@ -38,6 +38,44 @@ const tex = (c, { srgb = true, wrap = false } = {}) => {
 };
 
 /* ═══════════════════════════════════════════════════════════════════════════
+   КАРТЫ НОРМАЛЕЙ ИЗ ГОТОВОГО АЛЬБЕДО
+
+   Рельеф уже нарисован: оконные ниши, швы плит, бордюры, борозды полей. Брать
+   его как карту высот и считать градиент — дешевле и точнее, чем рисовать
+   рельеф отдельно: карта не может разъехаться с картинкой, потому что она из
+   неё и сделана. Размер берётся меньше исходного — нормали не нуждаются в той
+   же детализации, а Собель по 4 млн пикселей стоит заметных долей секунды.
+   ═══════════════════════════════════════════════════════════════════════════ */
+export function heightToNormal(srcCanvas, strength = 1, size = 0) {
+  const w = size || srcCanvas.width, h = size || srcCanvas.height;
+  const { c, g } = cv(w, h);
+  g.drawImage(srcCanvas, 0, 0, w, h);
+  const src = g.getImageData(0, 0, w, h).data;
+  const out = g.createImageData(w, h);
+  const d = out.data;
+
+  /* высота = яркость; края замыкаются по кругу — текстура тайлится */
+  const H = (x, y) => {
+    const i = ((((y % h) + h) % h) * w + (((x % w) + w) % w)) * 4;
+    return (src[i] * 0.299 + src[i + 1] * 0.587 + src[i + 2] * 0.114) / 255;
+  };
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const dx = (H(x + 1, y) - H(x - 1, y)) * strength;
+      const dy = (H(x, y + 1) - H(x, y - 1)) * strength;
+      const len = Math.hypot(dx, dy, 1);
+      const i = (y * w + x) * 4;
+      d[i] = (-dx / len * 0.5 + 0.5) * 255;
+      d[i + 1] = (-dy / len * 0.5 + 0.5) * 255;
+      d[i + 2] = (1 / len * 0.5 + 0.5) * 255;
+      d[i + 3] = 255;
+    }
+  }
+  g.putImageData(out, 0, 0);
+  return tex(c, { srgb: false, wrap: true });
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
    КОРПУС: альбедо + маска каналов (R=вода, G=растительность, B=покрытие)
    Оба холста рисуются из одних и тех же секторов CONFIG.
    ═══════════════════════════════════════════════════════════════════════════ */
@@ -329,7 +367,7 @@ export function makeHullMaps(size, maskSize, rnd) {
 
   const albedo = tex(A.c, { wrap: true });
   const mask = tex(M.c, { srgb: false, wrap: true });
-  return { albedo, mask };
+  return { albedo, mask, canvas: A.c };
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -440,7 +478,7 @@ export function makeFacade(rnd, variant) {
   a.g.fillStyle = 'rgba(20,26,34,.5)';
   a.g.fillRect(0, H - 3, W, 3);               // тень примыкания
 
-  return { map: tex(a.c), emis: tex(b.c) };
+  return { map: tex(a.c), emis: tex(b.c), canvas: a.c };
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -483,7 +521,7 @@ export function makeEndCapTexture(size, rnd) {
   a.g.strokeStyle = '#8b9098'; a.g.lineWidth = 3;
   a.g.beginPath(); a.g.arc(C, C, C * 0.1, 0, 6.2832); a.g.stroke();
 
-  return { map: tex(a.c), emis: tex(b.c) };
+  return { map: tex(a.c), emis: tex(b.c), canvas: a.c };
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -510,7 +548,7 @@ export function makePanelTexture(rnd) {
     g.fillStyle = pick(rnd, ['rgba(230,180,60,.5)', 'rgba(200,60,50,.45)', 'rgba(70,120,190,.45)']);
     g.fillRect(rnd() * S, rnd() * S, 6 + rnd() * 40, 3 + rnd() * 5);
   }
-  return tex(c, { wrap: true });
+  return { map: tex(c, { wrap: true }), canvas: c };
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════

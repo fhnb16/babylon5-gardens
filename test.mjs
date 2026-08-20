@@ -33,8 +33,10 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   ok(F.includes('uDetailRep'), 'Фрагментный: детальный шум подключён');
   ok(F.includes('roughnessFactor = mix( roughnessFactor, mix( 0.045, 0.20, wFar )'),
      'Фрагментный: вода зеркальна вблизи и матовеет вдали');
-  ok(F.includes('normal = normalize( normal + ( vTanU * rip.x + vTanV * rip.y )'),
+  ok(F.includes('( vTanU * rip.x + vTanV * rip.y )'),
      'Вода: рябь возмущает нормаль в касательных корпуса, а не в экранных осях');
+  ok(F.includes('nonPerturbedNormal + ( vTanU'),
+     'Рябь ставится поверх геометрической нормали — рельеф травы не просвечивает сквозь воду');
   ok(V.includes('vTanU = normalize( normalMatrix'), 'Вершинный: касательные посчитаны и переданы');
   ok(F.includes('P.y -= uTime * uFlow'), 'Вода: рябь сносит вниз по течению');
   ok(/near = 1\.0 - wFar/.test(F), 'Вода: мелкая рябь гаснет вдали — без этого высокие частоты дают муар');
@@ -74,7 +76,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
     if (o.isMesh || o.isPoints) draws++;
     if (o.isInstancedMesh && o.count === 0) emptyInst++;
   });
-  ok(draws <= 30, `Бюджет отрисовки: ${draws} вызовов (лимит 30)`);
+  ok(draws <= 32, `Бюджет отрисовки: ${draws} вызовов (лимит 32)`);
 
   /* Треугольники: плотная зелень с детализированными кронами легко
      разгоняет счёт, а один вызов отрисовки этого не показывает. */
@@ -1245,12 +1247,12 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
      (50 мс) шум около 18%. Это ожидаемо — накопление по одному лучу на кадр
      показывало бы зерно, но сходилось бы в десять раз дольше. */
   const noiseAt = frames => 1 / Math.sqrt(frames * P.rays);
-  ok(noiseAt(3) < 0.25,
-     `К третьему кадру шум ${(noiseAt(3) * 100) | 0}% — зерно физически не успевает проявиться`);
+  ok(noiseAt(3) > 0.25,
+     `К третьему кадру ещё ${(noiseAt(3) * 100) | 0}% шума — процесс видно`);
   ok(noiseAt(P.samples) < 0.05,
      `К концу накопления шум ${(noiseAt(P.samples) * 100).toFixed(0)}%`);
 
-  ok(P.rays >= 4 && P.samples >= 32,
+  ok(P.rays >= 2 && P.samples >= 32,
      `Лучей на пиксель: ${P.rays} за кадр × ${P.samples} кадров = ${P.rays * P.samples}`);
   ok(P.radius > 0.3 && P.radius < 2,
      `Дальность луча ${P.radius} юнита = ${P.radius * 10} м — масштаб контактного затенения`);
@@ -1438,6 +1440,145 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   ok(html.includes('id="sAAon"') && html.includes('id="sAA"'),
      'Сглаживание: отдельно включатель, отдельно способ');
   ok(html.includes('>FXAA<'), 'FXAA есть в списке способов');
+}
+
+/* ══ 3h5. Карты нормалей ═══════════════════════════════════════════════ */
+{
+  const tsrc = readFileSync(new URL('./js/textures.js', import.meta.url), 'utf8');
+  const wsrc = readFileSync(new URL('./js/world.js', import.meta.url), 'utf8');
+
+  ok(/export function heightToNormal/.test(tsrc), 'Карты нормалей строятся из готового альбедо');
+  ok(/H\(x \+ 1, y\) - H\(x - 1, y\)/.test(tsrc), 'Градиент высоты берётся центральной разностью');
+  ok(/\(\(\(y % h\) \+ h\) % h\)/.test(tsrc), 'Края замкнуты по кругу — карта тайлится вместе с альбедо');
+
+  /* рельеф не может разъехаться с картинкой: он из неё и сделан */
+  for (const [what, re] of [
+    ['корпус', /heightToNormal\(hullCanvas/],
+    ['фасады', /heightToNormal\(facCanvas/],
+    ['панели', /heightToNormal\(panelCanvas/]
+  ]) ok(re.test(wsrc), `Нормали строятся для: ${what}`);
+
+  ok(/hullNormal\.repeat\.x = -1/.test(wsrc),
+     'Карта нормалей корпуса зеркалится так же, как альбедо, иначе рельеф уедет');
+
+  /* пресеты */
+  ok(CONFIG.QUALITY.LOW.normals === 0, 'На низком пресете нормалей нет — как и было');
+  ok(CONFIG.QUALITY.HIGH.normals > 0 && CONFIG.QUALITY.ULTRA.normals > CONFIG.QUALITY.HIGH.normals,
+     `Размер карты корпуса: ${CONFIG.QUALITY.HIGH.normals} → ${CONFIG.QUALITY.ULTRA.normals}`);
+  ok(CONFIG.QUALITY.HIGH.normals < CONFIG.QUALITY.HIGH.hullTex,
+     'Карта нормалей мельче альбедо: столько детализации ей не нужно, а Собель по 4 млн пикселей дорог');
+
+  const low = new THREE.Group();
+  buildWorld(low, fakeRenderer, 'LOW');
+  const hullLow = low.children.find(o => o.material?.side === THREE.BackSide);
+  ok(!hullLow.material.normalMap, 'На низком пресете корпус без карты нормалей');
+
+  const hi = new THREE.Group();
+  buildWorld(hi, fakeRenderer, 'HIGH');
+  const hullHi = hi.children.find(o => o.material?.side === THREE.BackSide);
+  ok(!!hullHi.material.normalMap, 'На высоком — с картой');
+  const bldHi = hi.children.filter(o => o.isInstancedMesh && o.material?.emissiveMap);
+  ok(bldHi.every(o => o.material.normalMap), 'У всех типов домов есть рельеф оконных ниш');
+}
+
+/* ══ 3h6. Свечение, лучи, трафик, машины, трава ════════════════════════ */
+{
+  const psrc = readFileSync(new URL('./js/photo.js', import.meta.url), 'utf8');
+  const msrc = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+  const wsrc = readFileSync(new URL('./js/world.js', import.meta.url), 'utf8');
+  const html = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
+  const P = CONFIG.POST;
+
+  /* --- свечение и лучи --- */
+  ok(/BRIGHT_FRAG/.test(psrc) && /BLUR_FRAG/.test(psrc) && /RAYS_FRAG/.test(psrc),
+     'Три прохода: яркая выборка, размытие, лучи');
+  ok(/pass\(brMat, blRT\)/.test(psrc), 'Яркая выборка считается один раз на оба эффекта');
+  ok(/uDir\.value\.set\(P\.radius \/ w, 0\)/.test(psrc) && /set\(0, P\.radius \/ h\)/.test(psrc),
+     'Размытие разделимое: два прохода вместо квадрата выборок');
+  ok(/c \+= texture2D\( tGlow, uv \)\.rgb \* uGlow/.test(psrc),
+     'Свечение складывается со сценой ДО тонмаппинга — так ведёт себя рассеяние в оптике');
+  ok(P.div >= 2, `Вспомогательные буферы в ${P.div} раза меньше — размытое мелких деталей не несёт`);
+  ok(P.threshold > 0.5, `Свечение начинается с яркости ${P.threshold}`);
+
+  ok(/export function setSunScreen/.test(psrc), 'Экранное положение оси считается каждый кадр');
+  ok(/sunVisible = v\.z < 1/.test(psrc), 'За спиной камеры лучи выключаются');
+  ok(/uRays\.value = raysOn && sunVisible/.test(psrc), 'Лучи гаснут, когда ось не в кадре');
+
+  /* --- один буфер на всех --- */
+  ok(/export function setPost/.test(psrc), 'FXAA, свечение и лучи включают общую цепочку');
+  ok(/setPost\(renderer, \{ fxaa: fx, glow: glowOn, rays: raysOn \}\)/.test(msrc),
+     'Настройки сходятся в один вызов');
+  ok(/uFxaa < 0\.5/.test(psrc), 'Свечение можно включить без FXAA');
+
+  /* --- трафик --- */
+  ok(/export function updateTraffic/.test(wsrc), 'Огни машин двигаются');
+  ok(/traffic\.dir\[k\] > 0 \? c1 : c2/.test(wsrc), 'Встречные полосы разного цвета: белый вперёд, красный назад');
+  ok(/traffic\.dir\[k\] \* traffic\.half \/ R/.test(wsrc), 'Полосы разнесены поперёк улицы');
+  ok(/i2 \+= 3/.test(wsrc), 'Трафик идёт по магистралям — тем же, что светятся фонарями');
+  ok(/worldMats\.traffic\.opacity = lerp\(1\.0, 0\.12, daylight\)/.test(msrc),
+     'Днём фары почти не видны, ночью горят');
+  ok(CONFIG.TRAFFIC.speed > 0, `Скорость ${CONFIG.TRAFFIC.speed} юнита/с = ${CONFIG.TRAFFIC.speed * 10} м/с`);
+
+  /* --- машины на парковках --- */
+  ok(/info\.kind !== 'lot'/.test(wsrc), 'Машины ставятся только на кварталы типа «стоянка»');
+  ok(/cr\(\) < 0\.35/.test(wsrc), 'Часть мест пустая — иначе стоянка выглядит выставкой');
+
+  /* --- трава у комлей --- */
+  ok(/ТРАВА У КОМЛЕЙ/.test(wsrc), 'Трава у комлей есть');
+  ok(/patchWindMaterial\(tuftMat\)/.test(wsrc), 'Трава колышется тем же ветром, что и кроны');
+
+  /* --- вода --- */
+  ok(/1\.0 - exp\( -wDeep \* 3\.2 \)/.test(wsrc),
+     'Поглощение по глубине нелинейное — на отмели дно просвечивает, на стрежне нет');
+  ok(/smoothstep\( 0\.34, 0\.02, wDeep \)/.test(wsrc), 'Пена держится узкой полосой у кромки');
+  ok(/uTime \* uFlow/.test(wsrc), 'Рисунок пены сносит по течению');
+
+  /* --- настройки --- */
+  for (const id of ['sGlow', 'sRays', 'sTraffic']) {
+    ok(html.includes(`id="${id}"`), `Переключатель ${id} есть в настройках`);
+  }
+  for (const k of ['glow', 'rays', 'traffic']) {
+    ok(new RegExp(`prefs\\.set\\('${k}'`).test(msrc), `Состояние «${k}» сохраняется`);
+  }
+}
+
+/* ══ 3h7. Ландшафт на телефоне и видимость трассировки ═════════════════ */
+{
+  const css = readFileSync(new URL('./style.css', import.meta.url), 'utf8');
+  const html = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
+
+  /* Кнопки не должны наезжать друг на друга: считаем высоту панели */
+  const topbar = html.slice(html.indexOf('id="topbar"'), html.indexOf('id="pad"'));
+  const nBtn = (topbar.match(/class="btn glass"/g) || []).length;
+  ok(nBtn >= 6, `Кнопок в верхней панели: ${nBtn}`);
+  ok(nBtn * 48 + (nBtn - 1) * 8 > 320,
+     `Столбиком они занимают ${nBtn * 48 + (nBtn - 1) * 8}px — в ландшафт телефона не влезают`);
+
+  ok(/@media \(orientation:landscape\) and \(max-height:560px\)/.test(css),
+     'Есть отдельная раскладка для горизонтального режима');
+  const land = css.slice(css.indexOf('@media (orientation:landscape)'));
+  ok(/#topbar\{[^}]*grid-template-columns:repeat\(2,auto\)/.test(land),
+     'В ландшафте панель раскладывается в два столбца');
+  ok(/#pad\{flex-direction:row/.test(land), 'Нижний блок кнопок ложится в строку');
+
+  /* два столбца по 42px обязаны влезать в самый низкий экран */
+  const rows = Math.ceil(nBtn / 2);
+  const h = rows * 42 + (rows - 1) * 6;
+  ok(h + 50 + 24 < 320, `Два столбца — ${h}px, вместе с нижним блоком влезает в экран 320px`);
+
+  ok(/#photobar\{bottom/.test(land) && /#traceInfo\{bottom/.test(land),
+     'Панель съёмки и индикатор тоже разведены по высоте');
+
+  /* Трассировка должна быть ВИДНА: при десяти лучах первый кадр давал 32%
+     шума — почти готовую картинку, и проценты считали пустоту. */
+  const P = CONFIG.PHOTO;
+  const noise = f => 100 / Math.sqrt(f * P.rays);
+  ok(noise(1) > 45, `Первый кадр даёт ${noise(1).toFixed(0)}% шума — схождение видно глазом`);
+  ok(noise(P.samples) < 8, `К концу остаётся ${noise(P.samples).toFixed(0)}%`);
+  ok(P.rays * P.samples > 300, `Всего ${P.rays * P.samples} лучей на пиксель`);
+  const msrc = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+  ok(/шум \$\{noise\.toFixed\(0\)\}%/.test(msrc),
+     'Индикатор показывает оставшийся шум, а не одни проценты');
 }
 
 /* ══ 3i. Звук реагирует на то, где находится камера ════════════════════ */

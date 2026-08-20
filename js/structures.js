@@ -23,10 +23,13 @@ export function disposeStructures(group) {
    Всё живёт в worldGroup: цилиндр на оси симметричен, вращение не ломает,
    зато тени ферм честно едут по земле.
    ═══════════════════════════════════════════════════════════════════════════ */
-function buildAxis(group, panel) {
+function buildAxis(group, panel, panelNormal) {
   const A = CONFIG.AXIS, R = CONFIG.R, HL = CONFIG.L / 2;
   const add = o => { group.add(o); parts.push(o); return o; };
-  const metal = new THREE.MeshStandardMaterial({ map: panel, color: 0x9099a3, roughness: 0.45, metalness: 0.62 });
+  const metal = new THREE.MeshStandardMaterial({
+    map: panel, normalMap: panelNormal || null, color: 0x9099a3,
+    roughness: 0.45, metalness: 0.62
+  });
   patchRoughnessAlpha(metal);
 
   /* --- светящаяся труба на оси --- */
@@ -175,7 +178,7 @@ function trussGeo(len, w, bay) {
    Стилобат, террасы, барабан, колоннада и остеклённая ротонда кабинета
    коммандора наверху, мачта с маяком, три контрфорса у основания.
    ═══════════════════════════════════════════════════════════════════════════ */
-function buildTower(group, panel) {
+function buildTower(group, panel, panelNormal) {
   const T = CONFIG.TOWER;
   const g = new THREE.Group();
   g.quaternion.copy(surfaceQuat(T.deg * D2R));
@@ -218,7 +221,8 @@ function buildTower(group, panel) {
     shell.push(l);
   }
   const concrete = new THREE.MeshStandardMaterial({
-    map: panel, color: 0xc0a993, roughness: 0.78, metalness: 0.06
+    map: panel, normalMap: panelNormal || null, color: 0xc0a993,
+    roughness: 0.78, metalness: 0.06
   });
   patchRoughnessAlpha(concrete);
   g.add(new THREE.Mesh(panelUV(mergeGeos(shell), CONFIG.PANEL_TILE, T.h / T.modelH), concrete));
@@ -289,10 +293,10 @@ function buildEndCaps(group, renderer, low) {
 /* ═══════════════════════════════════════════════════════════════════════════
    ПУБЛИЧНОЕ API
    ═══════════════════════════════════════════════════════════════════════════ */
-export function buildStructures(group, renderer, quality, panel) {
+export function buildStructures(group, renderer, quality, panel, panelNormal) {
   disposeStructures(group);
-  buildAxis(group, panel);
-  buildTower(group, panel);
+  buildAxis(group, panel, panelNormal);
+  buildTower(group, panel, panelNormal);
   buildEndCaps(group, renderer, quality === 'LOW');
 }
 

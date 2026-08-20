@@ -257,16 +257,20 @@ export const CONFIG = {
   PRINT: { across: 1.19, along: 2.4 },
 
   QUALITY: {
-    LOW:   { count: 1, foliage: 0, trees: 1.0, hullTex: 1024, mask: 512,  aniso: 4,  dpr: 0, footprint: false },
-    HIGH:  { count: 0, foliage: 1, trees: 1.0, hullTex: 2048, mask: 1024, aniso: 8,  dpr: 4, footprint: true },
-    ULTRA: { count: 0, foliage: 2, trees: 1.3, hullTex: 2048, mask: 2048, aniso: 16, dpr: 4, footprint: true }
+    LOW:   { count: 1, foliage: 0, trees: 1.0, hullTex: 1024, mask: 512,  aniso: 4,  dpr: 0, footprint: false, normals: 0 },
+    HIGH:  { count: 0, foliage: 1, trees: 1.0, hullTex: 2048, mask: 1024, aniso: 8,  dpr: 4, footprint: true,  normals: 1024 },
+    ULTRA: { count: 0, foliage: 2, trees: 1.3, hullTex: 2048, mask: 2048, aniso: 16, dpr: 4, footprint: true,  normals: 2048 }
   },
 
   /* Трассировка в фото-режиме. rays — лучей на пиксель за кадр,
      samples — сколько кадров накопить: итого rays × samples лучей на пиксель.
      radius — дальность луча в юнитах мира (1 юнит = 10 м). */
   PHOTO: {
-    rays: 10, samples: 96, radius: 1.0, intensity: 1.5, bias: 0.015,
+    /* Лучей за кадр мало намеренно. При десяти первый же кадр давал 32% шума —
+       практически готовую картинку, и оставшиеся 95 кадров правили то, чего
+       глаз не различает: индикатор считал пустоту. Три луча дают 58% на первом
+       кадре, и схождение видно своими глазами, как и должно быть. */
+    rays: 3, samples: 140, radius: 1.0, intensity: 1.5, bias: 0.015,
     bounce: 2.2,          // сила переотражённого света
     reflect: 0.9,         // сила зеркальных отражений
     refSteps: 20, refStep: 0.35   // марш отражённого луча: шагов и стартовый шаг
@@ -281,6 +285,18 @@ export const CONFIG = {
      Верхний предел на итоговый масштаб, чтобы буфер не разросся. */
   /* Сэмплов MSAA в буферах постобработки: antialias у рендерера действует
      только на канвас, буферам нужно указывать явно. */
+  /* Сила рельефа по картам нормалей. normals в пресете — размер карты для
+     корпуса; 0 означает «без нормалей» (низкий пресет). */
+  NORMALS: { hull: 1.6, facade: 2.2, panel: 1.4, endcap: 1.2 },
+  /* Трафик: огней на полосу и скорость в юнитах в секунду */
+  TRAFFIC: { perLane: 26, speed: 7 },
+  /* Постобработка: свечение и лучи от оси. div — во сколько раз меньше
+     разрешение вспомогательных буферов, threshold — с какой яркости
+     начинается свечение. */
+  POST: {
+    div: 2, threshold: 0.9, radius: 2.2, glow: 0.85,
+    rays: 0.55, raySteps: 24, rayDensity: 0.75, rayDecay: 0.94
+  },
   MSAA_SAMPLES: 4,
   SSAA: [1, 1.25, 1.5, 2],
   /* Снимок делается крупнее экрана и ужимается до нативного размера: каждый

@@ -359,12 +359,20 @@ export function traceStep() {
 const FXAA_FRAG = `
   precision highp float;
   varying vec2 vUv;
-  uniform sampler2D tScene;
+  uniform sampler2D tScene, tGlow, tRays;
   uniform vec2 uRes;
-  uniform float uExposure;
+  uniform float uExposure, uGlow, uRays, uFxaa;
   ${TONEMAP_GLSL}
 
-  vec3 fetch( vec2 uv ) { return toScreen( texture2D( tScene, uv ).rgb, uExposure ); }
+  /* Свечение и лучи складываются с яркостью сцены ДО тонмаппинга —
+     так ведёт себя рассеяние света в оптике. */
+  vec3 sceneAt( vec2 uv ) {
+    vec3 c = texture2D( tScene, uv ).rgb * uExposure;
+    c += texture2D( tGlow, uv ).rgb * uGlow;
+    c += texture2D( tRays, uv ).rgb * uRays;
+    return c;
+  }
+  vec3 fetch( vec2 uv ) { return toScreen( sceneAt( uv ), 1.0 ); }
   float luma( vec3 c ) { return dot( c, vec3( 0.299, 0.587, 0.114 ) ); }
 
   void main() {
@@ -379,7 +387,7 @@ const FXAA_FRAG = `
     float lMin = min( lM, min( min( lNW, lNE ), min( lSW, lSE ) ) );
     float lMax = max( lM, max( max( lNW, lNE ), max( lSW, lSE ) ) );
     /* ровный участок не трогаем — иначе фильтр мылит всё подряд */
-    if ( lMax - lMin < max( 0.0312, lMax * 0.125 ) ) {
+    if ( uFxaa < 0.5 || lMax - lMin < max( 0.0312, lMax * 0.125 ) ) {
       gl_FragColor = vec4( rgbM, 1.0 );
       return;
     }
@@ -397,34 +405,156 @@ const FXAA_FRAG = `
   }
 `;
 
-let fxOn = false, fxRT = null, fxMat = null, fxQuad = null, fxScene = null, fxCam = null;
+/* ═══════════════════════════════════════════════════════════════════════════
+   СВЕЧЕНИЕ И ЛУЧИ ОТ ОСИ
 
-export function setFxaa(renderer, on) {
+   Оба берут одну и ту же выборку ярких мест и стоят на ней вдвоём: свечение
+   размывает её крестом, лучи растягивают от источника. Считать яркое дважды
+   незачем, поэтому проход общий.
+
+   Работают ДО тонмаппинга, в линейном HDR: свечение — физически рассеяние
+   света в оптике, оно складывается с яркостью сцены, а не с готовой картинкой.
+   ═══════════════════════════════════════════════════════════════════════════ */
+const BRIGHT_FRAG = `
+  precision highp float;
+  varying vec2 vUv;
+  uniform sampler2D tScene;
+  uniform float uThreshold, uExposure;
+  void main() {
+    vec3 c = texture2D( tScene, vUv ).rgb * uExposure;
+    float l = dot( c, vec3( 0.2126, 0.7152, 0.0722 ) );
+    gl_FragColor = vec4( c * smoothstep( uThreshold, uThreshold * 2.0, l ), 1.0 );
+  }
+`;
+
+const BLUR_FRAG = `
+  precision highp float;
+  varying vec2 vUv;
+  uniform sampler2D tSrc;
+  uniform vec2 uDir;
+  void main() {
+    /* пятиточечный гаусс: веса 6/4/1 из биномиальных коэффициентов */
+    vec3 c = texture2D( tSrc, vUv ).rgb * 0.375;
+    c += ( texture2D( tSrc, vUv + uDir ).rgb + texture2D( tSrc, vUv - uDir ).rgb ) * 0.25;
+    c += ( texture2D( tSrc, vUv + uDir * 2.0 ).rgb + texture2D( tSrc, vUv - uDir * 2.0 ).rgb ) * 0.0625;
+    gl_FragColor = vec4( c, 1.0 );
+  }
+`;
+
+const RAYS_FRAG = `
+  precision highp float;
+  varying vec2 vUv;
+  uniform sampler2D tSrc;
+  uniform vec2 uSun;
+  uniform float uDensity, uDecay;
+  void main() {
+    vec2 dir = ( uSun - vUv ) * uDensity / float( RAY_STEPS );
+    vec2 uv = vUv;
+    float w = 1.0;
+    vec3 sum = vec3( 0.0 );
+    for ( int i = 0; i < RAY_STEPS; i ++ ) {
+      uv += dir;
+      sum += texture2D( tSrc, uv ).rgb * w;
+      w *= uDecay;
+    }
+    gl_FragColor = vec4( sum / float( RAY_STEPS ), 1.0 );
+  }
+`;
+
+let fxOn = false, fxRT = null, fxMat = null, fxQuad = null, fxScene = null, fxCam = null;
+let glowOn = false, raysOn = false;
+let brRT = null, blRT = null, rayRT = null;
+let brMat = null, blurMat = null, rayMat = null;
+const sunUV = new THREE.Vector2(0.5, 0.5);
+let sunVisible = false;
+
+/** Свечение, лучи и FXAA живут на одном буфере: включён любой — цепочка нужна */
+export function setPost(renderer, { fxaa = false, glow = false, rays = false } = {}) {
+  glowOn = !!glow; raysOn = !!rays;
+  setFxaa(renderer, !!fxaa || glowOn || raysOn, !!fxaa);
+}
+
+let fxaaFilter = false;
+export function setFxaa(renderer, on, filter = true) {
   fxOn = !!on;
+  fxaaFilter = filter;
   if (!fxOn) { disposeFxaa(); return; }
   if (fxMat) { resizePost(renderer); return; }
   fxCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
   fxScene = new THREE.Scene();
   fxMat = new THREE.ShaderMaterial({
     vertexShader: VERT, fragmentShader: FXAA_FRAG,
-    uniforms: { tScene: { value: null }, uRes: { value: new THREE.Vector2(1, 1) },
-                uExposure: { value: 1 } }
+    uniforms: {
+      tScene: { value: null }, tGlow: { value: null }, tRays: { value: null },
+      uRes: { value: new THREE.Vector2(1, 1) },
+      uExposure: { value: 1 }, uGlow: { value: 0 }, uRays: { value: 0 },
+      uFxaa: { value: 1 }
+    }
   });
+  const P = CONFIG.POST;
+  brMat = new THREE.ShaderMaterial({
+    vertexShader: VERT, fragmentShader: BRIGHT_FRAG,
+    uniforms: { tScene: { value: null }, uThreshold: { value: P.threshold }, uExposure: { value: 1 } }
+  });
+  blurMat = new THREE.ShaderMaterial({
+    vertexShader: VERT, fragmentShader: BLUR_FRAG,
+    uniforms: { tSrc: { value: null }, uDir: { value: new THREE.Vector2() } }
+  });
+  rayMat = new THREE.ShaderMaterial({
+    defines: { RAY_STEPS: P.raySteps },
+    vertexShader: VERT, fragmentShader: RAYS_FRAG,
+    uniforms: {
+      tSrc: { value: null }, uSun: { value: sunUV },
+      uDensity: { value: P.rayDensity }, uDecay: { value: P.rayDecay }
+    }
+  });
+
   fxQuad = new THREE.Mesh(new THREE.PlaneGeometry(2, 2), fxMat);
   fxQuad.frustumCulled = false;
   fxScene.add(fxQuad);
   resizePost(renderer);
 }
 
+/** Экранное положение оси станции: лучи расходятся от неё, а не от точки */
+export function setSunScreen(camera, worldGroup) {
+  /* Берём точку на оси, ближайшую к направлению взгляда */
+  const f = new THREE.Vector3();
+  camera.getWorldDirection(f);
+  const p = camera.position;
+  /* ось — прямая x=y=0; ближайшая к лучу взгляда точка по z */
+  const denom = 1 - f.z * f.z;
+  const zAxis = denom < 1e-4 ? p.z + Math.sign(f.z || 1) * 100
+    : p.z + f.z * (-(p.x * f.x + p.y * f.y)) / denom;
+  const v = new THREE.Vector3(0, 0, THREE.MathUtils.clamp(zAxis, -CONFIG.L / 2, CONFIG.L / 2));
+  v.project(camera);
+  sunVisible = v.z < 1 && Math.abs(v.x) < 2.5 && Math.abs(v.y) < 2.5;
+  sunUV.set(v.x * 0.5 + 0.5, v.y * 0.5 + 0.5);
+}
+
 function disposeFxaa() {
-  fxRT?.dispose(); fxMat?.dispose(); fxQuad?.geometry.dispose();
-  fxRT = fxMat = fxQuad = fxScene = fxCam = null;
+  for (const t of [fxRT, brRT, blRT, rayRT]) t?.dispose();
+  for (const m of [fxMat, brMat, blurMat, rayMat]) m?.dispose();
+  fxQuad?.geometry.dispose();
+  fxRT = brRT = blRT = rayRT = null;
+  fxMat = brMat = blurMat = rayMat = fxQuad = fxScene = fxCam = null;
 }
 
 export function resizePost(renderer) {
   if (!fxOn || !fxMat) return;
   const s = new THREE.Vector2();
   renderer.getDrawingBufferSize(s);
+  const hw = Math.max(1, Math.round(s.x / CONFIG.POST.div));
+  const hh = Math.max(1, Math.round(s.y / CONFIG.POST.div));
+  const half = () => new THREE.WebGLRenderTarget(hw, hh, {
+    type: THREE.HalfFloatType, depthBuffer: false,
+    minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter
+  });
+  for (const t of [brRT, blRT, rayRT]) t?.dispose();
+  /* Свечение и лучи считаются в половинном разрешении: размытое всё равно
+     не несёт мелких деталей, а стоит вчетверо дешевле. */
+  brRT = half(); blRT = half(); rayRT = half();
+  fxMat.uniforms.tGlow.value = brRT.texture;
+  fxMat.uniforms.tRays.value = rayRT.texture;
   fxRT?.dispose();
   /* samples обязателен: antialias: true работает ТОЛЬКО для канваса. Уводя
      кадр в буфер, мы молча теряли MSAA, и FXAA лишь возвращал потерянное —
@@ -447,9 +577,43 @@ export function renderFrame(renderer, scene, camera) {
   }
   renderer.setRenderTarget(fxRT);
   renderer.render(scene, camera);
-  fxMat.uniforms.uExposure.value = renderer.toneMappingExposure;
-  renderer.setRenderTarget(null);
-  renderer.render(fxScene, fxCam);
+
+  const exposure = renderer.toneMappingExposure;
+  const P = CONFIG.POST;
+  const pass = (mat, target) => {
+    fxQuad.material = mat;
+    renderer.setRenderTarget(target);
+    renderer.render(fxScene, fxCam);
+  };
+
+  if (glowOn || raysOn) {
+    /* яркая выборка — общая для свечения и лучей */
+    brMat.uniforms.tScene.value = fxRT.texture;
+    brMat.uniforms.uExposure.value = exposure;
+    pass(brMat, blRT);
+
+    if (raysOn) {
+      rayMat.uniforms.tSrc.value = blRT.texture;
+      pass(rayMat, rayRT);
+    }
+    if (glowOn) {
+      /* разделимое размытие: два прохода вместо квадрата выборок */
+      const w = blRT.width, h = blRT.height;
+      blurMat.uniforms.tSrc.value = blRT.texture;
+      blurMat.uniforms.uDir.value.set(P.radius / w, 0);
+      pass(blurMat, brRT);
+      blurMat.uniforms.tSrc.value = brRT.texture;
+      blurMat.uniforms.uDir.value.set(0, P.radius / h);
+      pass(blurMat, blRT);
+    }
+  }
+
+  fxMat.uniforms.tGlow.value = glowOn ? blRT.texture : null;
+  fxMat.uniforms.uGlow.value = glowOn ? P.glow : 0;
+  fxMat.uniforms.uRays.value = raysOn && sunVisible ? P.rays : 0;
+  fxMat.uniforms.uExposure.value = exposure;
+  fxMat.uniforms.uFxaa.value = fxaaFilter ? 1 : 0;
+  pass(fxMat, null);
 }
 
 export function stopTrace(windUniform) {

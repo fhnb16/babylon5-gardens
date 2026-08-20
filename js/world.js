@@ -5,7 +5,7 @@ import {
 } from './util.js';
 import {
   makeHullMaps, makeDetailTexture, makeFacade, makePanelTexture, makeSoftSprite,
-  makeBlobTexture, makeFootprintTexture
+  makeBlobTexture, makeFootprintTexture, heightToNormal
 } from './textures.js';
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -69,9 +69,22 @@ function patchHullMaterial(mat, nArm, nSpar) {
         float dPave  = texture2D( uDetail, vMapUv * uDetailRep * 0.31 ).r;
         diffuseColor.rgb *= mix( 1.0, 0.70 + 0.60 * dGrass, hullMask.g * 0.9 );
         diffuseColor.rgb *= mix( 1.0, 0.86 + 0.28 * dPave,  hullMask.b * 0.7 );
-        // hullMask.r теперь глубина: 0 у берега, 1 на стрежне. У берега сквозь
-        // воду просвечивает нарисованное дно, на стрежне остаётся только цвет.
-        diffuseColor.rgb = mix( diffuseColor.rgb, uWaterTint, hullMask.r * 0.92 );
+        // hullMask.r — глубина: 0 у берега, 1 на стрежне. Толща воды поглощает
+        // свет по глубине, поэтому на отмели дно просвечивает почти целиком,
+        // а на стрежне остаётся один цвет воды. Показатель нелинейный —
+        // так работает поглощение.
+        float wDeep = hullMask.r;
+        float absorb = 1.0 - exp( -wDeep * 3.2 );
+        diffuseColor.rgb = mix( diffuseColor.rgb, uWaterTint, absorb );
+
+        // Пена у кромки: узкая полоса на самой отмели, с бегущим по течению
+        // рисунком. Без неё вода стыкуется с берегом линией, как аппликация.
+        if ( wDeep > 0.001 ) {
+          float edge = smoothstep( 0.34, 0.02, wDeep );
+          vec2 fp = vec2( vMapUv.x * 314.0, vMapUv.y * 300.0 - uTime * uFlow );
+          float f = sin( fp.x * 14.0 + sin( fp.y * 3.1 ) * 2.0 ) * 0.5 + 0.5;
+          diffuseColor.rgb += vec3( 0.55, 0.62, 0.66 ) * edge * ( 0.35 + 0.65 * f ) * 0.5;
+        }
 
         // тень фермы: угловой створ × локальность по z
         float zt = 0.0;
@@ -127,7 +140,10 @@ function patchHullMaterial(mat, nArm, nSpar) {
           rip += vec2( 0.22, 0.55 ) * cos( dot( P, vec2( 1.7, 0.9 ) ) + t * 0.8 );
 
           float amp = 0.055 * hullMask.r * ( 0.45 + 0.55 * near );
-          normal = normalize( normal + ( vTanU * rip.x + vTanV * rip.y ) * amp );
+          /* Рябь ставится поверх ГЕОМЕТРИЧЕСКОЙ нормали, а не поверх карты:
+             иначе рельеф травы и швов плит просвечивал бы сквозь воду. */
+          vec3 wn = normalize( nonPerturbedNormal + ( vTanU * rip.x + vTanV * rip.y ) * amp );
+          normal = normalize( mix( normal, wn, hullMask.r ) );
         }`);
   };
   mat.customProgramCacheKey = () => 'b5-hull';
@@ -259,13 +275,15 @@ function buildingGeo(type) {
 /* ═══════════════════════════════════════════════════════════════════════════
    СБОРКА МИРА
    ═══════════════════════════════════════════════════════════════════════════ */
-export const worldMats = { bld: [], nav: null, blob: null, print: null };
+export const worldMats = { bld: [], nav: null, blob: null, print: null, traffic: null };
 let parts = [];
+let traffic = null;
 
 export function disposeWorld(group) {
   for (const o of parts) { group.remove(o); deepDispose(o); }
   parts = [];
-  worldMats.bld = []; worldMats.nav = null; worldMats.blob = null; worldMats.print = null;
+  worldMats.bld = []; worldMats.nav = null; worldMats.blob = null;
+  worldMats.print = null; worldMats.traffic = null; traffic = null;
 }
 
 export function buildWorld(group, renderer, quality) {
@@ -281,7 +299,7 @@ export function buildWorld(group, renderer, quality) {
   /* ─────────── КОРПУС ─────────── */
   const hullGeo = new THREE.CylinderGeometry(R, R, L, CONFIG.HULL_SEG, 1, true);
   hullGeo.rotateX(Math.PI / 2);
-  const { albedo, mask } = makeHullMaps(Q.hullTex, Q.mask,
+  const { albedo, mask, canvas: hullCanvas } = makeHullMaps(Q.hullTex, Q.mask,
     mulberry32(CONFIG.SEED + 7));
 
   /* BackSide зеркалит U. Самотест сверяет реальные UV геометрии с мировым θ. */
@@ -306,8 +324,15 @@ export function buildWorld(group, renderer, quality) {
   hullU.uArmW.value = CONFIG.AXIS.trussW / R * 1.4;
   hullU.uFlow.value = CONFIG.RIVER_FLOW;
 
+  /* Рельеф корпуса берётся из его же альбедо: бордюры тротуаров, швы плит,
+     борозды полей уже нарисованы. Карта строится в меньшем разрешении —
+     нормалям столько детализации не нужно. */
+  const hullNormal = Q.normals ? heightToNormal(hullCanvas, CONFIG.NORMALS.hull, Q.normals) : null;
+  if (hullNormal && flip) { hullNormal.repeat.x = -1; hullNormal.offset.x = 0.5; }
   const hullMat = new THREE.MeshStandardMaterial({
-    map: albedo, side: THREE.BackSide, roughness: 0.95, metalness: 0.02
+    map: albedo, side: THREE.BackSide, roughness: 0.95, metalness: 0.02,
+    normalMap: hullNormal,
+    normalScale: new THREE.Vector2(1, 1)
   });
   patchHullMaterial(hullMat, arms.length, CONFIG.AXIS.spars.length);
   patchRoughnessAlpha(hullMat);
@@ -421,11 +446,16 @@ export function buildWorld(group, renderer, quality) {
   /* ─────────── ЗДАНИЯ: 4 силуэта × свой фасад ─────────── */
   const tints = [0x9fb0c4, 0xb6c2cf, 0x8c9db2, 0xc3ccd6, 0x7f90a5, 0xc9b7a4];
   for (let v = 0; v < 4; v++) {
-    const { map, emis } = makeFacade(mulberry32(CONFIG.SEED + 31 * (v + 1)), v);
-    for (const tx of [map, emis]) { tx.wrapS = tx.wrapT = THREE.RepeatWrapping; }
+    const { map, emis, canvas: facCanvas } = makeFacade(mulberry32(CONFIG.SEED + 31 * (v + 1)), v);
+    /* Оконные ниши и пилястры дают глубину проёмов — на закате в них ложится тень */
+    const nrm = Q.normals ? heightToNormal(facCanvas, CONFIG.NORMALS.facade) : null;
+    for (const tx of [map, emis, nrm]) {
+      if (tx) tx.wrapS = tx.wrapT = THREE.RepeatWrapping;
+    }
     map.anisotropy = Math.min(4, maxAniso);
     const mat = new THREE.MeshStandardMaterial({
       map, emissiveMap: emis, emissive: 0xffffff, emissiveIntensity: 0,
+      normalMap: nrm, normalScale: new THREE.Vector2(1, 1),
       roughness: 0.68, metalness: 0.1
     });
     patchRoughnessAlpha(mat);
@@ -446,9 +476,59 @@ export function buildWorld(group, renderer, quality) {
     });
   }
 
+  /* ─────────── МАШИНЫ НА ПАРКОВКАХ ───────────
+     План уже размечает кварталы типа «стоянка», но они стояли пустыми.
+     Машины ставятся по той же разметке, что нарисована в текстуре. */
+  {
+    const cars = [];
+    for (let i2 = 0; i2 < C.cols; i2++) {
+      for (let j2 = 0; j2 < C.rows; j2++) {
+        if (!cellUsable(i2, j2)) continue;
+        const info = cellInfo(i2, j2);
+        if (info.kind !== 'lot') continue;
+        const t = cityCenter(i2, 0).t, z = cityCenter(i2, j2).z;
+        if (!free(t, z)) continue;
+        const vert = info.spin % 2 === 0;
+        const rows2 = 4, cols2 = 3;
+        for (let a = 0; a < rows2; a++) {
+          for (let b = 0; b < cols2; b++) {
+            const cr = mulberry32((CONFIG.SEED ^ (i2 * 911) ^ (j2 * 233) ^ (a * 37) ^ (b * 7)) >>> 0);
+            if (cr() < 0.35) continue;                 // часть мест пустая
+            const u = (a + 0.5) / rows2 - 0.5, v = (b + 0.5) / cols2 - 0.5;
+            const dx = (vert ? u : v) * BLK.wT * 0.66;
+            const dz = (vert ? v : u) * BLK.wZ * 0.66;
+            cars.push([t + dx / R, z + dz, vert, cr()]);
+          }
+        }
+      }
+    }
+    if (cars.length) {
+      const body = mergeGeos([
+        rod(0.22, 0.1, 0.5, 0, 0.05, 0),
+        rod(0.19, 0.09, 0.26, 0, 0.14, -0.02)
+      ]);
+      const carMat = new THREE.MeshStandardMaterial({ roughness: 0.42, metalness: 0.35 });
+      const carCols = [0xb9c2cb, 0x8a94a0, 0x6d4f46, 0x39506b, 0xa8564a, 0xd8d2c4];
+      const im = new THREE.InstancedMesh(body, carMat, cars.length);
+      im.frustumCulled = false;
+      for (let k = 0; k < cars.length; k++) {
+        const [t, z, vert, r2] = cars[k];
+        surfaceQuat(t, q).multiply(qs.setFromAxisAngle(UP, vert ? 0 : Math.PI / 2));
+        m4.compose(surfacePos(t, R - 0.07, z, v3), q, sc.set(1, 1, 1));
+        im.setMatrixAt(k, m4);
+        im.setColorAt(k, natural(carCols[(r2 * carCols.length) | 0], 0.7, new THREE.Color()));
+      }
+      im.instanceMatrix.needsUpdate = true;
+      im.instanceColor.needsUpdate = true;
+      add(im);
+    }
+  }
+
   /* Панельная текстура нужна конструкциям на оси и башне */
-  const panel = makePanelTexture(mulberry32(CONFIG.SEED + 53));
+  const { map: panel, canvas: panelCanvas } = makePanelTexture(mulberry32(CONFIG.SEED + 53));
   panel.anisotropy = Math.min(4, maxAniso);
+  const panelNormal = Q.normals ? heightToNormal(panelCanvas, CONFIG.NORMALS.panel) : null;
+  if (panelNormal) panelNormal.wrapS = panelNormal.wrapT = THREE.RepeatWrapping;
 
   /* ─────────── ХОЛМЫ ───────────
      Раньше это была гладкая сфера радиусом до 340 м и высотой 100 м,
@@ -551,6 +631,41 @@ export function buildWorld(group, renderer, quality) {
     shadows.push([t, z, r * 1.5, tu[k]]);
   });
 
+  /* ─────────── ТРАВА У КОМЛЕЙ ───────────
+     Кольцо мелких травинок вокруг ствола: именно оно продаёт контакт с
+     землёй лучше любой декали — глаз читает, что дерево растёт, а не
+     воткнуто. Колышется тем же шейдером ветра, что и кроны. */
+  {
+    const blades = [];
+    const nb = 7;
+    for (let k = 0; k < nb; k++) {
+      const a = (k / nb) * TAU + 0.4;
+      const g0 = new THREE.PlaneGeometry(0.16, 0.34);
+      g0.translate(0, 0.17, 0);
+      g0.rotateX(-0.22);
+      g0.translate(0.2, 0, 0);
+      g0.rotateY(a);
+      blades.push(g0.toNonIndexed());
+      g0.dispose();
+    }
+    const tuftGeo = mergeGeos(blades.map(b => {
+      const idx = [];
+      for (let k = 0; k < b.attributes.position.count; k++) idx.push(k);
+      b.setIndex(idx);
+      return b;
+    }));
+    const tuftMat = new THREE.MeshStandardMaterial({
+      color: 0x5c8a3c, roughness: 1, side: THREE.DoubleSide, flatShading: true
+    });
+    patchWindMaterial(tuftMat);
+    instance(tuftGeo, tuftMat, treePts, (k, t, z, im) => {
+      const s = 0.6 + treePts[k][2] * 1.4;
+      surfaceQuat(t, q).multiply(qs.setFromAxisAngle(UP, rnd() * TAU));
+      m4.compose(surfacePos(t, R - tu[k], z, v3), q, sc.set(s, s, s));
+      im.setMatrixAt(k, m4);
+    });
+  }
+
   /* ─────────── КУСТЫ ─────────── */
   const bushMat = new THREE.MeshStandardMaterial({
     roughness: 1, flatShading: true, vertexColors: true
@@ -622,6 +737,44 @@ export function buildWorld(group, renderer, quality) {
     add(pm);
   }
 
+  /* ─────────── ТРАФИК ───────────
+     Огни машин на магистралях. Магистраль — каждая третья улица сетки, та же,
+     что светится фонарями. Точки едут вдоль полосы, цвет зависит от
+     направления: вперёд белый, назад красный. Позиции обновляет
+     updateTraffic — по одному буферу на все огни. */
+  {
+    const lanes = [];
+    for (let i2 = 0; i2 < C.cols; i2 += 3) {
+      if (!cellUsable(i2, Math.floor(C.rows / 2))) continue;
+      const t = cityCenter(i2, 0).t - (BLK.stepT / 2) / R;
+      lanes.push(t);
+    }
+    if (lanes.length) {
+      const per = CONFIG.TRAFFIC.perLane;
+      const n = lanes.length * per;
+      const pos = new Float32Array(n * 3), col = new Float32Array(n * 3);
+      traffic = { lanes, per, dir: new Float32Array(n), off: new Float32Array(n), pos, half: BLK.street * 0.22 };
+      const c1 = new THREE.Color(0xfff0cf), c2 = new THREE.Color(0xff4b32);
+      for (let k = 0; k < n; k++) {
+        traffic.dir[k] = k % 2 ? 1 : -1;
+        traffic.off[k] = rnd() * CONFIG.L;
+        const c = traffic.dir[k] > 0 ? c1 : c2;
+        col[k * 3] = c.r; col[k * 3 + 1] = c.g; col[k * 3 + 2] = c.b;
+      }
+      const geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+      geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
+      worldMats.traffic = new THREE.PointsMaterial({
+        size: 0.75, map: makeSoftSprite(0.6), vertexColors: true, transparent: true,
+        opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending
+      });
+      traffic.points = new THREE.Points(geo, worldMats.traffic);
+      traffic.points.frustumCulled = false;
+      add(traffic.points);
+      updateTraffic(0);
+    }
+  }
+
   /* ─────────── ГАБАРИТНЫЕ ОГНИ ─────────── */
   const np = [];
   for (let deg = 0; deg < 360; deg += 15) {
@@ -642,7 +795,7 @@ export function buildWorld(group, renderer, quality) {
   });
   add(new THREE.Points(ng, worldMats.nav));
 
-  return { panel, drawn: parts.length };
+  return { panel, panelNormal, drawn: parts.length };
 }
 
 /** Самотест ориентации UV: сверяем реальные UV геометрии с мировым θ */
@@ -658,4 +811,23 @@ export function uvSelfTest(geo, flip) {
     worst = Math.max(worst, Math.min(d, 1 - d));
   }
   return worst < 0.02;
+}
+
+
+/** Огни машин едут вдоль магистралей. Один буфер на все — обновляется целиком. */
+export function updateTraffic(dt) {
+  if (!traffic) return;
+  const R = CONFIG.R, L = CONFIG.L, HL = L / 2;
+  const sp = CONFIG.TRAFFIC.speed;
+  const p = traffic.pos, n = traffic.dir.length;
+  for (let k = 0; k < n; k++) {
+    traffic.off[k] = (traffic.off[k] + traffic.dir[k] * sp * dt + L) % L;
+    const z = traffic.off[k] - HL;
+    /* встречные полосы разнесены поперёк улицы */
+    const t = traffic.lanes[(k / traffic.per) | 0] + traffic.dir[k] * traffic.half / R;
+    p[k * 3] = Math.sin(t) * (R - 0.35);
+    p[k * 3 + 1] = Math.cos(t) * (R - 0.35);
+    p[k * 3 + 2] = z;
+  }
+  traffic.points.geometry.attributes.position.needsUpdate = true;
 }

@@ -11,7 +11,14 @@ const grad = () => ({
 globalThis.__canvasStacks = [];
 
 const ctx = () => {
-  const o = { createRadialGradient: grad, createLinearGradient: grad, __depth: 0 };
+  const o = {
+    createRadialGradient: grad, createLinearGradient: grad, __depth: 0,
+    /* пиксельные операции нужны генератору карт нормалей */
+    getImageData: (x, y, w, h) => ({ data: new Uint8ClampedArray(w * h * 4), width: w, height: h }),
+    createImageData: (w, h) => ({ data: new Uint8ClampedArray(w * h * 4), width: w, height: h }),
+    putImageData: () => {},
+    drawImage: () => {}
+  };
   globalThis.__canvasStacks.push(o);
   for (const k of ['fillStyle', 'strokeStyle', 'lineJoin', 'lineCap', 'filter', 'font']) o[k] = '';
   for (const k of ['lineWidth', 'globalAlpha']) o[k] = 1;

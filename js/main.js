@@ -2,12 +2,12 @@ import * as THREE from 'three';
 import { CONFIG } from './config.js';
 import { mulberry32, clamp, lerp, easeInOut, tpVec, aimAt, TAU } from './util.js';
 import { makeSoftSprite, makeGlowTexture } from './textures.js';
-import { buildWorld, worldMats, hullU, windU } from './world.js';
+import { buildWorld, worldMats, hullU, windU, updateTraffic } from './world.js';
 import { buildStructures, structMats, updateStructures } from './structures.js';
 import { ctl, isMobile, initControls, updateControls, syncFromCamera, resetStick, stationUp } from './controls.js';
 import { audio, startAudio, updateAudio, setVolume, setEnabled, suspendAudio } from './audio.js';
 import { trace, startTrace, traceStep, stopTrace,
-  setFxaa, resizePost, renderFrame } from './photo.js';
+  setPost, setSunScreen, resizePost, renderFrame } from './photo.js';
 
 const $ = id => document.getElementById(id);
 const stage = $('stage');
@@ -136,7 +136,7 @@ function rebuild() {
   if (clouds) clouds.visible = q !== 'LOW';
   const res = buildWorld(worldGroup, renderer, q);
   panel = res.panel;
-  buildStructures(worldGroup, renderer, q, panel);
+  buildStructures(worldGroup, renderer, q, panel, res.panelNormal);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -180,6 +180,7 @@ function applyPalette(ph) {
   for (const m of structMats.glass) m.emissiveIntensity = emis * 0.45;
   if (structMats.liftGlass) structMats.liftGlass.emissiveIntensity = lerp(1.4, 0.3, daylight);
 
+  if (worldMats.traffic) worldMats.traffic.opacity = lerp(1.0, 0.12, daylight);
   if (worldMats.nav) {
     worldMats.nav.opacity = clamp(f('navInt'), 0, 1);
     worldMats.nav.size = f('navSize');
@@ -488,7 +489,7 @@ function initUI() {
   const applyAA = () => {
     const fx = aaOn && sAA.value === 'fxaa';
     ssaa = aaOn && !fx ? parseFloat(sAA.value) : 1;
-    setFxaa(renderer, fx);
+    setPost(renderer, { fxaa: fx, glow: glowOn, rays: raysOn });
     sAAon.classList.toggle('on', aaOn);
     $('sAArow').classList.toggle('off', !aaOn);
     aaLabel = !aaOn ? 'MSAA' : fx ? 'MSAA+FXAA' : `MSAA+SSAA×${ssaa}`;
@@ -501,6 +502,23 @@ function initUI() {
   sAAon.onclick = () => { aaOn = !aaOn; prefs.set('aaOn', aaOn); applyAA(); };
   sAA.onchange = () => { prefs.set('aaMode', sAA.value); applyAA(); };
   applyAA();
+
+  /* Свечение и лучи делят одну цепочку постобработки с FXAA: включён любой —
+     кадр идёт через буфер, поэтому применяются они вместе. */
+  const swGlow = $('sGlow'), swRays = $('sRays'), swTraffic = $('sTraffic');
+  glowOn = prefs.get('glow', true);
+  raysOn = prefs.get('rays', true);
+  trafficOn = prefs.get('traffic', true);
+  const syncPost = () => {
+    swGlow.classList.toggle('on', glowOn);
+    swRays.classList.toggle('on', raysOn);
+    swTraffic.classList.toggle('on', trafficOn);
+    if (worldMats.traffic) worldMats.traffic.visible = trafficOn;
+    applyAA();
+  };
+  swGlow.onclick = () => { glowOn = !glowOn; prefs.set('glow', glowOn); syncPost(); };
+  swRays.onclick = () => { raysOn = !raysOn; prefs.set('rays', raysOn); syncPost(); };
+  swTraffic.onclick = () => { trafficOn = !trafficOn; prefs.set('traffic', trafficOn); syncPost(); };
 
   const sSat = $('sSat');
   sSat.value = Math.round(CONFIG.SATURATION * 100);
@@ -595,6 +613,7 @@ let dprIndex = 0, dprCap = 0, paused = false, frames = 0, winT = 0, upT = 0;
 const capForQuality = () => Math.min(CONFIG.QUALITY[currentQuality()].dpr, isMobile ? 3 : 4);
 const startDpr = () => quality === 'AUTO' && isMobile ? Math.min(2, capForQuality()) : capForQuality();
 let ssaa = 1, shotBoost = 1, aaLabel = 'MSAA';
+let glowOn = true, raysOn = true, trafficOn = true;
 /* Множитель суперсэмплинга применяется ПОВЕРХ плотности экрана. Раньше здесь
    стоял min(devicePixelRatio, шаг) — на обычном мониторе 1× он намертво
    запирал рендер на 1×, и никакого сглаживания сверх MSAA получить было
@@ -632,9 +651,12 @@ function loop() {
 
   if (trace.active) {
     const done = traceStep();
+    /* Показываем не только проценты, но и оставшийся шум: по нему видно,
+       что именно ещё уточняется, а проценты сами по себе ни о чём не говорят. */
+    const noise = 100 / Math.sqrt(Math.max(1, trace.sample) * CONFIG.PHOTO.rays);
     $('traceInfo').textContent = done >= 1
       ? `готово · ${trace.total * CONFIG.PHOTO.rays} лучей на пиксель`
-      : `свет · ${(done * 100) | 0}% · ${trace.sample} из ${trace.total}`;
+      : `свет · ${(done * 100) | 0}% · шум ${noise.toFixed(0)}%`;
     if (shotPending) { shotPending = false; grabShot(); }
     return;
   }
@@ -645,6 +667,8 @@ function loop() {
   hullU.uTime.value = elapsed;
   glow.rotation.z = Math.atan2(camera.position.x, -camera.position.y);
   updateStructures(dt);
+  if (trafficOn) updateTraffic(dt);
+  setSunScreen(camera, worldGroup);
 
   /* Авто-режим гонит фазу по кругу непрерывно: день сам перетекает в закат,
      закат в ночь, ночь снова в день. Ручное переключение двигает цель на одну
