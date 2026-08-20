@@ -5,7 +5,7 @@ import './test/dom-stub.mjs';
 import { readFileSync } from 'node:fs';
 import * as THREE from 'three';
 import { CONFIG } from './js/config.js';
-import { D2R, TAU, surfacePos, mergeGeos, rod } from './js/util.js';
+import { D2R, TAU, zoneAt, mulberry32, surfacePos, mergeGeos, rod } from './js/util.js';
 import { buildWorld, worldMats, hullU, uvSelfTest } from './js/world.js';
 import { buildStructures, structMats, updateStructures } from './js/structures.js';
 
@@ -217,10 +217,13 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   const src = readFileSync(new URL('./js/textures.js', import.meta.url), 'utf8');
   const fills = [...src.matchAll(/[ms]\.(?:fill|stroke)Style = '(#[0-9a-f]{6})'/g)].map(x => x[1]);
   const maskFills = [...src.matchAll(/\bm\.(?:fill|stroke)Style = '(#[0-9a-f]{6})'/g)].map(x => x[1]);
-  const pure = new Set(['#ff0000', '#00ff00', '#0000ff', '#000000', '#ffffff']);
-  const dirty = maskFills.filter(c => !pure.has(c));
+  /* Важно не «полная яркость», а отсутствие протечки: в заливке маски
+     допустим ровно один ненулевой канал любой силы. */
+  const channels = c => [c.slice(1, 3), c.slice(3, 5), c.slice(5, 7)]
+    .map(x => parseInt(x, 16)).filter(x => x > 0).length;
+  const dirty = maskFills.filter(c => channels(c) > 1);
   ok(maskFills.length > 0, `Заливок маски найдено: ${maskFills.length}`);
-  ok(dirty.length === 0, `Все каналы маски чистые (грязных: ${dirty.join(', ') || 'нет'})`);
+  ok(dirty.length === 0, `Каналы маски не протекают друг в друга (смешанных: ${dirty.join(', ') || 'нет'})`);
   ok(fills.length >= maskFills.length, 'Разбор исходника нашёл и остальные заливки');
 }
 
@@ -313,6 +316,170 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   ok(shot('LOW') === a, 'Возврат к заводскому зерну восстанавливает исходный мир');
 }
 
+/* ══ 3f. Плотность текселей одинакова на всех формах ═══════════════════ */
+{
+  const group = new THREE.Group();
+  buildWorld(group, fakeRenderer, 'LOW');
+  const bld = group.children.filter(o => o.isInstancedMesh && o.material?.emissiveMap);
+  ok(bld.length === 4, 'Четыре типа зданий со своими фасадами');
+
+  bld.forEach((im, v) => {
+    ok(im.material.map.wrapS === THREE.RepeatWrapping && im.material.map.wrapT === THREE.RepeatWrapping,
+       `Тип ${v}: фасад тайлится, а не растягивается один раз на всю деталь`);
+  });
+
+  /* Горизонтально: сколько метров стены приходится на единицу U. Должно
+     совпадать у плоской стены, барабана и тонкого карниза одного здания. */
+  const S = CONFIG.BLD, T = CONFIG.FACADE_TILE;
+  let worstU = 0, edges = 0;
+  bld.forEach((im, v) => {
+    const W = (S[v].w[0] + S[v].w[1]) / 2;
+    const g = im.geometry, p = g.attributes.position, uv = g.attributes.uv, n = g.attributes.normal;
+    const ix = g.index;
+    for (let k = 0; k < ix.count; k += 3) {
+      const a = ix.getX(k), b = ix.getX(k + 1);
+      if (Math.abs(n.getY(a)) > 0.9) continue;                       // кровля мапится отдельно
+      if (Math.abs(p.getY(a) - p.getY(b)) > 1e-4) continue;          // берём горизонтальные рёбра
+      const dw = Math.hypot(p.getX(a) - p.getX(b), p.getZ(a) - p.getZ(b)) * W;
+      const du = Math.abs(uv.getX(a) - uv.getX(b));
+      if (dw < 0.05 || du < 1e-4) continue;
+      edges++;
+      worstU = Math.max(worstU, Math.abs(dw / du / T - 1));
+    }
+  });
+  ok(edges > 50, `Горизонтальных рёбер в проверке: ${edges}`);
+  ok(worstU < 0.15, `Горизонтальная плотность ровная: худшее отклонение ${(worstU * 100) | 0}%`);
+
+  /* Вертикально: текстура обязана ложиться ровно на высоту здания, иначе
+     парапет из верхних процентов текстуры окажется не наверху стены. */
+  let topV = 0, baseV = 9;
+  bld.forEach(im => {
+    const g = im.geometry, p = g.attributes.position, uv = g.attributes.uv, n = g.attributes.normal;
+    for (let k = 0; k < p.count; k++) {
+      if (Math.abs(n.getY(k)) > 0.9) continue;
+      topV = Math.max(topV, uv.getY(k));
+      baseV = Math.min(baseV, uv.getY(k));
+    }
+  });
+  ok(Math.abs(baseV) < 0.01, 'Низ стены приходится на низ текстуры');
+  ok(topV > 0.95 && topV < 1.25, `Верх стены попадает в полосу парапета (v = ${topV.toFixed(2)})`);
+}
+
+/* ══ 3f2. Этажность низкая, распределение по этажам ═════════════════════ */
+{
+  const F = CONFIG.FLOOR_H;
+  for (const [v, s] of CONFIG.BLD.entries()) {
+    ok(s.floors[1] <= 4 && s.floors[0] >= 1,
+       `Тип ${v}: ${s.floors[0]}–${s.floors[1]} этажа = ${(s.floors[0] * F * 10).toFixed(1)}–${(s.floors[1] * F * 10).toFixed(1)} м`);
+  }
+  ok(F * 10 >= 3 && F * 10 <= 4, `Этаж ${(F * 10).toFixed(1)} м — жилая высота`);
+
+  /* треугольное распределение: середина диапазона должна доминировать */
+  const rnd = mulberry32(42);
+  const hist = {};
+  for (let k = 0; k < 60000; k++) {
+    const mid = (rnd() + rnd()) / 2;
+    const f = Math.round(1 + mid * 3);
+    hist[f] = (hist[f] || 0) + 1;
+  }
+  const share = f => (hist[f] || 0) / 60000;
+  ok(share(2) + share(3) > 0.8,
+     `2–3 этажа выпадают в ${((share(2) + share(3)) * 100) | 0}% случаев`);
+  ok(share(1) < 0.12 && share(4) < 0.12, 'Одноэтажные и четырёхэтажные — редкость');
+  ok(!(5 in hist), 'Выше четырёх этажей не бывает');
+}
+
+/* ══ 3g. Ничего не торчит из холмов и конструкций ══════════════════════ */
+{
+  const group = new THREE.Group();
+  buildWorld(group, fakeRenderer, 'HIGH');
+  const insts = group.children.filter(o => o.isInstancedMesh);
+  const m = new THREE.Matrix4(), p = new THREE.Vector3(), s = new THREE.Vector3(), qq = new THREE.Quaternion();
+  const gap = (a, b) => Math.abs(((a - b + Math.PI) % TAU + TAU) % TAU - Math.PI);
+
+  const all = [];
+  for (const im of insts) {
+    if (im.material.transparent) continue;                 // пятна теней не в счёт
+    for (let k = 0; k < im.count; k++) {
+      im.getMatrixAt(k, m); m.decompose(p, qq, s);
+      const r = Math.hypot(p.x, p.y);
+      all.push({ t: Math.atan2(p.x, p.y), z: p.z, r, top: CONFIG.R - r + s.y / 2,
+                 half: Math.max(s.x, s.z) * 0.5 });
+    }
+  }
+
+  /* пятки силовых ферм */
+  const A = CONFIG.AXIS;
+  let hitTruss = 0;
+  for (const z of A.spars) for (let k = 0; k < A.sparArms; k++) {
+    const ta = (A.sparAngle + k * 360 / A.sparArms) * D2R;
+    for (const o of all) {
+      if (o.top < 0.6) continue;
+      if (Math.hypot(gap(o.t, ta) * CONFIG.R, o.z - z) < A.trussW / 2 + o.half) hitTruss++;
+    }
+  }
+  ok(hitTruss === 0, `Ничего не растёт сквозь силовые фермы (нарушений ${hitTruss})`);
+
+  /* спицы торцов идут в трёх метрах над землёй */
+  let hitSpoke = 0;
+  for (const sign of [-1, 1]) for (let k = 0; k < 6; k++) {
+    const ta = (k / 6) * TAU + 0.26, zz = sign * (CONFIG.L / 2 - 8);
+    for (const o of all) {
+      if (o.top < 0.6) continue;
+      if (Math.hypot(gap(o.t, ta) * CONFIG.R, o.z - zz) < 1.0 + o.half) hitSpoke++;
+    }
+  }
+  ok(hitSpoke === 0, `Ничего не растёт сквозь спицы торцов (нарушений ${hitSpoke})`);
+
+  /* холм не накрывает реку и не залезает в город */
+  const hillMesh = insts.find(o => o.material?.flatShading && !o.material.map && o.count <= CONFIG.COUNT.hills[0]);
+  let wetHill = 0, urbanHill = 0, offEnd = 0;
+  for (let k = 0; k < hillMesh.count; k++) {
+    hillMesh.getMatrixAt(k, m); m.decompose(p, qq, s);
+    const t = Math.atan2(p.x, p.y), dt = s.x / CONFIG.R;
+    for (const tt of [t - dt, t, t + dt]) {
+      const zone = zoneAt(tt / D2R);
+      if (zone === 'river') wetHill++;
+      if (zone === 'city') urbanHill++;
+    }
+    if (Math.abs(p.z) + s.x > CONFIG.L / 2) offEnd++;
+  }
+  ok(wetHill === 0, `Ни один холм не выпирает в реку (нарушений ${wetHill})`);
+  ok(urbanHill === 0, `Ни один холм не заезжает в город (нарушений ${urbanHill})`);
+  ok(offEnd === 0, 'Ни один холм не вылезает за торец станции');
+
+  /* ничего не упирается в торцевые диски */
+  let pokeEnd = 0;
+  for (const o of all) if (Math.abs(o.z) + o.half > CONFIG.L / 2 - 1) pokeEnd++;
+  ok(pokeEnd === 0, `Ничего не протыкает торцевые диски (нарушений ${pokeEnd})`);
+}
+
+/* ══ 3h. PWA ставится и ничего не кеширует ═════════════════════════════ */
+{
+  const here = new URL('.', import.meta.url);
+  const mf = JSON.parse(readFileSync(new URL('manifest.webmanifest', here), 'utf8'));
+  ok(mf.display === 'standalone' && !!mf.name && !!mf.start_url, 'Манифест: имя, start_url, standalone');
+  const sizes = mf.icons.map(i => i.sizes);
+  ok(sizes.includes('192x192') && sizes.includes('512x512'), 'Иконки 192 и 512 объявлены');
+  ok(mf.icons.some(i => i.purpose === 'maskable'), 'Есть maskable-иконка для Android');
+  for (const ic of mf.icons) {
+    const buf = readFileSync(new URL(ic.src, here));
+    ok(buf.length > 500 && buf[1] === 0x50 && buf[2] === 0x4e, `Иконка ${ic.src} существует и это PNG`);
+    const w = buf.readUInt32BE(16), h = buf.readUInt32BE(20);
+    ok(`${w}x${h}` === ic.sizes, `Иконка ${ic.src} действительно ${ic.sizes}`);
+  }
+
+  const sw = readFileSync(new URL('sw.js', here), 'utf8');
+  ok(/addEventListener\(\s*'fetch'/.test(sw), 'Worker имеет обработчик fetch — без него Chrome не предложит установку');
+  const swCode = sw.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+  ok(!/caches|respondWith|CacheStorage/.test(swCode),
+     'В коде worker нет ни кеша, ни перехвата — всё идёт из сети');
+
+  const html = readFileSync(new URL('index.html', here), 'utf8');
+  ok(html.includes('rel="manifest"'), 'Манифест подключён в разметке');
+  ok(html.includes('apple-touch-icon'), 'Иконка для iOS указана');
+}
+
 /* ══ 4. Гравитация: крыши стоят там, где по ним можно ходить ════════════ */
 {
   /* центробежная g на высоте h от пола: доля земной = (R − h) / R */
@@ -326,11 +493,11 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   let worstH = 0;
   silhouettes.forEach((im, v) => {
     im.geometry.computeBoundingBox();
-    const top = (im.geometry.boundingBox.max.y + 0.5) * CONFIG.BLD[v].h[1];
+    const top = (im.geometry.boundingBox.max.y + 0.5) * CONFIG.BLD[v].floors[1] * CONFIG.FLOOR_H;
     worstH = Math.max(worstH, top);
   });
   ok(G(worstH) >= CONFIG.G_MIN,
-     `Самый высокий дом: ${worstH.toFixed(1)} юнитов = ${(worstH * 10) | 0} м, крыша при ${G(worstH).toFixed(2)} g (порог ${CONFIG.G_MIN})`);
+     `Самый высокий дом: ${(worstH * 10) | 0} м, крыша при ${G(worstH).toFixed(2)} g (порог ${CONFIG.G_MIN})`);
   ok(G(worstH) > 0.38, 'Крыша выше марсианской гравитации — жить и работать можно');
 
   /* верх остеклённого кабинета коммандора: 27.55 в чертёжных единицах башни */
@@ -349,11 +516,32 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
 /* ══ 5. Ночь читается ═══════════════════════════════════════════════════ */
 {
   const D = CONFIG.DAY, N = CONFIG.NIGHT;
-  /* ночь обязана быть темнее дня — иначе это день в синем фильтре */
-  ok(N.hemiInt < D.hemiInt * 0.35 && N.pointInt < D.pointInt * 0.35,
-     `Ночь темнее дня: заполняющий ${(N.hemiInt / D.hemiInt * 100) | 0}%, осевой ${(N.pointInt / D.pointInt * 100) | 0}% от дневного`);
-  ok(N.hemiInt > 0.12 && N.pointInt > 0.1,
-     'Но не в ноль: объёмы домов и рельеф читаются');
+  /* Свет считаем суммарно: осевых источников пять, судить по одному нельзя */
+  const fill = p => p.hemiInt + p.pointInt * CONFIG.LIGHT_Z.length;
+  const ratio = fill(N) / fill(D);
+  ok(ratio > 0.12 && ratio < 0.40,
+     `Ночь темнее дня: заполняющий свет ${(ratio * 100) | 0}% от дневного`);
+
+  /* Источники стоят на оси: нормаль пола смотрит на них, стены домов — нет.
+     Значит ночная полусфера обязана работать как рассеянный свет, иначе
+     дома превращаются в чёрные силуэты с окнами. */
+  const lum = hex => {
+    const c = new THREE.Color(hex);
+    return 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
+  };
+  const contrast = lum(N.hemiSky) / lum(N.hemiGround);
+  ok(contrast < 1.8,
+     `Ночная полусфера почти равномерна (контраст верх/низ ${contrast.toFixed(2)}) — стены домов освещены`);
+  ok(lum(D.hemiSky) / lum(D.hemiGround) > 2,
+     'Днём полусфера, наоборот, направленная — небо ярче земли');
+
+  /* Эмиссия не освещается: ночью она обязана быть слабее отражённого света,
+     иначе улицы светятся сами и красят пол в кремовый. */
+  const src2 = readFileSync(new URL('./js/world.js', import.meta.url), 'utf8');
+  ok(/smoothstep\(\s*0\.5,\s*0\.95,\s*hullMask\.b\s*\)/.test(src2),
+     'Фонари зажигаются порогом по B: светятся магистрали, а не весь сектор');
+  ok(N.cityGlow * 1.35 < fill(N) * 0.25,
+     `Уличное свечение (${(N.cityGlow * 1.35).toFixed(2)}) слабее заполняющего света (${fill(N).toFixed(2)})`);
   ok(N.cityGlow > 0, 'Улицы ночью светятся сами: видно, где стоят огни');
   ok(N.navSize > D.navSize, 'Габаритные огни ночью крупнее');
   ok(N.sunEmis > 0.3, 'Солнечная труба ночью тлеет как ночник, а не гаснет');

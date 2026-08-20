@@ -87,6 +87,38 @@ export function rod(w, h, d, x, y, z, rx = 0, ry = 0, rz = 0) {
   return g;
 }
 
+/** Развёртка фасада для одной детали здания.
+    По горизонтали — постоянная плотность: без этого карниз толщиной 60 см
+    показывал всю текстуру целиком, а барабан — её же, размазанную по кругу.
+    По вертикали — доля от высоты здания (v берётся прямо из координаты),
+    чтобы парапет из верхних процентов текстуры всегда оказывался наверху
+    стены, на какой бы высоте эта деталь ни находилась. */
+export function facadeUV(geo, uScale) {
+  const uv = geo.attributes.uv, p = geo.attributes.position;
+  for (let k = 0; k < uv.count; k++) uv.setXY(k, uv.getX(k) * uScale, p.getY(k));
+  uv.needsUpdate = true;
+  return geo;
+}
+
+/** Панельная развёртка по мировым координатам детали. Для слитых форм из
+    десятков брусьев перебирать каждый примитив бессмысленно: проецируем по
+    доминирующей оси нормали с фиксированной плотностью. Швы на цилиндрах для
+    технической текстуры не видны, зато 44-метровый пояс фермы перестаёт
+    показывать одну растянутую панель на всю длину. */
+export function panelUV(geo, tile, sy = 1) {
+  const p = geo.attributes.position, n = geo.attributes.normal, uv = geo.attributes.uv;
+  for (let k = 0; k < p.count; k++) {
+    const nx = Math.abs(n.getX(k)), ny = Math.abs(n.getY(k)), nz = Math.abs(n.getZ(k));
+    let a, b;
+    if (nx >= ny && nx >= nz) { a = p.getZ(k); b = p.getY(k) * sy; }
+    else if (ny >= nz) { a = p.getX(k); b = p.getZ(k); }
+    else { a = p.getX(k); b = p.getY(k) * sy; }
+    uv.setXY(k, a / tile, b / tile);
+  }
+  uv.needsUpdate = true;
+  return geo;
+}
+
 /** Рекурсивная очистка поддерева: геометрии, материалы, их текстуры */
 export function deepDispose(obj) {
   obj.traverse?.(n => {

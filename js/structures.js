@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { CONFIG } from './config.js';
-import { mulberry32, D2R, TAU, surfaceQuat, surfacePos, mergeGeos, rod, deepDispose } from './util.js';
+import { mulberry32, D2R, TAU, surfaceQuat, surfacePos, mergeGeos, rod, panelUV, deepDispose } from './util.js';
 import { makeEndCapTexture } from './textures.js';
 
 /* Материалы, которыми управляет палитра день/ночь */
@@ -64,16 +64,16 @@ function buildAxis(group, panel) {
     put(0.34, 0.34, -0.8, railR + 0.55);
     put(0.34, 0.34, 0.8, railR + 0.55);
   }
-  add(new THREE.Mesh(mergeGeos(spine), metal));
+  add(new THREE.Mesh(panelUV(mergeGeos(spine), CONFIG.PANEL_TILE), metal));
 
   /* --- кабины осевого лифта --- */
   /* длинная сторона кабины — вдоль оси (локальный Z), +Y смотрит на ось */
-  const carBody = mergeGeos([
+  const carBody = panelUV(mergeGeos([
     rod(2.6, 2.2, 6.4, 0, 0, 0),
     rod(2.9, 2.5, 0.5, 0, 0, 3.3),
     rod(2.9, 2.5, 0.5, 0, 0, -3.3),
     rod(0.5, 2.6, 0.5, 0, 1.6, 0)           // токосъёмник вверх, к рельсу
-  ]);
+  ]), CONFIG.PANEL_TILE);
   const carGlass = mergeGeos([
     rod(2.72, 1.4, 4.6, 0, 0.15, 0),        // поясные окна по бортам
     rod(2.3, 1.4, 0.1, 0, 0.15, 3.35)
@@ -102,7 +102,7 @@ function buildAxis(group, panel) {
     t.translate(0, 0, z);
     collar.push(t);
   }
-  add(new THREE.Mesh(mergeGeos(collar), metal));
+  add(new THREE.Mesh(panelUV(mergeGeos(collar), CONFIG.PANEL_TILE), metal));
 
   const trussLen = R - 1 - (A.spineR + 2.4);
   const truss = trussGeo(trussLen, A.trussW, A.trussBay);
@@ -142,7 +142,7 @@ function trussGeo(len, w, bay) {
       g.push(rod(0.17, d, 0.17, 0, y + dy / 2, h, 0, 0, i % 2 ? -a : a));
     }
   }
-  return mergeGeos(g);
+  return panelUV(mergeGeos(g), CONFIG.PANEL_TILE);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -195,7 +195,7 @@ function buildTower(group, panel) {
   const concrete = new THREE.MeshStandardMaterial({
     map: panel, color: 0xc0a993, roughness: 0.78, metalness: 0.06
   });
-  g.add(new THREE.Mesh(mergeGeos(shell), concrete));
+  g.add(new THREE.Mesh(panelUV(mergeGeos(shell), CONFIG.PANEL_TILE, T.h / T.modelH), concrete));
 
   /* --- стекло: поясное остекление барабанов и ротонда кабинета --- */
   const glass = [
@@ -208,7 +208,7 @@ function buildTower(group, panel) {
     emissive: 0xffe6bd, emissiveIntensity: 0
   });
   structMats.glass.push(glassMat);
-  g.add(new THREE.Mesh(mergeGeos(glass), glassMat));
+  g.add(new THREE.Mesh(panelUV(mergeGeos(glass), CONFIG.PANEL_TILE * 0.5, T.h / T.modelH), glassMat));
 
   /* --- маяк на мачте --- */
   structMats.beacon = new THREE.MeshStandardMaterial({
@@ -250,7 +250,7 @@ function buildEndCaps(group, renderer, low) {
       spoke.rotateZ(-a);
       p.push(spoke);
     }
-    const merged = mergeGeos(p);
+    const merged = panelUV(mergeGeos(p), CONFIG.PANEL_TILE);
     merged.translate(0, 0, sign * (HL - 8));
     const mesh = new THREE.Mesh(merged, new THREE.MeshStandardMaterial({
       color: 0xa7b0ba, roughness: 0.45, metalness: 0.55

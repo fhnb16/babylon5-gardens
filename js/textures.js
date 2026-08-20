@@ -98,7 +98,7 @@ export function makeHullMaps(size, rnd) {
     }
     /* гравийные дорожки — и в маску как покрытие */
     a.globalAlpha = 0.4; a.strokeStyle = '#c4b894'; a.lineWidth = 3;
-    m.strokeStyle = '#0000ff'; m.lineWidth = 2;
+    m.strokeStyle = '#000040'; m.lineWidth = 2;   // слабый B: зерно есть, фонарей нет
     for (let i = 0; i < 14; i++) {
       let px = x0 + rnd() * (x1 - x0), py = 0;
       const pts = [[px, py]];
@@ -117,8 +117,11 @@ export function makeHullMaps(size, rnd) {
     const x0 = X(s0), x1 = X(s1);
     a.save(); a.beginPath(); a.rect(x0, 0, x1 - x0, H); a.clip();
     a.fillStyle = '#5a5f63'; a.fillRect(x0, 0, x1 - x0, H);
-    /* в маску: город — покрытие */
-    m.fillStyle = '#0000ff'; m.fillRect(XM(s0), 0, XM(s1) - XM(s0), mh);
+    /* Город в маске: сплошная заливка даёт лишь зернистость покрытия.
+       Ярким B помечаются только магистрали — по нему шейдер зажигает
+       уличные фонари. Раньше светился весь сектор целиком и ночью
+       читался как подсвеченная снизу площадка. */
+    m.fillStyle = '#000040'; m.fillRect(XM(s0), 0, XM(s1) - XM(s0), mh);
 
     const bs = Math.max(20, 34 * (W / 2048)), st = Math.max(8, 12 * (W / 2048));
     for (let y = -bs; y < H + bs; y += bs + st) {
@@ -140,16 +143,20 @@ export function makeHullMaps(size, rnd) {
         }
       }
     }
-    /* магистрали с разметкой */
+    /* магистрали: и в альбедо, и ярким B в маску — это линии фонарей */
+    const kx = M.c.width / W, ky = mh / H;
+    m.strokeStyle = '#0000ff'; m.lineWidth = Math.max(2, st * kx * 0.8);
     for (let y = -bs; y < H + bs; y += (bs + st) * 3) {
       a.globalAlpha = 0.6; a.strokeStyle = '#3c4145'; a.lineWidth = Math.max(5, st);
       a.beginPath(); a.moveTo(x0, y); a.lineTo(x1, y); a.stroke();
       a.globalAlpha = 0.5; a.strokeStyle = '#e8d98a'; a.lineWidth = 1.5;
       a.beginPath(); a.moveTo(x0, y); a.lineTo(x1, y); a.stroke();
+      m.beginPath(); m.moveTo(XM(s0), y * ky); m.lineTo(XM(s1), y * ky); m.stroke();
     }
     for (let x = x0; x < x1; x += (bs + st) * 3) {
       a.globalAlpha = 0.6; a.strokeStyle = '#3c4145'; a.lineWidth = Math.max(5, st);
       a.beginPath(); a.moveTo(x, 0); a.lineTo(x, H); a.stroke();
+      m.beginPath(); m.moveTo(x * kx, 0); m.lineTo(x * kx, mh); m.stroke();
     }
     a.globalAlpha = 1;
     for (let i = 0; i < 6; i++) {
@@ -182,7 +189,7 @@ export function makeHullMaps(size, rnd) {
   /* ── техническая кромка у торцов ── */
   const edge = H * 0.022;
   a.fillStyle = '#6a6d72'; a.fillRect(0, 0, W, edge); a.fillRect(0, H - edge, W, edge);
-  m.fillStyle = '#0000ff';
+  m.fillStyle = '#000040';
   m.fillRect(0, 0, M.c.width, edge / H * mh); m.fillRect(0, mh - edge / H * mh, M.c.width, edge / H * mh);
   a.globalAlpha = 0.5; a.strokeStyle = '#3a3e44'; a.lineWidth = 2;
   for (let x = 0; x < W; x += W / CONFIG.HULL_SEG) {
@@ -250,10 +257,15 @@ export function makeFacade(rnd, variant) {
     a.g.fillStyle = pick(rnd, ['#7b818c', '#646a74', '#868d98', '#5b616a']);
     a.g.fillRect(rnd() * W, rnd() * ROOF, 2 + rnd() * 9, 2 + rnd() * 7);
   }
-  for (let i = 0; i < 7; i++) {             // вентиляция и машинные будки
-    const x = rnd() * (W - 30), y = 3 + rnd() * (ROOF - 16);
-    a.g.fillStyle = '#4d535c'; a.g.fillRect(x, y, 12 + rnd() * 18, 7 + rnd() * 6);
-    a.g.fillStyle = 'rgba(255,255,255,.16)'; a.g.fillRect(x, y, 12 + rnd() * 18, 2);
+  /* Полоса повторяется и по вертикали стены, поэтому её содержимое должно
+     читаться и как кровля сверху, и как технический этаж сбоку: жалюзи и
+     решётки, а не разбросанные будки. */
+  for (let x = 4; x < W - 6; x += 21) {
+    const hh = 7 + (rnd() * 5 | 0);
+    a.g.fillStyle = '#4d535c'; a.g.fillRect(x, 5, 15, hh);
+    a.g.fillStyle = 'rgba(255,255,255,.14)'; a.g.fillRect(x, 5, 15, 1.5);
+    a.g.fillStyle = 'rgba(25,30,38,.55)';
+    for (let s = 0; s < hh - 2; s += 3) a.g.fillRect(x + 1, 7 + s, 13, 1.4);
   }
   a.g.strokeStyle = 'rgba(35,40,48,.45)'; a.g.lineWidth = 1.5;
   for (let x = 0; x < W; x += 32) { a.g.beginPath(); a.g.moveTo(x, 0); a.g.lineTo(x, ROOF); a.g.stroke(); }
@@ -264,11 +276,12 @@ export function makeFacade(rnd, variant) {
     b.g.fillStyle = '#ff5a3c'; b.g.fillRect(x, y, 3, 3);
   }
 
-  const cols = [8, 10, 6, 12][variant], rows = [14, 8, 20, 10][variant];
+  /* столбцов — под шаг проёма ~3.5 м, строк — по числу этажей типа */
+  const cols = [8, 7, 9, 8][variant], rows = CONFIG.BLD[variant].rows;
   const mx = 10, my = ROOF + 8;
   const cw = (W - mx * 2) / cols, ch = (H - my - 14) / rows;
   const ww = cw * 0.66, wh = ch * 0.52;
-  const glow = ['#ffd9a0', '#ffc477', '#ffeccb', '#9fd4ff', '#c8ffd0'];
+  const glow = ['#ffd9a0', '#ffc477', '#ffeccb', '#f0dcbc', '#cfe0f2'];
   for (let r = 0; r < rows; r++) {
     /* межэтажный поясок — «полосатые» фасады Вавилона */
     if (r % 3 === 0) {

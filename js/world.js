@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { CONFIG } from './config.js';
 import {
-  mulberry32, D2R, TAU, clamp, pick, zoneAt, surfaceQuat, surfacePos, mergeGeos, rod, deepDispose
+  mulberry32, D2R, TAU, clamp, pick, zoneAt, surfaceQuat, surfacePos, mergeGeos, rod, facadeUV, deepDispose
 } from './util.js';
 import {
   makeHullMaps, makeDetailTexture, makeFacade, makePanelTexture, makeSoftSprite, makeBlobTexture
@@ -74,8 +74,10 @@ function patchHullMaterial(mat, nArm, nSpar) {
 
       /* --- ночью улицы и площади светятся сами: огни видно, а не только окна --- */
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
-        totalEmissiveRadiance += uCityGlow * hullMask.b
-          * ( 0.35 + 1.1 * dPave ) * vec3( 1.0, 0.78, 0.48 );`)
+        // фонари горят только на магистралях: слабый B — это просто покрытие
+        float lamps = smoothstep( 0.5, 0.95, hullMask.b );
+        totalEmissiveRadiance += uCityGlow * lamps
+          * ( 0.45 + 0.9 * dPave ) * vec3( 1.0, 0.78, 0.48 );`)
 
       /* --- вода зеркальна --- */
       .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
@@ -132,22 +134,27 @@ function roofUV(geo, band = 0.88) {
    Разнообразие формы бесплатно: тип по-прежнему один InstancedMesh.
    ═══════════════════════════════════════════════════════════════════════════ */
 function buildingGeo(type) {
+  const S = CONFIG.BLD[type], T = CONFIG.FACADE_TILE;
+  /* типовая ширина инстанса — по ней считаем горизонтальную плотность */
+  const W = (S.w[0] + S.w[1]) / 2;
   const parts = [];
+  const box = (w, h, d, x, y, z) => facadeUV(rod(w, h, d, x, y, z), w * W / T);
+  /* цилиндр разворачивается по длине окружности, а не «оборот на тайл» */
   const cyl = (r, h, y, seg = 14) => {
     const g = new THREE.CylinderGeometry(r, r, h, seg, 1, false);
     g.translate(0, y + h / 2, 0);
-    return g;
+    return facadeUV(g, 2 * Math.PI * r * W / T);
   };
   if (type === 0) {           // ступенчатая башня
-    parts.push(rod(1, 0.5, 1, 0, 0.25, 0));
-    parts.push(rod(0.74, 0.34, 0.74, 0, 0.67, 0));
-    parts.push(rod(0.46, 0.2, 0.46, 0, 0.94, 0));
-    parts.push(rod(0.1, 0.14, 0.1, 0.12, 1.07, 0.12));
+    parts.push(box(1, 0.5, 1, 0, 0.25, 0));
+    parts.push(box(0.74, 0.34, 0.74, 0, 0.67, 0));
+    parts.push(box(0.46, 0.2, 0.46, 0, 0.94, 0));
+    parts.push(box(0.1, 0.14, 0.1, 0.12, 1.07, 0.12));
   } else if (type === 1) {    // низкая плита с надстройкой
-    parts.push(rod(1, 0.5, 1, 0, 0.25, 0));
-    parts.push(rod(1.12, 0.06, 1.12, 0, 0.53, 0));      // карниз
+    parts.push(box(1, 0.5, 1, 0, 0.25, 0));
+    parts.push(box(1.12, 0.06, 1.12, 0, 0.53, 0));      // карниз
     parts.push(cyl(0.3, 0.44, 0.56, 12));
-    parts.push(rod(0.06, 0.24, 0.06, 0.2, 1.12, -0.2));  // мачта
+    parts.push(box(0.06, 0.24, 0.06, 0.2, 1.12, -0.2));  // мачта
   } else if (type === 2) {    // круглая башня-барабан
     parts.push(cyl(0.5, 0.84, 0));
     parts.push(cyl(0.58, 0.06, 0.84));
@@ -233,6 +240,19 @@ export function buildWorld(group, renderer, quality) {
      ponytail: наивный O(n²) перебор по ~350 пятнам. Сетка, если станет тысячи. */
   const taken = [];
   const angGap = (a, b) => Math.abs(((a - b + Math.PI) % TAU + TAU) % TAU - Math.PI);
+
+  /* Неподвижная геометрия тоже занимает землю. Пятки силовых ферм приходят
+     к корпусу, спицы торцов проходят в трёх метрах над ним — раньше про них
+     никто не знал, и деревья с домами прорастали сквозь конструкции. */
+  const A = CONFIG.AXIS;
+  for (const z of A.spars) {
+    for (let k = 0; k < A.sparArms; k++) {
+      taken.push([(A.sparAngle + k * 360 / A.sparArms) * D2R, z, A.trussW / 2 + 1.2]);
+    }
+  }
+  for (const sign of [-1, 1]) {
+    for (let k = 0; k < 6; k++) taken.push([(k / 6) * TAU + 0.26, sign * (HL - 8), 3.0]);
+  }
   const fits = (t, z, r) => {
     for (let k = 0; k < taken.length; k++) {
       const o = taken[k];
@@ -243,14 +263,24 @@ export function buildWorld(group, renderer, quality) {
 
   /** rad — либо число, либо функция, возвращающая радиус конкретной попытки
       (холму нужен его собственный, иначе он резервирует не свой размер) */
-  const sample = (w, n, rad = 0, claim = false) => {
+  /** Зона проверяется по краям объекта, а не только в центре: холм радиусом
+      14 занимает 16° и центром в парке легко накрывает соседнюю реку. */
+  const zoneClear = (t, z, r, bad) => {
+    const dt = r / R;
+    for (const tt of [t - dt, t, t + dt]) if (bad.includes(zoneAt(tt / D2R))) return false;
+    return true;
+  };
+
+  const sample = (w, n, rad = 0, claim = false, bad = null) => {
     const out = [];
-    for (let guard = 0; out.length < n && guard < n * 60; guard++) {
-      const t = rnd() * TAU, z = -HL + rnd() * L;
+    for (let guard = 0; out.length < n && guard < n * 80; guard++) {
+      const r = typeof rad === 'function' ? rad() : rad;
+      const margin = r + 3;
+      const t = rnd() * TAU, z = -HL + margin + rnd() * (L - margin * 2);
       const p = w[zoneAt(t / D2R)];
       if (p <= 0 || rnd() > p) continue;
-      const r = typeof rad === 'function' ? rad() : rad;
       if (!free(t, z) || !fits(t, z, r)) continue;
+      if (bad && !zoneClear(t, z, r, bad)) continue;
       out.push([t, z, r]);
       if (claim) taken.push([t, z, r]);
     }
@@ -289,6 +319,7 @@ export function buildWorld(group, renderer, quality) {
   const shape = CONFIG.BLD;
   for (let v = 0; v < 4; v++) {
     const { map, emis } = makeFacade(mulberry32(CONFIG.SEED + 31 * (v + 1)), v);
+    for (const tx of [map, emis]) { tx.wrapS = tx.wrapT = THREE.RepeatWrapping; }
     map.anisotropy = Math.min(4, maxAniso);
     const mat = new THREE.MeshStandardMaterial({
       map, emissiveMap: emis, emissive: 0xffffff, emissiveIntensity: 0,
@@ -297,7 +328,11 @@ export function buildWorld(group, renderer, quality) {
     worldMats.bld.push(mat);
     instance(buildingGeo(v), mat, sampleCity(CONFIG.COUNT.bld[i], shape[v].w[1] * 0.55), (k, t, z, im) => {
       const s = CONFIG.BLD[v];
-      const h = s.h[0] + rnd() * (s.h[1] - s.h[0]);
+      /* среднее двух равномерных даёт треугольное распределение: края
+         диапазона этажности выпадают редко, чаще середина */
+      const mid = (rnd() + rnd()) / 2;
+      const floors = Math.round(s.floors[0] + mid * (s.floors[1] - s.floors[0]));
+      const h = floors * CONFIG.FLOOR_H;
       const w = s.w[0] + rnd() * (s.w[1] - s.w[0]), d = s.w[0] + rnd() * (s.w[1] - s.w[0]);
       surfaceQuat(t, q).multiply(qs.setFromAxisAngle(UP, ((rnd() * 4) | 0) * Math.PI / 2));
       m4.compose(surfacePos(t, R - h / 2, z, v3), q, sc.set(w, h, d));
@@ -324,7 +359,7 @@ export function buildWorld(group, renderer, quality) {
     /* холм СЧИТАЕТСЯ с застройкой, но сам места не занимает: зелень должна
        вырасти прямо на его склоне, а не быть отброшена от него */
     sample(W_HILL, CONFIG.COUNT.hills[i],
-      () => HILL.r[0] + rnd() * (HILL.r[1] - HILL.r[0]), false),
+      () => HILL.r[0] + rnd() * (HILL.r[1] - HILL.r[0]), false, ['river', 'city']),
     (k, t, z, im, rad) => {
       const h = rad * (HILL.rise[0] + rnd() * (HILL.rise[1] - HILL.rise[0]));
       hills.push([t, z, rad, h]);

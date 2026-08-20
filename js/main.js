@@ -155,7 +155,7 @@ function applyPalette(t) {
 
   const emis = lerp(N.winEmis, D.winEmis, t);
   for (const m of worldMats.bld) m.emissiveIntensity = emis;
-  for (const m of structMats.glass) m.emissiveIntensity = emis * 0.8;
+  for (const m of structMats.glass) m.emissiveIntensity = emis * 0.45;
   if (structMats.liftGlass) structMats.liftGlass.emissiveIntensity = lerp(1.4, 0.3, t);
 
   if (worldMats.nav) {
@@ -167,7 +167,7 @@ function applyPalette(t) {
 
   moteMat.color.copy(mix(D.moteCol, N.moteCol, t));
   moteMat.opacity = lerp(N.moteOp, D.moteOp, t);
-  moteMat.size = lerp(0.95, 0.55, t);
+  moteMat.size = lerp(0.72, 0.55, t);
   clouds.material.opacity = lerp(0.06, 0.22, t);
 
   hullU.uSparShade.value = lerp(N.sparShade, D.sparShade, t);
@@ -444,6 +444,11 @@ try {
     $('fatal').firstElementChild.innerHTML =
       '<b>Графический контекст потерян</b><br>Обновите страницу — сцена соберётся заново.';
   });
+
+  /* PWA: worker нужен только для критерия устанавливаемости, кеша в нём нет */
+  if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+    addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+  }
 
   loop();
 } catch (err) {
