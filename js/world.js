@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { CONFIG } from './config.js';
 import {
-  mulberry32, D2R, TAU, clamp, pick, zoneAt, surfaceQuat, surfacePos, mergeGeos, rod, facadeUV, deepDispose
+  mulberry32, D2R, TAU, clamp, pick, zoneAt, surfaceQuat, surfacePos, mergeGeos, rod, facadeUV, natural, cityBlock, cityCenter, cellInfo, cellUsable, pickFloors, deepDispose
 } from './util.js';
 import {
   makeHullMaps, makeDetailTexture, makeFacade, makePanelTexture, makeSoftSprite, makeBlobTexture
@@ -22,6 +22,7 @@ export const hullU = {
   uArm: { value: [] }, uArmW: { value: 0.055 },
   uSparZ: { value: [] }, uSparZW: { value: 30.0 },
   uSparShade: { value: CONFIG.DAY.sparShade },
+  uFlow: { value: 0 },
   uCityGlow: { value: CONFIG.DAY.cityGlow },
   uWaterTint: { value: new THREE.Color(CONFIG.DAY.waterTint) }
 };
@@ -34,18 +35,27 @@ function patchHullMaterial(mat, nArm, nSpar) {
     s.vertexShader = s.vertexShader
       .replace('#include <common>', `#include <common>
         varying float vTh;
-        varying float vZo;`)
+        varying float vZo;
+        varying vec3 vTanU;
+        varying vec3 vTanV;`)
       .replace('#include <begin_vertex>', `#include <begin_vertex>
         vTh = atan( position.x, position.y );
-        vZo = position.z;`);
+        vZo = position.z;
+        // касательные корпуса в видовом пространстве: вдоль дуги и вдоль оси.
+        // Возмущать нормаль без них нельзя — во фрагментном шейдере normal
+        // задан в видовых координатах, и рябь поехала бы вместе с камерой.
+        vTanU = normalize( normalMatrix * vec3( cos( vTh ), -sin( vTh ), 0.0 ) );
+        vTanV = normalize( normalMatrix * vec3( 0.0, 0.0, 1.0 ) );`);
 
     s.fragmentShader = s.fragmentShader
       .replace('#include <common>', `#include <common>
         varying float vTh;
         varying float vZo;
+        varying vec3 vTanU;
+        varying vec3 vTanV;
         uniform sampler2D uMask;
         uniform sampler2D uDetail;
-        uniform float uTime, uDetailRep, uArmW, uSparZW, uSparShade, uCityGlow;
+        uniform float uTime, uDetailRep, uArmW, uSparZW, uSparShade, uCityGlow, uFlow;
         uniform float uArm[${nArm}];
         uniform float uSparZ[${nSpar}];
         uniform vec3 uWaterTint;
@@ -58,7 +68,9 @@ function patchHullMaterial(mat, nArm, nSpar) {
         float dPave  = texture2D( uDetail, vMapUv * uDetailRep * 0.31 ).r;
         diffuseColor.rgb *= mix( 1.0, 0.70 + 0.60 * dGrass, hullMask.g * 0.9 );
         diffuseColor.rgb *= mix( 1.0, 0.86 + 0.28 * dPave,  hullMask.b * 0.7 );
-        diffuseColor.rgb = mix( diffuseColor.rgb, uWaterTint, hullMask.r * 0.75 );
+        // hullMask.r теперь глубина: 0 у берега, 1 на стрежне. У берега сквозь
+        // воду просвечивает нарисованное дно, на стрежне остаётся только цвет.
+        diffuseColor.rgb = mix( diffuseColor.rgb, uWaterTint, hullMask.r * 0.92 );
 
         // тень фермы: угловой створ × локальность по z
         float zt = 0.0;
@@ -74,22 +86,47 @@ function patchHullMaterial(mat, nArm, nSpar) {
 
       /* --- ночью улицы и площади светятся сами: огни видно, а не только окна --- */
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
-        // фонари горят только на магистралях: слабый B — это просто покрытие
-        float lamps = smoothstep( 0.5, 0.95, hullMask.b );
-        totalEmissiveRadiance += uCityGlow * lamps
-          * ( 0.45 + 0.9 * dPave ) * vec3( 1.0, 0.78, 0.48 );`)
+        // Фонарь освещает покрытие, а не подменяет его цвет: множим на
+        // альбедо, иначе улица превращается в ровное светящееся пятно и
+        // разметка на ней пропадает.
+        float lamps = smoothstep( 0.34, 0.92, hullMask.b );
+        totalEmissiveRadiance += uCityGlow * lamps * diffuseColor.rgb
+          * ( 0.5 + 0.8 * dPave ) * vec3( 1.0, 0.86, 0.66 );`)
 
       /* --- вода зеркальна --- */
       .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
-        roughnessFactor = mix( roughnessFactor, 0.055, hullMask.r );`)
+        float wFar = smoothstep( 25.0, 90.0, length( vViewPosition ) );
+        roughnessFactor = mix( roughnessFactor, mix( 0.045, 0.20, wFar ), hullMask.r );`)
 
       /* --- рябь на воде: возмущаем нормаль, блик солнца сам поедет --- */
       .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>
         if ( hullMask.r > 0.02 ) {
-          vec2 rp = vMapUv * vec2( 1400.0, 900.0 );
-          float r1 = sin( rp.y * 0.9 + uTime * 1.4 ) + sin( rp.x * 0.5 - uTime * 0.7 );
-          float r2 = sin( rp.y * 0.4 - rp.x * 0.3 + uTime * 1.1 );
-          normal = normalize( normal + vec3( r1, r2, 0.0 ) * 0.035 * hullMask.r );
+          // Координаты в юнитах мира: по дуге и вдоль оси. Так длины волн
+          // задаются в метрах, а не в долях текстуры.
+          vec2 P = vec2( vMapUv.x * 314.0, vMapUv.y * 300.0 );
+          P.y -= uTime * uFlow;                      // рябь сносит вниз по течению
+          float t = uTime;
+
+          // Мелкая рябь гаснет с расстоянием: на дальних пикселях её период
+          // короче пикселя, и без затухания она превращается в муар — тот
+          // самый крестообразный узор.
+          float near = 1.0 - wFar;
+
+          // Волны идут преимущественно поперёк русла (большая компонента по
+          // дуге, малая вдоль оси). Поэтому отражение вытягивается в полосу
+          // вдоль оси — как и положено бликам от линейного источника.
+          vec2 rip = vec2( 0.0 );
+          rip += vec2( 1.00, 0.14 ) * cos( dot( P, vec2(  7.9,  1.1 ) ) + t * 2.1 );
+          rip += vec2( 0.74, -0.11 ) * cos( dot( P, vec2( 12.7, -1.9 ) ) - t * 2.8 );
+          rip += vec2( 0.46, 0.08 ) * cos( dot( P, vec2( 23.3,  3.1 ) ) + t * 4.2 ) * near;
+          rip += vec2( 0.28, -0.06 ) * cos( dot( P, vec2( 41.1, -4.7 ) ) - t * 5.9 ) * near;
+
+          // Продольные струи: медленная низкочастотная составляющая, которая
+          // и читается как течение.
+          rip += vec2( 0.22, 0.55 ) * cos( dot( P, vec2( 1.7, 0.9 ) ) + t * 0.8 );
+
+          float amp = 0.055 * hullMask.r * ( 0.45 + 0.55 * near );
+          normal = normalize( normal + ( vTanU * rip.x + vTanV * rip.y ) * amp );
         }`);
   };
   mat.customProgramCacheKey = () => 'b5-hull';
@@ -216,6 +253,7 @@ export function buildWorld(group, renderer, quality) {
   hullU.uArm.value = arms;
   hullU.uSparZ.value = CONFIG.AXIS.spars.slice();
   hullU.uArmW.value = CONFIG.AXIS.trussW / R * 1.4;
+  hullU.uFlow.value = CONFIG.RIVER_FLOW;
 
   const hullMat = new THREE.MeshStandardMaterial({
     map: albedo, side: THREE.BackSide, roughness: 0.95, metalness: 0.02
@@ -247,7 +285,7 @@ export function buildWorld(group, renderer, quality) {
   const A = CONFIG.AXIS;
   for (const z of A.spars) {
     for (let k = 0; k < A.sparArms; k++) {
-      taken.push([(A.sparAngle + k * 360 / A.sparArms) * D2R, z, A.trussW / 2 + 1.2]);
+      taken.push([(A.sparAngle + k * 360 / A.sparArms) * D2R, z, A.baseR + 1.5]);
     }
   }
   for (const sign of [-1, 1]) {
@@ -263,12 +301,21 @@ export function buildWorld(group, renderer, quality) {
 
   /** rad — либо число, либо функция, возвращающая радиус конкретной попытки
       (холму нужен его собственный, иначе он резервирует не свой размер) */
-  /** Зона проверяется по краям объекта, а не только в центре: холм радиусом
-      14 занимает 16° и центром в парке легко накрывает соседнюю реку. */
-  const zoneClear = (t, z, r, bad) => {
-    const dt = r / R;
-    for (const tt of [t - dt, t, t + dt]) if (bad.includes(zoneAt(tt / D2R))) return false;
-    return true;
+  /** Пересекается ли угловой размах объекта с сектором запрещённого типа.
+      Выборка точек тут не работает: холм радиусом 14 занимает 16°, а русло
+      шириной 6° спокойно проскакивает между контрольными точками. Сравниваем
+      интервалы целиком, с учётом склейки круга. */
+  const spanHits = (t, r, kinds) => {
+    const half = (r / R) / D2R;
+    const c = ((t / D2R) % 360 + 360) % 360;
+    for (const kind of kinds) {
+      for (const [a, b] of CONFIG.SECT[kind]) {
+        for (const off of [-360, 0, 360]) {
+          if (c + half >= a + off && c - half <= b + off) return true;
+        }
+      }
+    }
+    return false;
   };
 
   const sample = (w, n, rad = 0, claim = false, bad = null) => {
@@ -280,26 +327,30 @@ export function buildWorld(group, renderer, quality) {
       const p = w[zoneAt(t / D2R)];
       if (p <= 0 || rnd() > p) continue;
       if (!free(t, z) || !fits(t, z, r)) continue;
-      if (bad && !zoneClear(t, z, r, bad)) continue;
+      if (bad && spanHits(t, r, bad)) continue;
       out.push([t, z, r]);
       if (claim) taken.push([t, z, r]);
     }
     return out;
   };
-  const cityWidth = CONFIG.SECT.cities.reduce((s, [a, b]) => s + (b - a), 0);
-  /** offs — точки вдоль z, которые объект занимает (эстакада длинная) */
-  const sampleCity = (n, rad, offs = [0]) => {
-    const out = [];
-    for (let guard = 0; out.length < n && guard < n * 150; guard++) {
-      let v = rnd() * cityWidth, deg = 0;
-      for (const [a, b] of CONFIG.SECT.cities) { if (v < b - a) { deg = a + v; break; } v -= b - a; }
-      const t = deg * D2R, z = -HL + 10 + rnd() * (L - 20);
-      if (!free(t, z) || !offs.every(o => fits(t, z + o, rad))) continue;
-      out.push([t, z]);
-      for (const o of offs) taken.push([t, z + o, rad]);
+  /* Дома встают по кварталам той же сетки, что рисует текстура, и тип
+     квартала берётся из общей cellInfo. Случайная выборка была
+     принципиально несовместима с регулярным планом на корпусе. */
+  const BLK = cityBlock(), C = CONFIG.CITY;
+  const blockRad = Math.min(BLK.wT, BLK.wZ) / 2;
+  const plots = [[], [], [], []];
+  for (let i = 0; i < C.cols; i++) {
+    const t = cityCenter(i, 0).t;
+    for (let j = 0; j < C.rows; j++) {
+      if (!cellUsable(i, j)) continue;                      // весь размах внутри сектора
+      const z = cityCenter(i, j).z;
+      const info = cellInfo(i, j);
+      if (info.kind !== 'built') continue;
+      if (!free(t, z) || !fits(t, z, blockRad)) continue;   // Башня, фермы, спицы
+      plots[info.type].push([t, z, info]);
+      taken.push([t, z, blockRad]);
     }
-    return out;
-  };
+  }
 
   const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), v3 = new THREE.Vector3();
   const sc = new THREE.Vector3(), qs = new THREE.Quaternion(), UP = new THREE.Vector3(0, 1, 0);
@@ -316,7 +367,6 @@ export function buildWorld(group, renderer, quality) {
 
   /* ─────────── ЗДАНИЯ: 4 силуэта × свой фасад ─────────── */
   const tints = [0x9fb0c4, 0xb6c2cf, 0x8c9db2, 0xc3ccd6, 0x7f90a5, 0xc9b7a4];
-  const shape = CONFIG.BLD;
   for (let v = 0; v < 4; v++) {
     const { map, emis } = makeFacade(mulberry32(CONFIG.SEED + 31 * (v + 1)), v);
     for (const tx of [map, emis]) { tx.wrapS = tx.wrapT = THREE.RepeatWrapping; }
@@ -326,18 +376,18 @@ export function buildWorld(group, renderer, quality) {
       roughness: 0.68, metalness: 0.1
     });
     worldMats.bld.push(mat);
-    instance(buildingGeo(v), mat, sampleCity(CONFIG.COUNT.bld[i], shape[v].w[1] * 0.55), (k, t, z, im) => {
+    instance(buildingGeo(v), mat, plots[v], (k, t, z, im, info) => {
       const s = CONFIG.BLD[v];
       /* среднее двух равномерных даёт треугольное распределение: края
          диапазона этажности выпадают редко, чаще середина */
-      const mid = (rnd() + rnd()) / 2;
-      const floors = Math.round(s.floors[0] + mid * (s.floors[1] - s.floors[0]));
-      const h = floors * CONFIG.FLOOR_H;
-      const w = s.w[0] + rnd() * (s.w[1] - s.w[0]), d = s.w[0] + rnd() * (s.w[1] - s.w[0]);
-      surfaceQuat(t, q).multiply(qs.setFromAxisAngle(UP, ((rnd() * 4) | 0) * Math.PI / 2));
+      const h = pickFloors(info.floors, s.floors) * CONFIG.FLOOR_H;
+      const w = s.w[0] + info.w * (s.w[1] - s.w[0]);
+      const d = s.w[0] + info.d * (s.w[1] - s.w[0]);
+      surfaceQuat(t, q).multiply(qs.setFromAxisAngle(UP, info.spin * Math.PI / 2));
       m4.compose(surfacePos(t, R - h / 2, z, v3), q, sc.set(w, h, d));
       im.setMatrixAt(k, m4);
-      im.setColorAt(k, new THREE.Color(pick(rnd, tints)));
+      im.setColorAt(k, natural(tints[(info.tint * tints.length) | 0],
+        0.5 + CONFIG.SATURATION * 0.5, new THREE.Color()));
       shadows.push([t, z, Math.max(w, d) * 0.75, 0]);
     });
   }
@@ -359,13 +409,14 @@ export function buildWorld(group, renderer, quality) {
     /* холм СЧИТАЕТСЯ с застройкой, но сам места не занимает: зелень должна
        вырасти прямо на его склоне, а не быть отброшена от него */
     sample(W_HILL, CONFIG.COUNT.hills[i],
-      () => HILL.r[0] + rnd() * (HILL.r[1] - HILL.r[0]), false, ['river', 'city']),
+      () => HILL.r[0] + rnd() * (HILL.r[1] - HILL.r[0]), false, ['rivers', 'cities']),
     (k, t, z, im, rad) => {
       const h = rad * (HILL.rise[0] + rnd() * (HILL.rise[1] - HILL.rise[0]));
       hills.push([t, z, rad, h]);
       m4.compose(surfacePos(t, R, z, v3), surfaceQuat(t, q), sc.set(rad, h, rad));
       im.setMatrixAt(k, m4);
-      im.setColorAt(k, new THREE.Color().setHSL(0.24 + rnd() * 0.07, 0.3 + rnd() * 0.2, 0.23 + rnd() * 0.13));
+      im.setColorAt(k, new THREE.Color().setHSL(
+        0.24 + rnd() * 0.07, (0.3 + rnd() * 0.2) * CONFIG.SATURATION, 0.23 + rnd() * 0.13));
     });
 
   /** Высота купола холма в точке — чтобы дерево стояло на склоне, а не в нём */
@@ -397,8 +448,7 @@ export function buildWorld(group, renderer, quality) {
       im.setMatrixAt(k, m4);
     });
 
-  const greens = [0x3f6b2a, 0x4c7c33, 0x355c25, 0x598a3c, 0x2c5320, 0x6a9a44, 0x7ba851];
-  const autumn = [0xc8562a, 0xd8792c, 0xb03a22, 0xe0973a, 0xa8452b];
+  const SZ = CONFIG.SEASONS[CONFIG.SEASON] || CONFIG.SEASONS.summer;
   const crownMat = new THREE.MeshStandardMaterial({ roughness: 0.9, flatShading: true });
   patchWindMaterial(crownMat);
   instance(new THREE.IcosahedronGeometry(1, 0), crownMat, treePts, (k, t, z, im) => {
@@ -406,21 +456,22 @@ export function buildWorld(group, renderer, quality) {
     surfaceQuat(t, q).multiply(qs.setFromAxisAngle(UP, rnd() * TAU));
     m4.compose(surfacePos(t, R - tu[k] - (th[k] + r * 0.55), z, v3), q, sc.set(r, r * (0.85 + rnd() * 0.45), r));
     im.setMatrixAt(k, m4);
-    im.setColorAt(k, new THREE.Color(rnd() < CONFIG.AUTUMN ? pick(rnd, autumn) : pick(rnd, greens)));
+    im.setColorAt(k, natural(rnd() < SZ.accent ? pick(rnd, SZ.accents) : pick(rnd, SZ.greens),
+      CONFIG.SATURATION, new THREE.Color()));
     shadows.push([t, z, r * 1.5, tu[k]]);
   });
 
   /* ─────────── КУСТЫ ─────────── */
   const bushMat = new THREE.MeshStandardMaterial({ roughness: 1, flatShading: true });
   patchWindMaterial(bushMat);
-  const bushCols = [0x3d6b2c, 0x4f7f38, 0x2f5424, 0xa63a2c, 0xbf5a2e, 0x6f9440, 0xd07a34];
+  const bushCols = SZ.bushes;
   instance(new THREE.IcosahedronGeometry(1, 0), bushMat, sample(W_BUSH, CONFIG.COUNT.bushes[i], 1.0),
     (k, t, z, im) => {
       const s = 0.55 + rnd() * 1.0, up = relief(t, z);
       surfaceQuat(t, q).multiply(qs.setFromAxisAngle(UP, rnd() * TAU));
       m4.compose(surfacePos(t, R - up - s * 0.45, z, v3), q, sc.set(s, s * 0.7, s));
       im.setMatrixAt(k, m4);
-      im.setColorAt(k, new THREE.Color(pick(rnd, bushCols)));
+      im.setColorAt(k, natural(pick(rnd, bushCols), CONFIG.SATURATION, new THREE.Color()));
       shadows.push([t, z, s * 1.4, up]);
     });
 

@@ -1,6 +1,14 @@
 import * as THREE from 'three';
 import { CONFIG } from './config.js';
-import { pick } from './util.js';
+import { pick, D2R, cityBlock, cityCenter, cellInfo, cellUsable } from './util.js';
+
+/** Мелкий разброс тона квартала: одинаковые прямоугольники читаются как
+    штампованные лотки */
+const tint = (hex, k) => {
+  const n = parseInt(hex.slice(1), 16);
+  const c = [n >> 16, (n >> 8) & 255, n & 255].map(v => Math.max(0, Math.min(255, Math.round(v * k))));
+  return `rgb(${c[0]},${c[1]},${c[2]})`;
+};
 
 const cv = (w, h) => {
   const c = document.createElement('canvas');
@@ -112,59 +120,153 @@ export function makeHullMaps(size, rnd) {
     a.globalAlpha = 1; a.restore();
   }
 
-  /* ── ГОРОДА ── */
-  for (const [s0, s1] of CONFIG.SECT.cities) {
-    const x0 = X(s0), x1 = X(s1);
-    a.save(); a.beginPath(); a.rect(x0, 0, x1 - x0, H); a.clip();
-    a.fillStyle = '#5a5f63'; a.fillRect(x0, 0, x1 - x0, H);
-    /* Город в маске: сплошная заливка даёт лишь зернистость покрытия.
-       Ярким B помечаются только магистрали — по нему шейдер зажигает
-       уличные фонари. Раньше светился весь сектор целиком и ночью
-       читался как подсвеченная снизу площадка. */
-    m.fillStyle = '#000040'; m.fillRect(XM(s0), 0, XM(s1) - XM(s0), mh);
+  /* ── ГОРОДА ──
+     План рисуется по ТОЙ ЖЕ сетке кварталов, по которой расставляются дома,
+     и содержимое квартала обе стороны берут из cellInfo. Домов в текстуре
+     нет: они только объёмные. Асфальт кладётся по столбцам сетки, а не по
+     всему сектору, — тогда город обрывается ровно по последнему кварталу. */
+  {
+    const B = cityBlock(), C = CONFIG.CITY;
+    const circ = 2 * Math.PI * CONFIG.R;
+    const pxT = W / circ, pxZ = H / CONFIG.L;         // юниты мира → пиксели
+    const hw = B.wT * pxT / 2, hh = B.wZ * pxZ / 2;
+    const kx = M.c.width / W, ky = mh / H;
+    const colW = B.stepT * pxT, rowH = B.stepZ * pxZ;
+    const streets = [];                               // осевые линии улиц для маски
 
-    const bs = Math.max(20, 34 * (W / 2048)), st = Math.max(8, 12 * (W / 2048));
-    for (let y = -bs; y < H + bs; y += bs + st) {
-      for (let x = x0 - bs; x < x1 + bs; x += bs + st) {
-        if (rnd() < 0.1) {
-          a.fillStyle = pick(rnd, ['#4f7038', '#5b7d3f']);
-          a.fillRect(x, y, bs, bs);
-          m.fillStyle = '#00ff00';
-          m.fillRect(x / W * M.c.width, y / H * mh, bs / W * M.c.width, bs / H * mh);
+    for (let i = 0; i < C.cols; i++) {
+      const rows = [];
+      for (let j = 0; j < C.rows; j++) if (cellUsable(i, j)) rows.push(j);
+      if (!rows.length) continue;
+
+      const cx = (cityCenter(i, 0).t / (2 * Math.PI)) * W;
+      const y0 = (cityCenter(i, rows[0]).z + CONFIG.L / 2) * pxZ - rowH / 2;
+      const y1 = (cityCenter(i, rows[rows.length - 1]).z + CONFIG.L / 2) * pxZ + rowH / 2;
+
+      /* асфальт полосой этого столбца */
+      a.fillStyle = '#4e5359';
+      a.fillRect(cx - colW / 2, y0, colW, y1 - y0);
+      m.fillStyle = '#000040';
+      m.fillRect((cx - colW / 2) * kx, y0 * ky, colW * kx, (y1 - y0) * ky);
+
+      /* продольная улица слева от столбца и поперечные между рядами */
+      streets.push(['v', cx - colW / 2, y0, y1, i % 3 === 0]);
+      if (i === C.cols - 1 || !cellUsable(i + 1, rows[0])) {
+        streets.push(['v', cx + colW / 2, y0, y1, false]);
+      }
+      for (const j of rows) {
+        const cy = (cityCenter(i, j).z + CONFIG.L / 2) * pxZ;
+        streets.push(['h', cy - rowH / 2, cx - colW / 2, cx + colW / 2, j % 3 === 0]);
+
+        const info = cellInfo(i, j);
+        const x = cx - hw, y = cy - hh, bw = hw * 2, bh = hh * 2;
+        const shade = 0.92 + info.tint * 0.16;         // мелкий разброс тона
+
+        if (info.kind === 'park') {
+          a.fillStyle = pick(rnd, ['#4f7038', '#5b7d3f', '#456630']);
+          a.fillRect(x, y, bw, bh);
+          a.globalAlpha = 0.3; a.fillStyle = '#6f9048';
+          for (let k = 0; k < 12; k++) {
+            a.beginPath();
+            a.ellipse(x + rnd() * bw, y + rnd() * bh, 2 + rnd() * 6, 2 + rnd() * 5, 0, 0, 6.2832);
+            a.fill();
+          }
+          a.globalAlpha = 0.25; a.strokeStyle = '#c4b894'; a.lineWidth = 2;
+          a.beginPath(); a.moveTo(x, y + bh * (0.3 + info.w * 0.4));
+          a.lineTo(x + bw, y + bh * (0.3 + info.d * 0.4)); a.stroke();
+          a.globalAlpha = 1;
+          m.fillStyle = '#00ff00'; m.fillRect(x * kx, y * ky, bw * kx, bh * ky);
           continue;
         }
-        a.fillStyle = pick(rnd, ['#6e7377', '#787d81', '#63686c', '#82868a', '#585d61']);
-        a.fillRect(x, y, bs, bs);
-        const n = 2 + ((rnd() * 3) | 0), cell = bs / n;
-        for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) {
-          if (rnd() < 0.4) continue;
-          a.fillStyle = pick(rnd, ['#8a8f93', '#565b60', '#767b80', '#9aa0a4', '#4e5358']);
-          a.fillRect(x + i * cell + 1, y + j * cell + 1, cell - 2, cell - 2);
+
+        /* мощение и неяркий тротуар по периметру */
+        a.fillStyle = tint('#6f757b', shade); a.fillRect(x, y, bw, bh);
+        a.fillStyle = tint('#7e848a', shade);
+        a.fillRect(x, y, bw, 2); a.fillRect(x, y + bh - 2, bw, 2);
+        a.fillRect(x, y, 2, bh); a.fillRect(x + bw - 2, y, 2, bh);
+
+        if (info.kind === 'plaza') {
+          a.globalAlpha = 0.55; a.fillStyle = '#8b9197';
+          a.beginPath(); a.arc(x + bw / 2, y + bh / 2, Math.min(bw, bh) * 0.38, 0, 6.2832); a.fill();
+          a.globalAlpha = 0.22; a.strokeStyle = '#565c62'; a.lineWidth = 1.4;
+          for (let k = 1; k <= 3; k++) {
+            a.beginPath();
+            a.arc(x + bw / 2, y + bh / 2, Math.min(bw, bh) * 0.38 * k / 3.4, 0, 6.2832);
+            a.stroke();
+          }
+          a.globalAlpha = 0.4; a.fillStyle = '#54763a';
+          for (let k = 0; k < 4; k++) {
+            const ang = (k / 4) * 6.2832 + info.w * 3;
+            a.beginPath();
+            a.arc(x + bw / 2 + Math.cos(ang) * bw * 0.34,
+                  y + bh / 2 + Math.sin(ang) * bh * 0.34, bw * 0.07, 0, 6.2832);
+            a.fill();
+          }
+          a.globalAlpha = 1;
+        } else if (info.kind === 'lot') {
+          a.fillStyle = tint('#5a6066', shade);
+          a.fillRect(x + 3, y + 3, bw - 6, bh - 6);
+          a.globalAlpha = 0.3; a.strokeStyle = '#cfd5da'; a.lineWidth = 1.1;
+          a.beginPath();
+          const vert = info.spin % 2 === 0;
+          for (let k = 8; k < (vert ? bw : bh) - 6; k += 5) {
+            if (vert) {
+              a.moveTo(x + k, y + 7); a.lineTo(x + k, y + bh * 0.44);
+              a.moveTo(x + k, y + bh * 0.56); a.lineTo(x + k, y + bh - 7);
+            } else {
+              a.moveTo(x + 7, y + k); a.lineTo(x + bw * 0.44, y + k);
+              a.moveTo(x + bw * 0.56, y + k); a.lineTo(x + bw - 7, y + k);
+            }
+          }
+          a.stroke(); a.globalAlpha = 1;
+        } else {
+          /* застроенный квартал: газон по краям, мощёная площадка под дом */
+          const g = Math.min(bw, bh) * (0.11 + info.w * 0.06);
+          a.fillStyle = tint('#547239', shade);
+          a.fillRect(x + g, y + g, bw - g * 2, bh - g * 2);
+          const px = bw * (0.2 + info.d * 0.06), py = bh * (0.2 + info.w * 0.06);
+          a.fillStyle = tint('#767c82', shade);
+          a.fillRect(x + px, y + py, bw - px * 2, bh - py * 2);
+          a.globalAlpha = 0.35; a.strokeStyle = '#bfb694'; a.lineWidth = 2;
+          a.beginPath();
+          if (info.spin % 2) { a.moveTo(x + bw / 2, y + g); a.lineTo(x + bw / 2, y + bh - g); }
+          else { a.moveTo(x + g, y + bh / 2); a.lineTo(x + bw - g, y + bh / 2); }
+          a.stroke(); a.globalAlpha = 1;
         }
       }
     }
-    /* магистрали: и в альбедо, и ярким B в маску — это линии фонарей */
-    const kx = M.c.width / W, ky = mh / H;
-    m.strokeStyle = '#0000ff'; m.lineWidth = Math.max(2, st * kx * 0.8);
-    for (let y = -bs; y < H + bs; y += (bs + st) * 3) {
-      a.globalAlpha = 0.6; a.strokeStyle = '#3c4145'; a.lineWidth = Math.max(5, st);
-      a.beginPath(); a.moveTo(x0, y); a.lineTo(x1, y); a.stroke();
-      a.globalAlpha = 0.5; a.strokeStyle = '#e8d98a'; a.lineWidth = 1.5;
-      a.beginPath(); a.moveTo(x0, y); a.lineTo(x1, y); a.stroke();
-      m.beginPath(); m.moveTo(XM(s0), y * ky); m.lineTo(XM(s1), y * ky); m.stroke();
+
+    /* Улицы поверх кварталов. В маске каждая улица — мягкий гребень из трёх
+       проходов: резкая линия давала ночью квадратные светящиеся полосы. */
+    for (const [dir, p, q0, q1, main] of streets) {
+      const wide = main ? C.street * pxT * 1.15 : C.street * pxT * 0.9;
+      a.strokeStyle = main ? '#3a3f44' : '#44494f';
+      a.lineWidth = wide;
+      a.beginPath();
+      if (dir === 'v') { a.moveTo(p, q0); a.lineTo(p, q1); }
+      else { a.moveTo(q0, p); a.lineTo(q1, p); }
+      a.stroke();
+      if (main) {
+        a.globalAlpha = 0.5; a.strokeStyle = '#e8d98a'; a.lineWidth = 1.3;
+        a.setLineDash([9, 7]);
+        a.beginPath();
+        if (dir === 'v') { a.moveTo(p, q0); a.lineTo(p, q1); }
+        else { a.moveTo(q0, p); a.lineTo(q1, p); }
+        a.stroke();
+        a.setLineDash([]); a.globalAlpha = 1;
+      }
+      /* мягкий след фонарей в канал B */
+      m.strokeStyle = '#0000ff';
+      for (const [mul, alpha] of [[2.1, 0.22], [1.4, 0.45], [0.75, 1]]) {
+        m.globalAlpha = alpha * (main ? 1 : 0.75);
+        m.lineWidth = Math.max(1.5, wide * kx * mul);
+        m.beginPath();
+        if (dir === 'v') { m.moveTo(p * kx, q0 * ky); m.lineTo(p * kx, q1 * ky); }
+        else { m.moveTo(q0 * kx, p * ky); m.lineTo(q1 * kx, p * ky); }
+        m.stroke();
+      }
+      m.globalAlpha = 1;
     }
-    for (let x = x0; x < x1; x += (bs + st) * 3) {
-      a.globalAlpha = 0.6; a.strokeStyle = '#3c4145'; a.lineWidth = Math.max(5, st);
-      a.beginPath(); a.moveTo(x, 0); a.lineTo(x, H); a.stroke();
-      m.beginPath(); m.moveTo(x * kx, 0); m.lineTo(x * kx, mh); m.stroke();
-    }
-    a.globalAlpha = 1;
-    for (let i = 0; i < 6; i++) {
-      a.fillStyle = '#9aa0a4'; a.globalAlpha = 0.7;
-      a.beginPath(); a.arc(x0 + rnd() * (x1 - x0), rnd() * H, 20 + rnd() * 36, 0, 6.2832); a.fill();
-      a.globalAlpha = 1;
-    }
-    a.restore();
   }
 
   /* ── РЕКИ: альбедо + канал воды в маске ── */
@@ -180,10 +282,16 @@ export function makeHullMaps(size, rnd) {
     };
     stroke(a, half * 2 + 22, '#a8a173', 1, 1);
     stroke(a, half * 2 + 11, '#7f9a55', 1, 1);
-    stroke(a, half * 2 - 2, '#2f5f8a', 1, 1);
-    a.globalAlpha = 0.5; stroke(a, half * 0.8, '#4d86b5', 1, 1); a.globalAlpha = 1;
-    /* маска воды: чуть уже русла, чтобы блик не лез на берег */
-    stroke(m, (half * 2 - 6) / W * M.c.width, '#ff0000', M.c.width / W, mh / H);
+    stroke(a, half * 2 - 2, '#3a5c47', 1, 1);      // дно у берега
+    stroke(a, half * 1.5, '#2c4c5e', 1, 1);        // дно поглубже
+    a.globalAlpha = 0.35; stroke(a, half * 0.7, '#20384a', 1, 1); a.globalAlpha = 1;
+    /* Маска воды тремя проходами: канал R становится не признаком «вода да
+       или нет», а глубиной — 0 у берега, 1 на стрежне. Шейдер по ней и
+       затемняет цвет, и гасит рябь на отмели. */
+    const kw = M.c.width / W, kh = mh / H;
+    stroke(m, (half * 2 - 4) * kw, '#330000', kw, kh);
+    stroke(m, (half * 1.45) * kw, '#990000', kw, kh);
+    stroke(m, (half * 0.75) * kw, '#ff0000', kw, kh);
   }
 
   /* ── техническая кромка у торцов ── */
@@ -393,8 +501,8 @@ export function makeSoftSprite(hardness = 0) {
 export function makeBlobTexture() {
   const S = 128, { c, g } = cv(S, S);
   const gr = g.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
-  gr.addColorStop(0, 'rgba(0,0,0,.72)');
-  gr.addColorStop(0.45, 'rgba(0,0,0,.42)');
+  gr.addColorStop(0, 'rgba(0,0,0,.88)');
+  gr.addColorStop(0.42, 'rgba(0,0,0,.55)');
   gr.addColorStop(1, 'rgba(0,0,0,0)');
   g.fillStyle = gr; g.fillRect(0, 0, S, S);
   return tex(c);

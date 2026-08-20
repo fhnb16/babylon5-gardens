@@ -123,9 +123,32 @@ function buildAxis(group, panel) {
   add(arms);
 }
 
-/** Решётчатая ферма вдоль локальной +Y: 4 пояса + раскосы по отсекам */
+/** Решётчатая ферма вдоль локальной +Y: 4 пояса + раскосы по отсекам.
+    У корпуса — массивное основание: три опоры держат всю станцию, и голая
+    решётка, воткнутая в грунт, выглядела бы несерьёзно. */
 function trussGeo(len, w, bay) {
-  const g = [], h = w / 2, chord = 0.28;
+  const g = [], h = w / 2, chord = 0.34;
+  const B = CONFIG.AXIS.baseR;
+
+  /* стилобат, утопленный в корпус, и сужающийся воротник над ним */
+  const disc = (r0, r1, hh, y, seg = 20) => {
+    const c = new THREE.CylinderGeometry(r0, r1, hh, seg, 1, false);
+    c.translate(0, y + hh / 2, 0);
+    return c;
+  };
+  g.push(disc(B, B * 1.06, 1.4, -0.7));          // плита в грунте
+  g.push(disc(B * 0.78, B * 0.94, 1.1, 0.7));    // ступень
+  g.push(disc(w * 1.5, B * 0.74, 4.2, 1.8));     // воротник к ферме
+
+  /* контрфорсы: от края плиты наклонно к воротнику */
+  for (let k = 0; k < 6; k++) {
+    const a = (k / 6) * TAU + 0.26;
+    const fin = new THREE.BoxGeometry(0.7, 5.6, 1.5);
+    fin.rotateZ(0.44);
+    fin.translate(B * 0.62, 2.6, 0);
+    fin.rotateY(a);
+    g.push(fin);
+  }
   for (const [sx, sz] of [[-h, -h], [h, -h], [-h, h], [h, h]]) {
     g.push(rod(chord, len, chord, sx, len / 2, sz));
   }

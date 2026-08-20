@@ -119,6 +119,86 @@ export function panelUV(geo, tile, sy = 1) {
   return geo;
 }
 
+/** Кватернион камеры, смотрящей из eye на target.
+    Object3D.lookAt для НЕ-камеры разворачивает к цели +Z, а камера смотрит
+    вдоль −Z: подставив обычный Object3D, легко получить взгляд ровно назад.
+    Matrix4.lookAt строит именно камерный базис, поэтому берём его напрямую. */
+const _aimM = new THREE.Matrix4();
+export function aimAt(eye, target, up, out) {
+  _aimM.lookAt(eye, target, up);
+  return out.setFromRotationMatrix(_aimM);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   СЕТКА КВАРТАЛОВ — единственный источник правды о городе
+   ═══════════════════════════════════════════════════════════════════════════ */
+/** Габариты квартала в юнитах мира */
+export function cityBlock() {
+  const C = CONFIG.CITY;
+  return {
+    stepT: TAU * CONFIG.R / C.cols,          // шаг по дуге
+    stepZ: CONFIG.L / C.rows,                // шаг вдоль оси
+    wT: TAU * CONFIG.R / C.cols - C.street,  // ширина квартала по дуге
+    wZ: CONFIG.L / C.rows - C.street
+  };
+}
+
+/** Центр квартала (i, j): угол в радианах и координата z */
+export function cityCenter(i, j) {
+  const C = CONFIG.CITY;
+  return {
+    t: ((i + 0.5) / C.cols) * TAU,
+    z: -CONFIG.L / 2 + (j + 0.5) * (CONFIG.L / C.rows)
+  };
+}
+
+/** Годится ли квартал под застройку: весь его угловой размах должен лежать
+    внутри городского сектора, а не только центр. Иначе крайние кварталы
+    вылезают на соседний биом — и планом, и домами. */
+export function cellUsable(i, j) {
+  const B = cityBlock();
+  const half = (B.wT / CONFIG.R) / D2R / 2;
+  const c = cityCenter(i, 0).t / D2R;
+  if (!CONFIG.SECT.cities.some(([a, b]) => c - half >= a && c + half <= b)) return false;
+  return Math.abs(cityCenter(i, j).z) <= CONFIG.L / 2 - B.stepZ;
+}
+
+/** Что в этом квартале. Детерминированно по индексам и зерну, поэтому
+    текстура и геометрия получают ОДИН И ТОТ ЖЕ ответ. */
+export function cellInfo(i, j) {
+  const rnd = mulberry32((CONFIG.SEED ^ Math.imul(i, 374761393) ^ Math.imul(j, 668265263)) >>> 0);
+  const roll = rnd();
+  const kind = roll < 0.15 ? 'park' : roll < 0.23 ? 'plaza' : roll < 0.31 ? 'lot' : 'built';
+  return {
+    kind,
+    type: (rnd() * 4) | 0,
+    w: rnd(), d: rnd(),
+    spin: (rnd() * 4) | 0,
+    floors: rnd(),          // форму распределения задаёт CONFIG.FLOOR_W
+    tint: rnd()
+  };
+}
+
+/** Этажность по весам из CONFIG.FLOOR_W, ограниченная диапазоном типа.
+    u — равномерное число из cellInfo, форму задаёт таблица весов. */
+export function pickFloors(u, [lo, hi]) {
+  const W = CONFIG.FLOOR_W;
+  let sum = 0;
+  for (let f = lo; f <= hi; f++) sum += W[f - 1];
+  let acc = u * sum;
+  for (let f = lo; f <= hi; f++) { acc -= W[f - 1]; if (acc < 0) return f; }
+  return hi;
+}
+
+/** Приглушение палитры: тянем насыщенность к серому и слегка сводим
+    светлоту к середине. Природные кроны не бывают чистыми цветами
+    красителя, а низкополигональная модель без текстур это подчёркивает. */
+const _hsl = { h: 0, s: 0, l: 0 };
+export function natural(hex, k, out) {
+  out.setHex(hex).getHSL(_hsl);
+  return out.setHSL(_hsl.h, _hsl.s * k, lerp(0.42, _hsl.l, 0.5 + k * 0.5));
+}
+
 /** Рекурсивная очистка поддерева: геометрии, материалы, их текстуры */
 export function deepDispose(obj) {
   obj.traverse?.(n => {

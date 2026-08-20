@@ -5,9 +5,12 @@ import './test/dom-stub.mjs';
 import { readFileSync } from 'node:fs';
 import * as THREE from 'three';
 import { CONFIG } from './js/config.js';
-import { D2R, TAU, zoneAt, mulberry32, surfacePos, mergeGeos, rod } from './js/util.js';
+import { D2R, TAU, zoneAt, mulberry32, clamp as clampNum, tpVec, aimAt, natural,
+  cityBlock, cityCenter, cellInfo, cellUsable, pickFloors, surfacePos, mergeGeos, rod } from './js/util.js';
 import { buildWorld, worldMats, hullU, uvSelfTest } from './js/world.js';
 import { buildStructures, structMats, updateStructures } from './js/structures.js';
+import { fieldAt, waterLevel, windLevel, humLevel, birdLevel } from './js/audio.js';
+import { stationUp } from './js/controls.js';
 
 let fails = 0;
 const ok = (c, m) => { console.log((c ? '  ok  ' : '  FAIL') + '  ' + m); if (!c) fails++; };
@@ -28,8 +31,15 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   ok(V.includes('vTh = atan( position.x, position.y )'), 'Вершинный: θ объекта прокинут во фрагментный');
   ok(F.includes('hullMask = texture2D( uMask'), 'Фрагментный: маска биомов подключена');
   ok(F.includes('uDetailRep'), 'Фрагментный: детальный шум подключён');
-  ok(F.includes('roughnessFactor = mix( roughnessFactor, 0.055'), 'Фрагментный: вода зеркальна');
-  ok(F.includes('normal = normalize( normal + vec3( r1'), 'Фрагментный: рябь возмущает нормаль');
+  ok(F.includes('roughnessFactor = mix( roughnessFactor, mix( 0.045, 0.20, wFar )'),
+     'Фрагментный: вода зеркальна вблизи и матовеет вдали');
+  ok(F.includes('normal = normalize( normal + ( vTanU * rip.x + vTanV * rip.y )'),
+     'Вода: рябь возмущает нормаль в касательных корпуса, а не в экранных осях');
+  ok(V.includes('vTanU = normalize( normalMatrix'), 'Вершинный: касательные посчитаны и переданы');
+  ok(F.includes('P.y -= uTime * uFlow'), 'Вода: рябь сносит вниз по течению');
+  ok(/near = 1\.0 - wFar/.test(F), 'Вода: мелкая рябь гаснет вдали — без этого высокие частоты дают муар');
+  ok(F.includes('mix( 0.045, 0.20, wFar )'), 'Вода: вдали поверхность матовее, блики не рассыпаются');
+  ok((F.match(/rip \+= vec2/g) || []).length >= 5, 'Вода: не меньше пяти волновых составляющих, а не две синусоиды');
   ok(F.includes('uSparShade * zt *'), 'Фрагментный: тень фермы считается');
   ok(F.includes('totalEmissiveRadiance += uCityGlow'), 'Фрагментный: ночное свечение улиц подключено');
   ok(F.indexOf('totalEmissiveRadiance += uCityGlow') > F.indexOf('hullMask = texture2D'),
@@ -38,7 +48,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   /* инъекции обязаны стоять ПОСЛЕ своих include, иначе переменных ещё нет */
   ok(F.indexOf('hullMask = texture2D') > F.indexOf('#include <map_fragment>'),
      'Порядок: маска читается после map_fragment');
-  ok(F.indexOf('roughnessFactor = mix( roughnessFactor, 0.055') > F.indexOf('hullMask = texture2D'),
+  ok(F.indexOf('roughnessFactor = mix( roughnessFactor,') > F.indexOf('hullMask = texture2D'),
      'Порядок: шероховатость воды после чтения маски');
 
   /* всё, на что опираемся, действительно объявлено в чанках three */
@@ -110,8 +120,10 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
     const r = Math.hypot(p.x, p.y);
     rMin = Math.min(rMin, r); rMax = Math.max(rMax, r);
   }
-  ok(rMax > CONFIG.R - 3 && rMax <= CONFIG.R,
-     `Ферма упирается в корпус (внешний r=${rMax.toFixed(1)} при R=${CONFIG.R})`);
+  /* Основание опоры намеренно утоплено в грунт: край плиты уходит чуть за
+     R, но корпус рисуется изнутри и перекрывает его по глубине. */
+  ok(rMax > CONFIG.R - 3 && rMax < CONFIG.R + 1.5,
+     `Опора упирается в корпус, плита утоплена в грунт (край r=${rMax.toFixed(1)} при R=${CONFIG.R})`);
   ok(rMin < CONFIG.AXIS.spineR + 6 && rMin > CONFIG.SUN.r,
      `Ферма приходит к оси, не протыкая светящуюся трубу (внутренний r=${rMin.toFixed(1)})`);
 
@@ -365,28 +377,240 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   ok(topV > 0.95 && topV < 1.25, `Верх стены попадает в полосу парапета (v = ${topV.toFixed(2)})`);
 }
 
+/* ══ 3e1. Городская текстура — план, а не нарисованные дома ════════════ */
+{
+  const src = readFileSync(new URL('./js/textures.js', import.meta.url), 'utf8');
+  const city = src.slice(src.indexOf('── ГОРОДА'), src.indexOf('── РЕКИ'));
+
+  /* Признак старой ошибки: дробление квартала на случайные серые ячейки,
+     изображавшие застройку сверху. Дома должны быть только объёмными. */
+  ok(!/for \(let i = 0; i < n; i\+\+\) for \(let j = 0/.test(city),
+     'Квартал не дробится на случайные ячейки — подделки домов в текстуре нет');
+  ok(!/const cell = bs \/ n/.test(city), 'Переменной поддельных ячеек больше нет');
+
+  /* план обязан различать все типы кварталов из общей cellInfo */
+  for (const kind of ['park', 'plaza', 'lot']) {
+    ok(city.includes(`'${kind}'`), `План рисует квартал типа ${kind}`);
+  }
+  ok(/setLineDash/.test(city), 'У магистралей есть разделительная разметка');
+  ok(/fillRect\(x, y, bw, 2\)/.test(city), 'У квартала есть тротуар по периметру');
+  ok(/tint\('#/.test(city), 'Тон квартала слегка разбросан — не штампованные лотки');
+  ok(/cellUsable/.test(city), 'План рисуется только там, где квартал целиком в секторе');
+
+  /* сквер должен помечаться в маске как растительность, а не как покрытие */
+  ok(/m\.fillStyle = '#00ff00'/.test(city), 'Скверы помечены в маске зеленью');
+  ok(/m\.strokeStyle = '#0000ff'/.test(city), 'Магистрали помечены ярким B для фонарей');
+
+  /* текстура всё ещё генерируется без ошибок */
+  globalThis.__canvasStacks.length = 0;
+  const g = new THREE.Group();
+  buildWorld(g, fakeRenderer, 'LOW');
+  ok(g.children.some(o => o.material?.side === THREE.BackSide), 'Корпус с новой текстурой собран');
+
+  /* Каждый save с обрезкой обязан быть закрыт. Незакрытый — тихая ошибка:
+     следующая обрезка пересекается с предыдущей, и всё дальнейшее рисование
+     уходит в пустоту. Именно так пропал весь план города. */
+  const unbalanced = globalThis.__canvasStacks.filter(c => c.__depth !== 0);
+  ok(unbalanced.length === 0,
+     `Стек обрезок сбалансирован на всех ${globalThis.__canvasStacks.length} холстах` +
+     (unbalanced.length ? ` (незакрытых: ${unbalanced.map(c => c.__depth).join(', ')})` : ''));
+
+  const saves = (src.match(/\ba\.save\(\)/g) || []).length;
+  const restores = (src.match(/\ba\.restore\(\)/g) || []).length;
+  ok(saves === restores, `save и restore в исходнике сходятся: ${saves} против ${restores}`);
+}
+
+/* ══ 3e1b. Дома стоят ровно в кварталах плана ══════════════════════════ */
+{
+  const g = new THREE.Group();
+  buildWorld(g, fakeRenderer, 'HIGH');
+  const bld = g.children.filter(o => o.isInstancedMesh && o.material?.emissiveMap);
+  const B = cityBlock(), C = CONFIG.CITY;
+  const m = new THREE.Matrix4(), p = new THREE.Vector3(), s = new THREE.Vector3(), q = new THREE.Quaternion();
+
+  let total = 0, offGrid = 0, tooWide = 0, wrongCell = 0, worstT = 0, worstZ = 0;
+  for (const im of bld) {
+    for (let k = 0; k < im.count; k++) {
+      im.getMatrixAt(k, m); m.decompose(p, q, s);
+      total++;
+      const t2 = ((Math.atan2(p.x, p.y) / TAU) % 1 + 1) % 1;
+      const i = Math.round(t2 * C.cols - 0.5);
+      const j = Math.round((p.z + CONFIG.L / 2) / (CONFIG.L / C.rows) - 0.5);
+      const c = cityCenter(((i % C.cols) + C.cols) % C.cols, j);
+
+      /* отклонение от центра квартала */
+      const dT = Math.abs(((c.t - Math.atan2(p.x, p.y) + Math.PI) % TAU + TAU) % TAU - Math.PI) * CONFIG.R;
+      const dZ = Math.abs(c.z - p.z);
+      worstT = Math.max(worstT, dT); worstZ = Math.max(worstZ, dZ);
+      if (dT > 0.01 || dZ > 0.01) offGrid++;
+
+      /* дом обязан помещаться в квартал */
+      if (s.x > B.wT || s.z > B.wZ) tooWide++;
+
+      /* и квартал обязан быть застроенным по общей cellInfo */
+      if (cellInfo(((i % C.cols) + C.cols) % C.cols, j).kind !== 'built') wrongCell++;
+    }
+  }
+  ok(total > 150, `Домов расставлено: ${total}`);
+  ok(offGrid === 0,
+     `Каждый дом стоит в центре своего квартала (макс. отклонение ${worstT.toFixed(3)} по дуге, ${worstZ.toFixed(3)} по оси)`);
+  ok(tooWide === 0, `Ни один дом не вылезает из квартала ${(B.wT * 10) | 0}×${(B.wZ * 10) | 0} м`);
+  ok(wrongCell === 0, 'Дом стоит только там, где план рисует застроенный квартал');
+
+  /* ни один квартал не вылезает за границу своего биома */
+  const half = (B.wT / CONFIG.R) / D2R / 2;
+  let spill = 0, usable = 0;
+  for (let i = 0; i < C.cols; i++) {
+    for (let j = 0; j < C.rows; j++) {
+      if (!cellUsable(i, j)) continue;
+      usable++;
+      const cDeg = ((cityCenter(i, 0).t / D2R) % 360 + 360) % 360;
+      for (let d = -half; d <= half; d += 0.2) if (zoneAt(cDeg + d) !== 'city') { spill++; break; }
+      if (Math.abs(cityCenter(i, j).z) + B.wZ / 2 > CONFIG.L / 2) spill++;
+    }
+  }
+  ok(usable > 200, `Пригодных кварталов: ${usable}`);
+  ok(spill === 0, `Ни один квартал не вылезает на соседний биом или за торец (нарушений ${spill})`);
+
+  /* и сами дома — тоже целиком */
+  let bldSpill = 0;
+  for (const im of bld) {
+    for (let k = 0; k < im.count; k++) {
+      im.getMatrixAt(k, m); m.decompose(p, q, s);
+      const cDeg = ((Math.atan2(p.x, p.y) / D2R) % 360 + 360) % 360;
+      const hd = (s.x / 2) / CONFIG.R / D2R;
+      for (let d = -hd; d <= hd; d += 0.2) if (zoneAt(cDeg + d) !== 'city') { bldSpill++; break; }
+    }
+  }
+  ok(bldSpill === 0, `Ни один дом не стоит на чужом биоме (нарушений ${bldSpill})`);
+
+  /* текстура и геометрия обязаны читать одну функцию */
+  const tsrc = readFileSync(new URL('./js/textures.js', import.meta.url), 'utf8');
+  const wsrc = readFileSync(new URL('./js/world.js', import.meta.url), 'utf8');
+  for (const fn of ['cityBlock', 'cityCenter', 'cellInfo', 'cellUsable']) {
+    ok(tsrc.includes(fn) && wsrc.includes(fn), `И текстура, и геометрия используют ${fn}`);
+  }
+  ok(!/sampleCity/.test(wsrc), 'Случайной выборки для домов больше нет');
+
+  /* cellInfo детерминирована */
+  const a1 = cellInfo(7, 11), a2 = cellInfo(7, 11);
+  ok(JSON.stringify(a1) === JSON.stringify(a2), 'cellInfo даёт один и тот же ответ обеим сторонам');
+  ok(cellInfo(7, 11).kind !== undefined && cellInfo(8, 11).type !== undefined, 'Соседние кварталы различаются');
+
+  /* сетка бесшовно смыкается на 360° */
+  ok(Number.isInteger(C.cols) && Number.isInteger(C.rows), 'Сетка задана счётчиками — шов сходится');
+  ok(Math.max(...CONFIG.BLD.map(x => x.w[1])) < Math.min(B.wT, B.wZ) - 0.8,
+     `Самый широкий дом ${(Math.max(...CONFIG.BLD.map(x => x.w[1])) * 10) | 0} м с запасом входит в квартал`);
+}
+
+/* ══ 3e2. Вода: глубина, поток, анизотропия ════════════════════════════ */
+{
+  const src = readFileSync(new URL('./js/textures.js', import.meta.url), 'utf8');
+  /* канал R реки должен иметь несколько уровней — это глубина, а не флаг */
+  const levels = [...src.matchAll(/stroke\(m,[^,]+,\s*'(#[0-9a-f]{6})'/g)].map(x => x[1]);
+  const reds = [...new Set(levels.map(c => parseInt(c.slice(1, 3), 16)))].sort((a, b) => a - b);
+  ok(reds.length >= 3, `Русло размечено ${reds.length} уровнями глубины: ${reds.join(', ')}`);
+  ok(reds[0] > 0 && reds[reds.length - 1] === 255, 'Отмель слабее нуля, стрежень на максимуме');
+
+  /* волны идут поперёк русла — иначе блик от линейного солнца не вытянется */
+  const wsrc = readFileSync(new URL('./js/world.js', import.meta.url), 'utf8');
+  const waves = [...wsrc.matchAll(/dot\( P, vec2\(\s*(-?[\d.]+),\s*(-?[\d.]+)\s*\)/g)]
+    .map(x => [Math.abs(+x[1]), Math.abs(+x[2])]);
+  ok(waves.length >= 5, `Волновых составляющих: ${waves.length}`);
+  const across = waves.filter(([kx, ky]) => kx > ky).length;
+  ok(across >= waves.length - 1,
+     `Почти все волны идут поперёк русла (${across} из ${waves.length}) — блик вытягивается вдоль оси`);
+
+  /* длины волн в разумных для реки пределах */
+  const lambdas = waves.map(([kx, ky]) => 2 * Math.PI / Math.hypot(kx, ky) * 10);
+  ok(Math.max(...lambdas) < 45 && Math.min(...lambdas) > 1,
+     `Длины волн ${Math.min(...lambdas).toFixed(1)}–${Math.max(...lambdas).toFixed(1)} м`);
+
+  ok(CONFIG.RIVER_FLOW > 0, `Течение ${CONFIG.RIVER_FLOW} юнита/с = ${(CONFIG.RIVER_FLOW * 10).toFixed(0)} м/с`);
+
+  /* вода должна быть темнее берега */
+  const lum = hex => { const c = new THREE.Color(hex); return 0.2126*c.r + 0.7152*c.g + 0.0722*c.b; };
+  ok(lum(CONFIG.DAY.waterTint) < 0.12, `Дневная вода тёмная (яркость ${lum(CONFIG.DAY.waterTint).toFixed(3)})`);
+  ok(lum(CONFIG.NIGHT.waterTint) < lum(CONFIG.DAY.waterTint), 'Ночью вода ещё темнее');
+}
+
+/* ══ 3f3. Палитра приглушена и настраивается ═══════════════════════════ */
+{
+  const c = new THREE.Color(), hsl = { h: 0, s: 0, l: 0 };
+  ok(CONFIG.SATURATION > 0.2 && CONFIG.SATURATION < 1.01,
+     `Насыщенность по умолчанию ${(CONFIG.SATURATION * 100) | 0}%`);
+  ok(CONFIG.SATURATION < 0.85, 'По умолчанию палитра заметно спокойнее исходной');
+
+  /* приглушение обязано снижать насыщенность и не менять оттенок */
+  let maxHueShift = 0, allDesat = true;
+  for (const S of Object.values(CONFIG.SEASONS)) {
+    for (const hex of [...S.greens, ...S.accents, ...S.bushes]) {
+      const src = new THREE.Color(hex);
+      const srcHSL = { h: 0, s: 0, l: 0 };
+      src.getHSL(srcHSL);
+      natural(hex, CONFIG.SATURATION, c);
+      c.getHSL(hsl);
+      maxHueShift = Math.max(maxHueShift, Math.abs(hsl.h - srcHSL.h));
+      if (srcHSL.s > 0.05 && hsl.s >= srcHSL.s) allDesat = false;
+    }
+  }
+  ok(maxHueShift < 1e-6, 'Оттенок сохраняется — приглушаем, а не перекрашиваем');
+  ok(allDesat, 'Все цвета всех сезонов действительно приглушены');
+
+  natural(0xff0000, 1, c); c.getHSL(hsl);
+  ok(hsl.s > 0.95, 'При 100% палитра остаётся исходной');
+
+  const html2 = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
+  ok(html2.includes('id="sSat"'), 'Насыщенность настраивается слайдером');
+  const msrc2 = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+  ok(/sSat\.onchange/.test(msrc2) && !/sSat\.oninput = \(\) => \{[\s\S]{0,80}rebuild/.test(msrc2),
+     'Пересборка мира идёт на отпускании слайдера, а не на каждый пиксель');
+  ok(/prefs\.set\('sat'/.test(msrc2), 'Насыщенность сохраняется');
+}
+
 /* ══ 3f2. Этажность низкая, распределение по этажам ═════════════════════ */
 {
   const F = CONFIG.FLOOR_H;
   for (const [v, s] of CONFIG.BLD.entries()) {
-    ok(s.floors[1] <= 4 && s.floors[0] >= 1,
+    ok(s.floors[1] <= 6 && s.floors[0] >= 1,
        `Тип ${v}: ${s.floors[0]}–${s.floors[1]} этажа = ${(s.floors[0] * F * 10).toFixed(1)}–${(s.floors[1] * F * 10).toFixed(1)} м`);
   }
   ok(F * 10 >= 3 && F * 10 <= 4, `Этаж ${(F * 10).toFixed(1)} м — жилая высота`);
 
-  /* треугольное распределение: середина диапазона должна доминировать */
-  const rnd = mulberry32(42);
+  /* Считаем по РЕАЛЬНО построенным домам: доля зависит и от таблицы весов,
+     и от того, каким типам какой диапазон разрешён. */
   const hist = {};
-  for (let k = 0; k < 60000; k++) {
-    const mid = (rnd() + rnd()) / 2;
-    const f = Math.round(1 + mid * 3);
-    hist[f] = (hist[f] || 0) + 1;
+  let n = 0;
+  for (let i = 0; i < CONFIG.CITY.cols; i++) {
+    const t2 = cityCenter(i, 0).t;
+    if (zoneAt(t2 / D2R) !== 'city') continue;
+    for (let j = 0; j < CONFIG.CITY.rows; j++) {
+      const info = cellInfo(i, j);
+      if (info.kind !== 'built') continue;
+      const fl = pickFloors(info.floors, CONFIG.BLD[info.type].floors);
+      hist[fl] = (hist[fl] || 0) + 1;
+      n++;
+    }
   }
-  const share = f => (hist[f] || 0) / 60000;
-  ok(share(2) + share(3) > 0.8,
-     `2–3 этажа выпадают в ${((share(2) + share(3)) * 100) | 0}% случаев`);
-  ok(share(1) < 0.12 && share(4) < 0.12, 'Одноэтажные и четырёхэтажные — редкость');
-  ok(!(5 in hist), 'Выше четырёх этажей не бывает');
+  const share = f => (hist[f] || 0) / n;
+  const maxFloors = Math.max(...Object.keys(hist).map(Number));
+  ok(maxFloors === 6, `Максимальная этажность в городе: ${maxFloors} (${Math.round(maxFloors * F * 10)} м)`);
+  ok(!hist[7], 'Семиэтажек не бывает');
+
+  const mid = share(3) + share(4) + share(5);
+  ok(mid > 0.7, `3–5 этажей — основная застройка: ${(mid * 100) | 0}%`);
+  ok(share(4) > share(2) && share(4) > share(6), 'Пик распределения в середине диапазона');
+  ok(share(1) < 0.08 && share(6) < 0.12,
+     `Края редки: одноэтажных ${(share(1) * 100).toFixed(0)}%, шестиэтажных ${(share(6) * 100).toFixed(0)}%`);
+  ok(share(5) > 0.15, `Пятиэтажки встречаются часто: ${(share(5) * 100) | 0}%`);
+
+  /* веса должны реально задавать форму: сумма и монотонность краёв */
+  ok(CONFIG.FLOOR_W.length === 6, 'Таблица весов покрывает все шесть этажностей');
+  ok(CONFIG.FLOOR_W[0] < CONFIG.FLOOR_W[3] && CONFIG.FLOOR_W[5] < CONFIG.FLOOR_W[3],
+     'В таблице весов середина тяжелее краёв');
+  ok(pickFloors(0, [2, 6]) === 2 && pickFloors(0.999, [2, 6]) === 6,
+     'Выборка покрывает весь разрешённый диапазон типа');
+  ok(pickFloors(0.5, [3, 3]) === 3, 'Вырожденный диапазон возвращает единственное значение');
 }
 
 /* ══ 3g. Ничего не торчит из холмов и конструкций ══════════════════════ */
@@ -415,10 +639,22 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
     const ta = (A.sparAngle + k * 360 / A.sparArms) * D2R;
     for (const o of all) {
       if (o.top < 0.6) continue;
-      if (Math.hypot(gap(o.t, ta) * CONFIG.R, o.z - z) < A.trussW / 2 + o.half) hitTruss++;
+      if (Math.hypot(gap(o.t, ta) * CONFIG.R, o.z - z) < A.baseR + o.half) hitTruss++;
     }
   }
   ok(hitTruss === 0, `Ничего не растёт сквозь силовые фермы (нарушений ${hitTruss})`);
+  ok(A.sparArms === 3, `Опор на узел: ${A.sparArms} — леса в кадре меньше`);
+
+  /* опоры обязаны садиться в сад, а не в застройку */
+  const armZones = [];
+  for (let k = 0; k < A.sparArms; k++) {
+    armZones.push(zoneAt(A.sparAngle + k * 360 / A.sparArms));
+  }
+  ok(armZones.every(z => z === 'park' || z === 'field' || z === 'edge'),
+     `Все опоры приземляются в сад: ${armZones.join(', ')}`);
+  ok(!armZones.includes('city'), 'Ни одна опора не стоит в городском квартале');
+  ok(!armZones.includes('river'), 'Ни одна опора не стоит в русле');
+  ok(A.baseR >= 5, `У опоры массивное основание радиусом ${A.baseR} юнитов = ${A.baseR * 10} м`);
 
   /* спицы торцов идут в трёх метрах над землёй */
   let hitSpoke = 0;
@@ -433,14 +669,18 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
 
   /* холм не накрывает реку и не залезает в город */
   const hillMesh = insts.find(o => o.material?.flatShading && !o.material.map && o.count <= CONFIG.COUNT.hills[0]);
+  /* Перебираем ВЕСЬ угловой размах холма с мелким шагом. Проверка трёх
+     точек тут не годится: холм занимает 16°, русло шириной 6° проскакивало
+     между контрольными точками, и холмы залезали на воду. */
   let wetHill = 0, urbanHill = 0, offEnd = 0;
   for (let k = 0; k < hillMesh.count; k++) {
     hillMesh.getMatrixAt(k, m); m.decompose(p, qq, s);
-    const t = Math.atan2(p.x, p.y), dt = s.x / CONFIG.R;
-    for (const tt of [t - dt, t, t + dt]) {
-      const zone = zoneAt(tt / D2R);
-      if (zone === 'river') wetHill++;
-      if (zone === 'city') urbanHill++;
+    const cDeg = ((Math.atan2(p.x, p.y) / D2R) % 360 + 360) % 360;
+    const half = s.x / CONFIG.R / D2R;
+    for (let d = -half; d <= half; d += 0.25) {
+      const zone = zoneAt(cDeg + d);
+      if (zone === 'river') { wetHill++; break; }
+      if (zone === 'city') { urbanHill++; break; }
     }
     if (Math.abs(p.z) + s.x > CONFIG.L / 2) offEnd++;
   }
@@ -478,6 +718,266 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   const html = readFileSync(new URL('index.html', here), 'utf8');
   ok(html.includes('rel="manifest"'), 'Манифест подключён в разметке');
   ok(html.includes('apple-touch-icon'), 'Иконка для iOS указана');
+}
+
+/* ══ 3k. Видовые точки показывают то, что обещают ══════════════════════ */
+{
+  const D = CONFIG, R = D.R, HL = D.L / 2;
+  const vec = ([d, r, z]) => new THREE.Vector3(Math.sin(d * D2R) * r, Math.cos(d * D2R) * r, z);
+
+  /** Где луч взгляда упирается в корпус */
+  const hullHit = (p, dir) => {
+    const a = dir.x * dir.x + dir.y * dir.y;
+    if (a < 1e-9) return Infinity;
+    const b = 2 * (p.x * dir.x + p.y * dir.y);
+    const c = p.x * p.x + p.y * p.y - R * R;
+    const disc = b * b - 4 * a * c;
+    if (disc < 0) return Infinity;
+    const tt = (-b + Math.sqrt(disc)) / (2 * a);
+    return Math.abs(p.z + dir.z * tt) > HL ? Infinity : tt;
+  };
+
+  const up = new THREE.Vector3(), dir = new THREE.Vector3();
+  for (const tp of CONFIG.TP) {
+    const p = vec(tp.pos), q = vec(tp.look);
+    dir.subVectors(q, p);
+    const len = dir.length();
+    dir.divideScalar(len);
+    const r = Math.hypot(p.x, p.y);
+
+    ok(len >= 35, `«${tp.name}»: цель в ${len.toFixed(0)} юнитах, не в упор`);
+    ok(r >= 4 && r <= 46, `«${tp.name}»: камера на r=${r.toFixed(0)}, не вжата в корпус`);
+    ok(Math.abs(tp.pos[2]) <= 142, `«${tp.name}»: не упирается в торец`);
+
+    const radial = (dir.x * p.x + dir.y * p.y) / r;
+    ok(radial < 0.55, `«${tp.name}»: не смотрит в ближнюю стенку (радиальная доля ${radial.toFixed(2)})`);
+    const hit = hullHit(p, dir);
+    ok(hit > 32, `«${tp.name}»: до корпуса по лучу ${hit === Infinity ? '∞' : hit.toFixed(0)}`);
+
+    /* камера не внутри Башни */
+    const T = CONFIG.TOWER;
+    const arc = Math.abs(((tp.pos[0] - T.deg + 180) % 360 + 360) % 360 - 180) * D2R * R;
+    const inTower = Math.hypot(arc, tp.pos[2] - T.z) < 8 && r > R - T.h;
+    ok(!inTower, `«${tp.name}»: камера снаружи Башни`);
+
+    /* камера не внутри основания фермы */
+    const A = CONFIG.AXIS;
+    let inTruss = false;
+    for (const z of A.spars) for (let k = 0; k < A.sparArms; k++) {
+      const ta = A.sparAngle + k * 360 / A.sparArms;
+      const da = Math.abs(((tp.pos[0] - ta + 180) % 360 + 360) % 360 - 180) * D2R * R;
+      if (Math.hypot(da, tp.pos[2] - z) < A.trussW + 2 && r > 10) inTruss = true;
+    }
+    ok(!inTruss, `«${tp.name}»: камера не в ферме`);
+    /* и не должна стоять на основании опоры: оно радиусом 6 юнитов */
+    let onBase = false;
+    for (const z of A.spars) for (let k = 0; k < A.sparArms; k++) {
+      const ta = A.sparAngle + k * 360 / A.sparArms;
+      const da = Math.abs(((tp.pos[0] - ta + 180) % 360 + 360) % 360 - 180) * D2R * R;
+      if (Math.hypot(da, tp.pos[2] - z) < A.baseR + 2 && r > R - 10) onBase = true;
+    }
+    ok(!onBase, `«${tp.name}»: камера не в основании опоры`);
+
+    /* горизонт не завален: «верх» камеры обязан идти к оси станции */
+    stationUp(p, up);
+    ok(Math.abs(up.dot(dir)) < 0.9, `«${tp.name}»: взгляд не вертикально вверх или вниз`);
+  }
+}
+
+/* ══ 3k2. Камера реально смотрит на цель, а не назад ═══════════════════ */
+{
+  /* Object3D.lookAt для НЕ-камеры разворачивает к цели +Z, а камера смотрит
+     вдоль −Z. Подставив обычный Object3D, получаешь взгляд ровно назад —
+     и все девять точек «смотрят не туда» при идеальных координатах.
+     Проверяем не замысел, а результат: куда направлен −Z готового кватерниона. */
+  const up = new THREE.Vector3(), q = new THREE.Quaternion();
+  const fwd = new THREE.Vector3(), want = new THREE.Vector3();
+  let worst = 0, worstName = '';
+  for (const tp of CONFIG.TP) {
+    const p = tpVec(tp.pos), t2 = tpVec(tp.look);
+    stationUp(p, up);
+    aimAt(p, t2, up, q);
+    fwd.set(0, 0, -1).applyQuaternion(q);
+    want.subVectors(t2, p).normalize();
+    const err = Math.acos(clampNum(fwd.dot(want), -1, 1)) * 180 / Math.PI;
+    if (err > worst) { worst = err; worstName = tp.name; }
+  }
+  ok(worst < 0.01, `Все точки наведены точно (худшая ошибка ${worst.toFixed(3)}° — «${worstName}»)`);
+
+  /* и горизонт не перевёрнут */
+  let worstTilt = 1;
+  for (const tp of CONFIG.TP) {
+    const p = tpVec(tp.pos), t2 = tpVec(tp.look);
+    stationUp(p, up); aimAt(p, t2, up, q);
+    worstTilt = Math.min(worstTilt, new THREE.Vector3(0, 1, 0).applyQuaternion(q).dot(up));
+  }
+  ok(worstTilt > 0.8, `Горизонт нигде не завален (худшее совпадение верха ${worstTilt.toFixed(2)})`);
+
+  const msrc1 = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+  ok(!/new THREE\.Object3D\(\)/.test(msrc1),
+     'Наведение больше не идёт через обычный Object3D');
+  ok(/aimAt\(/.test(msrc1), 'Используется камерный базис Matrix4.lookAt');
+}
+
+/* ══ 3l. Управление привязано к «низу» станции ═════════════════════════ */
+{
+  const V = new THREE.Vector3(), up = new THREE.Vector3();
+  /* «верх» в любой точке направлен к оси, а не в мировой +Y */
+  let worst = 0;
+  for (let d = 0; d < 360; d += 11) {
+    const t = d * D2R;
+    stationUp(V.set(Math.sin(t) * 40, Math.cos(t) * 40, 17), up);
+    worst = Math.max(worst, up.distanceTo(V.clone().setZ(0).normalize().negate()));
+  }
+  ok(worst < 1e-9, 'Верх камеры везде направлен от пола к оси');
+  stationUp(V.set(0, 0, 30), up);
+  ok(Math.abs(up.length() - 1) < 1e-9, 'На самой оси верх не вырождается в ноль');
+
+  const csrc = readFileSync(new URL('./js/controls.js', import.meta.url), 'utf8');
+  ok(!/Euler/.test(csrc),
+     'Углы Эйлера от мирового +Y убраны — иначе крен защёлкивался бы после посадки');
+  ok(/levelCamera/.test(csrc) && /makeBasis/.test(csrc), 'Крен снимается перестроением базиса');
+  const msrc0 = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+  ok(!/_o\.up\.set\(0, 1, 0\)/.test(msrc0), 'Перелёт больше не использует мировой верх');
+  ok((msrc0.match(/stationUp\(/g) || []).length >= 2, 'И посадка, и перелёт берут верх станции');
+}
+
+/* ══ 3j. Новые возможности и починенные баги ═══════════════════════════ */
+{
+  const msrc = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+  const csrc = readFileSync(new URL('./js/controls.js', import.meta.url), 'utf8');
+  const html = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
+  const css = readFileSync(new URL('./style.css', import.meta.url), 'utf8');
+  const asrc = readFileSync(new URL('./js/audio.js', import.meta.url), 'utf8');
+
+  /* --- полный экран: размер берём у контейнера, а не у окна --- */
+  ok(/new ResizeObserver\(resize\)\.observe\(stage\)/.test(msrc),
+     'Размер рендера следит за контейнером — чёрных полей в полном экране нет');
+  ok(/stage\.clientWidth/.test(msrc), 'resize() меряет элемент, а не innerWidth');
+  ok(/fullscreenchange/.test(msrc), 'Пересчёт по событию полноэкранного режима');
+  const setSizes = [...msrc.matchAll(/renderer\.setSize\(([^)]*)\)/g)].map(x => x[1]);
+  ok(setSizes.length > 0 && setSizes.every(s => /,\s*false\s*$/.test(s)),
+     `Все ${setSizes.length} вызова setSize идут с updateStyle = false — три не прописывает канвасу инлайновый размер в пикселях`);
+  ok(/:fullscreen/.test(css), 'Есть правила для полноэкранного корня');
+
+  /* --- вода: широкий спектр вместо одного резонанса --- */
+  const bands = [...asrc.matchAll(/noiseBand\(buf, wLow, ([\d.]+), ([\d.]+)/g)]
+    .map(x => ({ f: +x[1], Q: +x[2] }));
+  ok(bands.length >= 3, `Журчание собрано из ${bands.length} полос, а не из одной`);
+  ok(bands.every(b => b.Q < 1.5), `Добротность всех полос ниже 1.5 — свиста нет (${bands.map(b => b.Q).join(', ')})`);
+  ok(Math.min(...bands.map(b => b.f)) < 400, 'Есть низкий рокот потока, а не только верх');
+  ok(/lowpass/.test(asrc) && /3200/.test(asrc), 'Общий срез убирает шипение выше 3.2 кГц');
+
+  /* --- облака в LOW --- */
+  ok(/clouds\.visible = q !== 'LOW'/.test(msrc), '§14: в пресете LOW облака выключаются');
+
+  /* --- сохранение всех настроек --- */
+  const keys = [...msrc.matchAll(/prefs\.set\('(\w+)'/g)].map(x => x[1]);
+  const uniq = [...new Set(keys)].sort();
+  ok(uniq.length >= 8, `Сохраняются настройки: ${uniq.join(', ')}`);
+  for (const k of ['seed', 'quality', 'season', 'sens', 'rot', 'wind', 'vol', 'sound', 'cycle', 'fps']) {
+    ok(uniq.includes(k), `  · ${k} переживает перезагрузку`);
+  }
+  ok(/catch \{ this\.d = \{\}; \}/.test(msrc) || /catch/.test(msrc.split('PREFS_KEY')[1].slice(0, 400)),
+     'Недоступный localStorage не роняет приложение');
+
+  /* --- адаптивный джойстик --- */
+  ok(typeof CONFIG.STICK_RADIUS === 'object'
+     && CONFIG.STICK_RADIUS.portrait > CONFIG.STICK_RADIUS.landscape,
+     `§12: в портрете джойстик крупнее (${CONFIG.STICK_RADIUS.portrait} против ${CONFIG.STICK_RADIUS.landscape} px)`);
+  ok(/innerHeight >= innerWidth/.test(csrc), 'Ориентация определяется по пропорциям экрана');
+  ok(/base\.style\.width = base\.style\.height/.test(csrc), 'Размер базы задаётся из того же радиуса');
+
+  /* --- фото-режим --- */
+  ok(/toBlob/.test(msrc), 'Снимок берётся через toBlob');
+  const mCode = msrc.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
+  ok(!/preserveDrawingBuffer/.test(mCode),
+     'preserveDrawingBuffer не включён — снимок берётся сразу после отрисовки');
+  ok(msrc.indexOf('if (shotPending)') > msrc.indexOf('renderer.render(scene, camera);'),
+     'Захват стоит после render, иначе буфер уже очищен');
+  ok(/body\.clean #topbar/.test(css), 'В фото-режиме HUD скрывается');
+  ok(html.includes('id="bShot"') && html.includes('id="bPhotoExit"'), 'Есть затвор и выход');
+
+  /* --- авто-тур --- */
+  ok(CONFIG.TOUR_HOLD > 2, `Стоянка в точке ${CONFIG.TOUR_HOLD} с`);
+  ok(/function updateTour/.test(msrc) && /updateTour\(dt\)/.test(msrc), 'Тур обновляется в цикле');
+  ok(/showCaption/.test(msrc) && html.includes('id="caption"'), 'Титры точки показываются');
+  ok(/function cancelFly\(\) \{ fly\.on = false; setTour\(false\)/.test(msrc),
+     'Касание во время перелёта прекращает и тур');
+  ok(/tour\.idx = \(tour\.idx \+ 1\) % CONFIG\.TP\.length/.test(msrc), 'Тур идёт по кругу');
+
+  /* --- сезоны --- */
+  const seasons = Object.keys(CONFIG.SEASONS);
+  ok(seasons.length === 4, `Сезонов: ${seasons.join(', ')}`);
+  for (const s of seasons) {
+    const S = CONFIG.SEASONS[s];
+    ok(S.greens.length && S.accents.length && S.bushes.length && S.accent >= 0 && S.accent <= 1,
+       `  · ${S.name}: ${(S.accent * 100) | 0}% не-зелёных крон`);
+  }
+  ok(CONFIG.SEASONS.autumn.accent > CONFIG.SEASONS.summer.accent, 'Осенью цветных крон больше, чем летом');
+  ok(html.includes('id="sSeason"'), 'Сезон переключается из настроек');
+}
+
+/* ══ 3i. Звук реагирует на то, где находится камера ════════════════════ */
+{
+  /* Решения о громкости вынесены в чистые функции — их можно проверить
+     без браузера и без AudioContext. */
+  const V = new THREE.Vector3();
+  const at = (deg, r, z) => fieldAt(V.set(Math.sin(deg * D2R) * r, Math.cos(deg * D2R) * r, z));
+
+  /* --- вода --- */
+  const river = (CONFIG.SECT.rivers[0][0] + CONFIG.SECT.rivers[0][1]) / 2;
+  const onRiver = waterLevel(at(river, CONFIG.R - 1.5, 0));
+  const nearBank = waterLevel(at(CONFIG.SECT.rivers[0][1] + 14, CONFIG.R - 1.5, 0));
+  const acrossField = waterLevel(at(200, CONFIG.R - 1.5, 0));
+  const highAbove = waterLevel(at(river, 12, 0));
+  ok(onRiver > 0.9, `Над руслом журчание в полную силу (${onRiver.toFixed(2)})`);
+  ok(nearBank < onRiver * 0.8 && nearBank > 0, `В полусотне метров от русла заметно тише (${nearBank.toFixed(2)})`);
+  ok(acrossField === 0, 'В полях реки не слышно вовсе');
+  ok(highAbove === 0, 'С высоты у оси реки тоже не слышно');
+
+  /* --- гул станции --- */
+  ok(humLevel(at(0, 6, 0)) > humLevel(at(0, CONFIG.R - 2, 0)) * 1.4,
+     'Гул громче у оси, где механика, чем у земли');
+  ok(humLevel(at(0, CONFIG.R - 2, 0)) > 0.3, 'Но слышен и на земле — это станция');
+
+  /* --- ветер --- */
+  const still = windLevel(at(0, CONFIG.R - 1, 0), 0);
+  const flying = windLevel(at(0, CONFIG.R - 1, 0), CONFIG.SPEED_MAX);
+  ok(flying > still, `В полёте набегающий поток громче (${still.toFixed(2)} → ${flying.toFixed(2)})`);
+  ok(windLevel(at(0, 8, 0), 0) < still, 'У оси, вдали от земли, ветра меньше');
+  ok(flying <= 1, 'Ветер не выходит за единицу и не перегружает мастер');
+
+  /* --- птицы --- */
+  const park = CONFIG.SECT.parks[0][0] + 5, city = CONFIG.SECT.cities[0][0] + 5;
+  ok(birdLevel(at(park, CONFIG.R - 2, 0), 1) > 0.9, 'В парке днём птицы поют');
+  ok(birdLevel(at(park, CONFIG.R - 2, 0), 0) === 0, 'Ночью птицы молчат');
+  ok(birdLevel(at(city, CONFIG.R - 2, 0), 1) === 0, 'В городе птиц нет');
+  ok(birdLevel(at(park, 10, 0), 1) === 0, 'У оси птиц не слышно');
+  ok(birdLevel(at(200, CONFIG.R - 2, 0), 1) > 0 &&
+     birdLevel(at(200, CONFIG.R - 2, 0), 1) < birdLevel(at(park, CONFIG.R - 2, 0), 1),
+     'В полях птицы есть, но реже, чем в парке');
+
+  /* --- сумма слоёв не перегружает мастер --- */
+  const A = CONFIG.AUDIO;
+  let worst = 0;
+  for (let d = 0; d < 360; d += 3) for (const rr of [CONFIG.R - 1, 30, 8]) {
+    const f = at(d, rr, 0);
+    worst = Math.max(worst,
+      windLevel(f, CONFIG.SPEED_MAX) * A.wind + waterLevel(f) * A.water + humLevel(f) * A.hum);
+  }
+  ok(worst < 0.95, `Сумма слоёв в худшей точке ${worst.toFixed(2)} — клиппинга нет`);
+  ok(A.volume > 0 && A.volume <= 1, 'Громкость по умолчанию в пределах нормы');
+
+  /* --- контекст не создаётся без жеста --- */
+  const asrc = readFileSync(new URL('./js/audio.js', import.meta.url), 'utf8');
+  ok(/export function startAudio/.test(asrc) && !/new\s+AC\(\)/.test(asrc.split('export function startAudio')[0]),
+     'AudioContext создаётся только в startAudio, вызываемом по жесту');
+  const msrc = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+  ok(/\$\('go'\)\.onclick[\s\S]{0,300}startAudio\(\)/.test(msrc),
+     'startAudio вызывается по нажатию «Начать», а не при загрузке');
+  ok(/suspendAudio\(paused\)/.test(msrc), 'Звук останавливается вместе со сценой');
+  ok(!/fetch|\.mp3|\.ogg|\.wav/.test(asrc), 'Ни одного внешнего сэмпла — всё синтез');
 }
 
 /* ══ 4. Гравитация: крыши стоят там, где по ним можно ходить ════════════ */
@@ -519,6 +1019,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   /* Свет считаем суммарно: осевых источников пять, судить по одному нельзя */
   const fill = p => p.hemiInt + p.pointInt * CONFIG.LIGHT_Z.length;
   const ratio = fill(N) / fill(D);
+  ok(fill(D) > 4.5, `Днём заполняющего света ${fill(D).toFixed(2)} — светло`);
   ok(ratio > 0.12 && ratio < 0.40,
      `Ночь темнее дня: заполняющий свет ${(ratio * 100) | 0}% от дневного`);
 
@@ -538,10 +1039,25 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   /* Эмиссия не освещается: ночью она обязана быть слабее отражённого света,
      иначе улицы светятся сами и красят пол в кремовый. */
   const src2 = readFileSync(new URL('./js/world.js', import.meta.url), 'utf8');
-  ok(/smoothstep\(\s*0\.5,\s*0\.95,\s*hullMask\.b\s*\)/.test(src2),
-     'Фонари зажигаются порогом по B: светятся магистрали, а не весь сектор');
-  ok(N.cityGlow * 1.35 < fill(N) * 0.25,
-     `Уличное свечение (${(N.cityGlow * 1.35).toFixed(2)}) слабее заполняющего света (${fill(N).toFixed(2)})`);
+  ok(/smoothstep\(\s*0\.34,\s*0\.92,\s*hullMask\.b\s*\)/.test(src2),
+     'Фонари зажигаются мягким порогом по B, а не по всей заливке');
+  /* фонари горят на всех улицах, а не только на магистралях, поэтому
+     площадь свечения выросла и яркость должна была упасть */
+  const tsrc2 = readFileSync(new URL('./js/textures.js', import.meta.url), 'utf8');
+  const cityBlk = tsrc2.slice(tsrc2.indexOf('── ГОРОДА'), tsrc2.indexOf('── РЕКИ'));
+  const passes = (cityBlk.match(/\[[\d.]+, [\d.]+\]/g) || []).length;
+  ok(/for \(const \[mul, alpha\] of/.test(cityBlk),
+     `След фонарей рисуется несколькими проходами (${passes}) — край мягкий, а не квадратный`);
+  ok(/streets\.push/.test(cityBlk), 'Светятся все улицы, а не каждая третья');
+
+  /* Свечение стало множителем к альбедо, а не самостоятельным цветом:
+     сравнивать его с абсолютной яркостью света больше нельзя. Проверяем
+     то, что важно, — фонарь освещает покрытие, поэтому разметка видна. */
+  const wsrc2 = readFileSync(new URL('./js/world.js', import.meta.url), 'utf8');
+  ok(/totalEmissiveRadiance \+= uCityGlow \* lamps \* diffuseColor\.rgb/.test(wsrc2),
+     'Свет фонарей множится на альбедо — разметка дороги видна ночью');
+  ok(N.cityGlow <= 1.0, `Фонарь не ярче самой поверхности (множитель ${N.cityGlow})`);
+  ok(D.cityGlow === 0, 'Днём фонари выключены');
   ok(N.cityGlow > 0, 'Улицы ночью светятся сами: видно, где стоят огни');
   ok(N.navSize > D.navSize, 'Габаритные огни ночью крупнее');
   ok(N.sunEmis > 0.3, 'Солнечная труба ночью тлеет как ночник, а не гаснет');

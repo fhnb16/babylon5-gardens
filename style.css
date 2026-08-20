@@ -22,6 +22,11 @@ html,body{
 }
 body{position:fixed;inset:0;touch-action:none;user-select:none;-webkit-user-select:none}
 #stage{position:absolute;inset:0;touch-action:none}
+/* в полноэкранном режиме корень должен занимать весь экран, иначе
+   зафиксированный body сохраняет прежний размер и остаются поля */
+html:fullscreen,body:fullscreen,html:-webkit-full-screen,body:-webkit-full-screen{
+  width:100%;height:100%;margin:0}
+::backdrop{background:#05080f}
 canvas{display:block;width:100%;height:100%;touch-action:none;outline:none}
 
 /* ═══════════════════════════════════════════════════════════════
@@ -70,6 +75,31 @@ canvas{display:block;width:100%;height:100%;touch-action:none;outline:none}
 }
 #fps.show{display:block}
 
+/* ── титры авто-тура ── */
+#caption{
+  position:absolute;left:50%;transform:translateX(-50%) translateY(14px);
+  bottom:calc(46px + var(--sab));text-align:center;pointer-events:none;
+  opacity:0;transition:opacity .6s ease,transform .6s ease;
+  text-shadow:0 2px 18px rgba(0,0,0,.85);max-width:80vw;
+}
+#caption.show{opacity:1;transform:translateX(-50%) translateY(0)}
+#caption b{display:block;font-size:clamp(18px,4.4vw,26px);font-weight:300;letter-spacing:.06em;color:#fff}
+#caption s{display:block;text-decoration:none;font-size:12px;letter-spacing:.22em;
+  text-transform:uppercase;color:var(--accent);margin-top:6px}
+
+/* ── фото-режим ── */
+body.clean #topbar,body.clean #brand,body.clean #pad,body.clean #fps{display:none}
+#photobar{
+  position:absolute;left:50%;transform:translateX(-50%);
+  bottom:calc(20px + var(--sab));display:none;gap:14px;
+}
+body.clean #photobar{display:flex}
+#photobar .btn{width:56px;height:56px;border-radius:50%}
+#photobar #bShot{width:66px;height:66px}
+#photobar #bShot svg{width:30px;height:30px}
+.tp.tour{margin-bottom:10px;border-color:rgba(255,217,160,.3);background:rgba(255,217,160,.08)}
+.tp.tour.on{background:rgba(255,217,160,.2);color:var(--accent)}
+
 /* мобильные кнопки-держалки справа */
 #pad{
   position:absolute;right:calc(12px + var(--sar));bottom:calc(18px + var(--sab));
@@ -81,14 +111,14 @@ canvas{display:block;width:100%;height:100%;touch-action:none;outline:none}
 
 /* виртуальный джойстик */
 #stickBase{
-  position:absolute;width:120px;height:120px;border-radius:50%;
+  position:absolute;width:148px;height:148px;border-radius:50%;
   border:1.5px solid rgba(180,214,255,.35);
   background:radial-gradient(circle,rgba(140,180,230,.16),rgba(140,180,230,.03) 70%);
   left:0;top:0;opacity:0;transition:opacity .16s ease;
   pointer-events:none;transform:translate(-999px,-999px);
 }
 #stickKnob{
-  position:absolute;width:52px;height:52px;border-radius:50%;
+  position:absolute;width:66px;height:66px;border-radius:50%;
   background:rgba(219,232,247,.32);border:1.5px solid rgba(255,255,255,.55);
   left:0;top:0;opacity:0;transition:opacity .16s ease;
   pointer-events:none;transform:translate(-999px,-999px);
@@ -150,7 +180,7 @@ canvas{display:block;width:100%;height:100%;touch-action:none;outline:none}
 .sw.on{background:rgba(255,217,160,.35)}
 .sw.on::after{transform:translateX(20px);background:var(--accent)}
 
-#help .cols{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+#help .cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:18px}
 #help h3{font-size:12px;letter-spacing:.16em;text-transform:uppercase;
   color:var(--accent);margin-bottom:8px;font-weight:600}
 #help p{font-size:13px;color:rgba(219,232,247,.75);margin-bottom:5px}

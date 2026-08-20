@@ -28,6 +28,9 @@
     <div class="btn glass" id="bDay" title="День / ночь" aria-label="День или ночь">
       <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.4"/><path d="M12 2.6v2.4M12 19v2.4M21.4 12H19M5 12H2.6M18.6 5.4l-1.7 1.7M7.1 16.9l-1.7 1.7M18.6 18.6l-1.7-1.7M7.1 7.1L5.4 5.4"/></svg>
     </div>
+    <div class="btn glass on" id="bSnd" title="Звук" aria-label="Звук">
+      <svg viewBox="0 0 24 24"><path d="M4 9.2h3.3L12 5.3v13.4l-4.7-3.9H4z"/><path d="M15.6 9.4a3.6 3.6 0 0 1 0 5.2"/><path d="M18.2 6.8a7.2 7.2 0 0 1 0 10.4"/></svg>
+    </div>
     <div class="btn glass" id="bTp" title="Телепорты" aria-label="Телепорты">
       <svg viewBox="0 0 24 24"><path d="M12 21s7-6.1 7-11a7 7 0 1 0-14 0c0 4.9 7 11 7 11z"/><circle cx="12" cy="10" r="2.6"/></svg>
     </div>
@@ -36,6 +39,9 @@
     </div>
     <div class="btn glass" id="bHelp" title="Справка" aria-label="Справка">
       <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9.2"/><path d="M9.3 9.2a2.8 2.8 0 0 1 5.4.9c0 1.9-2.7 2.4-2.7 4"/><path d="M12 17.4h.01"/></svg>
+    </div>
+    <div class="btn glass" id="bPhoto" title="Фото-режим" aria-label="Фото-режим">
+      <svg viewBox="0 0 24 24"><path d="M3.2 8.4h3.4l1.5-2.3h7.8l1.5 2.3h3.4v10.4H3.2z"/><circle cx="12" cy="13.3" r="3.4"/></svg>
     </div>
     <div class="btn glass" id="bFs" title="Во весь экран" aria-label="Во весь экран">
       <svg viewBox="0 0 24 24"><path d="M3.5 9V3.5H9M15 3.5h5.5V9M20.5 15v5.5H15M9 20.5H3.5V15"/></svg>
@@ -48,6 +54,16 @@
     <div class="btn glass" id="bSpd" aria-label="Скорость"><svg viewBox="0 0 24 24"><path d="M4 15a8 8 0 1 1 16 0"/><path d="M12 15l4.2-4.6"/><circle cx="12" cy="15" r="1.3"/></svg></div>
   </div>
 
+  <div id="caption"><b></b><s></s></div>
+  <div id="photobar">
+    <div class="btn glass" id="bShot" aria-label="Снимок">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.6"/><circle cx="12" cy="12" r="4.2"/></svg>
+    </div>
+    <div class="btn glass" id="bPhotoExit" aria-label="Выйти из фото-режима">
+      <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+    </div>
+  </div>
+
   <div id="stickBase"></div>
   <div id="stickKnob"></div>
   <div id="fps" class="glass"></div>
@@ -57,6 +73,7 @@
   <div class="grip"></div>
   <div class="btn close" id="tpClose"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></div>
   <h2>Куда лететь</h2>
+  <div class="tp tour" id="bTour"><i>🎞</i><div><b>Авто-тур</b><s>Облёт всех точек с подписями</s></div></div>
   <div id="tpList"></div>
 </section>
 
@@ -87,6 +104,23 @@
         <svg viewBox="0 0 24 24"><path d="M3.5 12a8.5 8.5 0 1 0 2.6-6.1"/><path d="M3.2 4.4v4.3h4.3"/></svg>
       </div>
     </div>
+  </div>
+  <div class="row">
+    <label>Сезон<small>Палитра крон и кустов</small></label>
+    <select id="sSeason">
+      <option value="spring">Весна</option>
+      <option value="summer">Лето</option>
+      <option value="autumn">Осень</option>
+      <option value="winter">Зима</option>
+    </select>
+  </div>
+  <div class="row">
+    <label>Насыщенность зелени<small id="sSatV">62%</small></label>
+    <input type="range" id="sSat" min="20" max="120" value="62">
+  </div>
+  <div class="row">
+    <label>Громкость<small id="sVolV">55%</small></label>
+    <input type="range" id="sVol" min="0" max="100" value="55">
   </div>
   <div class="row">
     <label>Ветер в кронах<small id="sWindV">100%</small></label>
@@ -123,6 +157,20 @@
       <p>Кнопки ▲ ▼ у правого края — вверх и вниз</p>
       <p>Кнопка со спидометром — переключить скорость</p>
       <p>Касание во время перелёта — отмена</p>
+    </div>
+    <div>
+      <h3>Режимы</h3>
+      <p>🎞 Авто-тур — в списке точек, облёт с подписями</p>
+      <p>📷 Фото-режим — HUD прячется, затвор сохраняет PNG</p>
+      <p>Сезон, качество и громкость — в настройках</p>
+      <p>Все настройки и зерно сохраняются</p>
+    </div>
+    <div>
+      <h3>Звук</h3>
+      <p>Гул станции громче у оси, где механика</p>
+      <p>Ветер усиливается у земли и в быстром полёте</p>
+      <p>Журчание слышно только вблизи русла</p>
+      <p>Птицы поют днём в парках и полях</p>
     </div>
   </div>
 </section>

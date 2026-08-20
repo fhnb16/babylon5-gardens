@@ -7,7 +7,6 @@ import { clamp } from './util.js';
    и никаких внешних джойстиков.
    ═══════════════════════════════════════════════════════════════════════════ */
 export const ctl = {
-  yaw: 0, pitch: 0,
   speed: CONFIG.SPEED_BASE,
   boost: false,
   keys: Object.create(null),
@@ -22,8 +21,21 @@ export const ctl = {
 export const isMobile = matchMedia('(pointer: coarse)').matches
   || /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
 
-const PITCH_MAX = 89 * Math.PI / 180;
+const SIN_MAX = Math.sin(89 * Math.PI / 180);
 let base, knob;
+let dYaw = 0, dPitch = 0;      // накопленный ввод обзора за кадр
+
+/** «Верх» задаёт центробежная сила: от пола к оси станции.
+    Мировой +Y годился бы для плоского мира — здесь он переворачивает
+    горизонт везде, кроме θ = 180°. */
+export function stationUp(pos, out) {
+  out.set(-pos.x, -pos.y, 0);
+  return out.lengthSq() < 1e-4 ? out.set(0, 1, 0) : out.normalize();
+}
+
+/** §12: радиус джойстика зависит от ориентации экрана */
+export const stickRadius = () =>
+  CONFIG.STICK_RADIUS[innerHeight >= innerWidth ? 'portrait' : 'landscape'];
 
 /**
  * @param dom     канвас рендерера
@@ -83,7 +95,7 @@ export function initControls(dom, stage, isBusy, onTap) {
     const s = ctl.stick;
     if (e.pointerId === s.id && s.active) {
       let dx = e.clientX - s.ox, dy = e.clientY - s.oy;
-      const len = Math.hypot(dx, dy), R = CONFIG.STICK_RADIUS;
+      const len = Math.hypot(dx, dy), R = stickRadius();
       if (len > R) { dx *= R / len; dy *= R / len; }
       s.x = dx / R; s.y = dy / R;
       showStick(s.ox, s.oy, s.ox + dx, s.oy + dy);
@@ -133,13 +145,16 @@ export function initControls(dom, stage, isBusy, onTap) {
 }
 
 function look(dx, dy, k) {
-  ctl.yaw -= dx * k * ctl.sens;
-  ctl.pitch = clamp(ctl.pitch - dy * k * ctl.sens, -PITCH_MAX, PITCH_MAX);
+  dYaw -= dx * k * ctl.sens;
+  dPitch -= dy * k * ctl.sens;
 }
 function showStick(bx, by, kx, ky) {
+  const R = stickRadius(), kr = Math.round(R * 0.44);
+  base.style.width = base.style.height = R * 2 + 'px';
+  knob.style.width = knob.style.height = kr * 2 + 'px';
   base.classList.add('on'); knob.classList.add('on');
-  base.style.transform = `translate(${bx - 60}px,${by - 60}px)`;
-  knob.style.transform = `translate(${kx - 26}px,${ky - 26}px)`;
+  base.style.transform = `translate(${bx - R}px,${by - R}px)`;
+  knob.style.transform = `translate(${kx - kr}px,${ky - kr}px)`;
 }
 export function resetStick() {
   Object.assign(ctl.stick, { active: false, id: -1, x: 0, y: 0 });
@@ -151,12 +166,40 @@ export function resetStick() {
    ПРИМЕНЕНИЕ ВВОДА
    ═══════════════════════════════════════════════════════════════════════════ */
 const _fwd = new THREE.Vector3(), _right = new THREE.Vector3();
-const _up = new THREE.Vector3(0, 1, 0), _localUp = new THREE.Vector3();
-const _eul = new THREE.Euler(0, 0, 0, 'YXZ');
+const _up = new THREE.Vector3(), _back = new THREE.Vector3();
+const _m4 = new THREE.Matrix4(), _q = new THREE.Quaternion();
+
+/** Снимаем крен и удерживаем тангаж: базис строится от «верха» станции.
+    Ориентация хранится прямо в кватернионе камеры — углы Эйлера от мирового
+    +Y тут не годятся, они защёлкивали бы крен обратно после каждой посадки. */
+export function levelCamera(camera) {
+  stationUp(camera.position, _up);
+  camera.getWorldDirection(_fwd);
+
+  const s = _fwd.dot(_up);
+  if (Math.abs(s) > SIN_MAX) {              // не даём взгляду встать вертикально
+    _fwd.addScaledVector(_up, Math.sign(s) * SIN_MAX - s).normalize();
+  }
+  _right.crossVectors(_fwd, _up);
+  if (_right.lengthSq() < 1e-8) return;     // вырожденный случай — оставляем как есть
+  _right.normalize();
+  _up.crossVectors(_right, _fwd).normalize();
+  _back.copy(_fwd).negate();
+  camera.quaternion.setFromRotationMatrix(_m4.makeBasis(_right, _up, _back));
+}
 
 export function updateControls(dt, camera) {
   if (!ctl.enabled) return;
-  camera.quaternion.setFromEuler(_eul.set(ctl.pitch, ctl.yaw, 0));
+
+  if (dYaw || dPitch) {
+    stationUp(camera.position, _up);
+    camera.quaternion.premultiply(_q.setFromAxisAngle(_up, dYaw));
+    camera.getWorldDirection(_fwd);
+    _right.crossVectors(_fwd, _up).normalize();
+    camera.quaternion.premultiply(_q.setFromAxisAngle(_right, dPitch));
+    dYaw = dPitch = 0;
+  }
+  levelCamera(camera);
 
   let fx = 0, fz = 0, fy = ctl.vert;
   const k = ctl.keys;
@@ -179,11 +222,11 @@ export function updateControls(dt, camera) {
 
   const spd = ctl.speed * (ctl.boost ? CONFIG.SPEED_BOOST : 1) * dt;
   camera.getWorldDirection(_fwd);
+  stationUp(camera.position, _up);
   _right.crossVectors(_fwd, _up).normalize();
-  _localUp.set(0, 1, 0).applyQuaternion(camera.quaternion);
   camera.position.addScaledVector(_fwd, fz * spd);
   camera.position.addScaledVector(_right, fx * spd);
-  camera.position.addScaledVector(_localUp, fy * spd);
+  camera.position.addScaledVector(_up, fy * spd);   // «вверх» — к оси станции
 
   /* мягко держим камеру внутри станции */
   const r = Math.hypot(camera.position.x, camera.position.y);
@@ -194,9 +237,8 @@ export function updateControls(dt, camera) {
   camera.position.z = clamp(camera.position.z, -CONFIG.L / 2 + 2, CONFIG.L / 2 - 2);
 }
 
-/** После перелёта: подхватить ориентацию камеры без скачка */
+/** После перелёта ориентация уже в кватернионе — достаточно выровнять крен */
 export function syncFromCamera(camera) {
-  _eul.setFromQuaternion(camera.quaternion, 'YXZ');
-  ctl.yaw = _eul.y;
-  ctl.pitch = clamp(_eul.x, -PITCH_MAX, PITCH_MAX);
+  dYaw = dPitch = 0;
+  levelCamera(camera);
 }

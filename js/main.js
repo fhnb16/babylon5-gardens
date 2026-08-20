@@ -1,32 +1,39 @@
 import * as THREE from 'three';
 import { CONFIG } from './config.js';
-import { mulberry32, clamp, lerp, easeInOut, tpVec, TAU } from './util.js';
+import { mulberry32, clamp, lerp, easeInOut, tpVec, aimAt, TAU } from './util.js';
 import { makeSoftSprite, makeGlowTexture } from './textures.js';
 import { buildWorld, worldMats, hullU, windU } from './world.js';
 import { buildStructures, structMats, updateStructures } from './structures.js';
-import { ctl, isMobile, initControls, updateControls, syncFromCamera, resetStick } from './controls.js';
+import { ctl, isMobile, initControls, updateControls, syncFromCamera, resetStick, stationUp } from './controls.js';
+import { audio, startAudio, updateAudio, setVolume, setEnabled, suspendAudio } from './audio.js';
 
 const $ = id => document.getElementById(id);
 const stage = $('stage');
 
-/* Зерно переживает перезагрузку. localStorage может быть недоступен
-   (приватный режим, отключённые куки) — тогда просто работаем без него. */
-const SEED_KEY = 'b5.seed';
-const seedStore = {
+/* Настройки переживают перезагрузку одним объектом. localStorage может быть
+   недоступен (приватный режим, отключённые куки) — тогда просто работаем без
+   него: всё в try/catch, ни один вызов не обязан удаться. */
+const PREFS_KEY = 'b5.prefs';
+const prefs = {
+  d: {},
   load() {
-    try {
-      const v = Number(localStorage.getItem(SEED_KEY));
-      return Number.isFinite(v) && v >= 0 ? v >>> 0 : null;
-    } catch { return null; }
+    try { this.d = JSON.parse(localStorage.getItem(PREFS_KEY)) || {}; } catch { this.d = {}; }
+    return this;
   },
-  save(v) {
-    try {
-      if (v === CONFIG.SEED_DEFAULT) localStorage.removeItem(SEED_KEY);
-      else localStorage.setItem(SEED_KEY, String(v));
-    } catch { /* без сохранения, но работаем */ }
+  get(k, dflt) { const v = this.d[k]; return v === undefined ? dflt : v; },
+  set(k, v) {
+    this.d[k] = v;
+    try { localStorage.setItem(PREFS_KEY, JSON.stringify(this.d)); } catch { /* без сохранения */ }
+  },
+  drop(k) {
+    delete this.d[k];
+    try { localStorage.setItem(PREFS_KEY, JSON.stringify(this.d)); } catch { /* без сохранения */ }
   }
-};
-CONFIG.SEED = seedStore.load() ?? CONFIG.SEED_DEFAULT;
+}.load();
+
+CONFIG.SEED = prefs.get('seed', CONFIG.SEED_DEFAULT) >>> 0;
+CONFIG.SEASON = prefs.get('season', CONFIG.SEASON);
+CONFIG.SATURATION = prefs.get('sat', CONFIG.SATURATION * 100) / 100;
 
 let renderer, scene, camera, worldGroup, fog;
 let hemi, lights = [], glow, clouds, motes, moteMat, panel;
@@ -40,9 +47,12 @@ function boot() {
   });
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.1;
+  renderer.toneMappingExposure = 1.22;
   renderer.shadowMap.enabled = false;   // тени — контактные пятна и аналитика в шейдере
-  renderer.setSize(innerWidth, innerHeight);
+  /* updateStyle = false обязателен: иначе three прописывает канвасу инлайновые
+     style.width/height в пикселях стартового окна, и они навсегда перебивают
+     CSS width:100%. Именно поэтому в полном экране оставались чёрные поля. */
+  renderer.setSize(innerWidth, innerHeight, false);
   stage.appendChild(renderer.domElement);
 
   scene = new THREE.Scene();
@@ -119,6 +129,8 @@ function buildAmbient() {
 
 function rebuild() {
   const q = currentQuality();
+  /* §14: в пресете LOW облака выключаются */
+  if (clouds) clouds.visible = q !== 'LOW';
   const res = buildWorld(worldGroup, renderer, q);
   panel = res.panel;
   buildStructures(worldGroup, renderer, q, panel);
@@ -163,7 +175,7 @@ function applyPalette(t) {
     worldMats.nav.size = lerp(N.navSize, D.navSize, t);
   }
   /* контактные тени слабеют вместе с источником */
-  if (worldMats.blob) worldMats.blob.opacity = lerp(0.22, 0.85, t);
+  if (worldMats.blob) worldMats.blob.opacity = lerp(0.24, 1.0, t);
 
   moteMat.color.copy(mix(D.moteCol, N.moteCol, t));
   moteMat.opacity = lerp(N.moteOp, D.moteOp, t);
@@ -184,8 +196,10 @@ const fly = {
   p0: new THREE.Vector3(), p1: new THREE.Vector3(), p2: new THREE.Vector3(),
   look: new THREE.Vector3(), q0: new THREE.Quaternion(), rot0: 0
 };
-const _o = new THREE.Object3D(), _qA = new THREE.Quaternion(), _qB = new THREE.Quaternion();
+const _qA = new THREE.Quaternion(), _qB = new THREE.Quaternion();
+const _upA = new THREE.Vector3();
 const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _Z = new THREE.Vector3(0, 0, 1);
+const _vAudio = new THREE.Vector3();
 
 function goTo(i, instant = false) {
   const tp = CONFIG.TP[i];
@@ -194,10 +208,8 @@ function goTo(i, instant = false) {
 
   if (instant) {
     camera.position.copy(worldGroup.localToWorld(target.clone()));
-    _o.position.copy(camera.position);
-    _o.up.set(0, 1, 0);
-    _o.lookAt(worldGroup.localToWorld(look.clone()));
-    camera.quaternion.copy(_o.quaternion);
+    stationUp(camera.position, _upA);
+    aimAt(camera.position, worldGroup.localToWorld(look.clone()), _upA, camera.quaternion);
     syncFromCamera(camera);
     return;
   }
@@ -236,14 +248,77 @@ function updateFly(dt) {
   camera.position.copy(_v);
 
   _v2.copy(fly.look); worldGroup.localToWorld(_v2);
-  _o.position.copy(_v); _o.up.set(0, 1, 0); _o.lookAt(_v2);
-  _qB.copy(_o.quaternion);
+  stationUp(_v, _upA);
+  aimAt(_v, _v2, _upA, _qB);
   _qA.setFromAxisAngle(_Z, worldGroup.rotation.z - fly.rot0).multiply(fly.q0);
   camera.quaternion.slerpQuaternions(_qA, _qB, e);
 
   if (fly.t >= 1) { fly.on = false; syncFromCamera(camera); }
 }
-function cancelFly() { fly.on = false; syncFromCamera(camera); }
+function cancelFly() { fly.on = false; setTour(false); syncFromCamera(camera); }
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   АВТО-ТУР
+   Облетает все точки по кругу. Титры показываются после посадки и гаснут
+   перед следующим взлётом. Любое вмешательство в управление тур прекращает.
+   ═══════════════════════════════════════════════════════════════════════════ */
+const tour = { on: false, idx: 0, wait: 0 };
+const capEl = () => $('caption');
+
+function showCaption(i) {
+  const tp = CONFIG.TP[i], el = capEl();
+  el.firstElementChild.textContent = tp.name;
+  el.lastElementChild.textContent = tp.hint;
+  el.classList.add('show');
+}
+function hideCaption() { capEl().classList.remove('show'); }
+
+function setTour(on) {
+  tour.on = on;
+  $('bTour').classList.toggle('on', on);
+  if (on) {
+    tour.idx = 0;
+    goTo(0);
+    tour.wait = CONFIG.TOUR_HOLD;
+  } else {
+    hideCaption();
+  }
+}
+function updateTour(dt) {
+  if (!tour.on) return;
+  if (fly.on) { hideCaption(); return; }
+  if (tour.wait === CONFIG.TOUR_HOLD) showCaption(tour.idx);
+  tour.wait -= dt;
+  if (tour.wait <= 0) {
+    tour.idx = (tour.idx + 1) % CONFIG.TP.length;
+    goTo(tour.idx);
+    tour.wait = CONFIG.TOUR_HOLD;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ФОТО-РЕЖИМ
+   Снимок берётся сразу после отрисовки кадра: так не нужен
+   preserveDrawingBuffer, который стоит производительности всё время.
+   ═══════════════════════════════════════════════════════════════════════════ */
+let cleanView = false, shotPending = false;
+
+function setClean(on) {
+  cleanView = on;
+  document.body.classList.toggle('clean', on);
+  if (on) closeSheets();
+}
+function grabShot() {
+  const name = `babylon5-${CONFIG.SEED}-${Date.now()}.png`;
+  renderer.domElement.toBlob(blob => {
+    if (!blob) return;
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 4000);
+  }, 'image/png');
+}
 
 /* ═══════════════════════════════════════════════════════════════════════════
    UI
@@ -270,9 +345,14 @@ function initUI() {
     const d = document.createElement('div');
     d.className = 'tp';
     d.innerHTML = `<i>${tp.ico}</i><div><b>${tp.name}</b><s>${tp.hint}</s></div>`;
-    d.addEventListener('click', () => { closeSheets(); goTo(i); });
+    d.addEventListener('click', () => { closeSheets(); setTour(false); goTo(i); });
     list.appendChild(d);
   });
+
+  $('bTour').onclick = () => { closeSheets(); setTour(!tour.on); };
+  $('bPhoto').onclick = () => setClean(true);
+  $('bPhotoExit').onclick = () => setClean(false);
+  $('bShot').onclick = () => { shotPending = true; };
 
   $('bTp').onclick = () => toggleSheet('tp');
   $('bSet').onclick = () => toggleSheet('set');
@@ -287,25 +367,79 @@ function initUI() {
   };
   bDay.onclick = () => { dayTarget = dayTarget > 0.5 ? 0 : 1; setDayIcon(); };
 
+  const bSnd = $('bSnd'), SND_ON = bSnd.innerHTML;
+  const SND_OFF = '<svg viewBox="0 0 24 24"><path d="M4 9.2h3.3L12 5.3v13.4l-4.7-3.9H4z"/><path d="M16.2 9.8l5 4.4M21.2 9.8l-5 4.4"/></svg>';
+  const showSnd = () => {
+    bSnd.innerHTML = audio.on ? SND_ON : SND_OFF;
+    bSnd.classList.toggle('on', audio.on);
+  };
+  setEnabled(prefs.get('sound', true));
+  showSnd();
+  bSnd.onclick = () => { setEnabled(!audio.on); prefs.set('sound', audio.on); showSnd(); };
+
+  const sVol = $('sVol');
+  sVol.value = prefs.get('vol', Math.round(CONFIG.AUDIO.volume * 100));
+  sVol.oninput = () => {
+    setVolume(sVol.value / 100);
+    $('sVolV').textContent = sVol.value + '%';
+    prefs.set('vol', +sVol.value);
+  };
+  sVol.oninput();
+
   $('bFs').onclick = () => {
     if (document.fullscreenElement) document.exitFullscreen?.();
     else document.documentElement.requestFullscreen?.()?.catch?.(() => {});
   };
 
-  $('sQual').onchange = e => {
+  const sQual = $('sQual');
+  sQual.value = quality = prefs.get('quality', 'AUTO');
+  sQual.onchange = e => {
     quality = e.target.value;
+    prefs.set('quality', quality);
     dprCap = capForQuality(); dprIndex = startDpr(); applyDpr();
     rebuild();
     applyPalette(easeInOut(clamp(dayMix, 0, 1)));
   };
+
+  const sSeason = $('sSeason');
+  sSeason.value = CONFIG.SEASON;
+  sSeason.onchange = () => {
+    CONFIG.SEASON = sSeason.value;
+    prefs.set('season', CONFIG.SEASON);
+    rebuild();
+    applyPalette(easeInOut(clamp(dayMix, 0, 1)));
+  };
+
+  const sSat = $('sSat');
+  sSat.value = Math.round(CONFIG.SATURATION * 100);
+  $('sSatV').textContent = sSat.value + '%';
+  /* пересборка мира стоит полсекунды — запускаем на отпускании, а не на каждый пиксель */
+  sSat.onchange = () => {
+    CONFIG.SATURATION = sSat.value / 100;
+    prefs.set('sat', +sSat.value);
+    rebuild();
+    applyPalette(easeInOut(clamp(dayMix, 0, 1)));
+  };
+  sSat.oninput = () => { $('sSatV').textContent = sSat.value + '%'; };
+
   const sSens = $('sSens');
-  sSens.oninput = () => { ctl.sens = sSens.value / 100; $('sSensV').textContent = ctl.sens.toFixed(2) + '×'; };
+  sSens.value = prefs.get('sens', 100);
+  sSens.oninput = () => {
+    ctl.sens = sSens.value / 100;
+    $('sSensV').textContent = ctl.sens.toFixed(2) + '×';
+    prefs.set('sens', +sSens.value);
+  };
+  sSens.oninput();
+
   const sRot = $('sRot');
+  sRot.value = prefs.get('rot', 19);
   sRot.oninput = () => {
     const v = sRot.value / 100;
     omega = v * TAU / CONFIG.ROT_PERIOD_CANON;
     $('sRotV').textContent = v <= 0.001 ? 'остановлено' : 'оборот за ' + Math.round(TAU / omega) + ' с';
+    prefs.set('rot', +sRot.value);
   };
+  sRot.oninput();
   /* --- зерно генерации: своё, случайное, заводское --- */
   const sSeed = $('sSeed'), sSeedV = $('sSeedV');
   const showSeed = () => {
@@ -316,7 +450,8 @@ function initUI() {
     const n = Math.floor(Number(v));
     if (!Number.isFinite(n) || n < 0) { showSeed(); return; }
     CONFIG.SEED = n >>> 0;
-    seedStore.save(CONFIG.SEED);
+    if (CONFIG.SEED === CONFIG.SEED_DEFAULT) prefs.drop('seed');
+    else prefs.set('seed', CONFIG.SEED);
     showSeed();
     rebuild();
     applyPalette(easeInOut(clamp(dayMix, 0, 1)));
@@ -327,22 +462,36 @@ function initUI() {
   $('sSeedDef').onclick = () => applySeed(CONFIG.SEED_DEFAULT);
 
   const sWind = $('sWind');
+  sWind.value = prefs.get('wind', 100);
   sWind.oninput = () => {
     windU.uWind.value = sWind.value / 100;
     $('sWindV').textContent = sWind.value > 0 ? sWind.value + '%' : 'штиль';
+    prefs.set('wind', +sWind.value);
   };
+  sWind.oninput();
   const swCycle = $('sCycle'), swFps = $('sFps');
-  swCycle.onclick = () => { autoCycle = !autoCycle; swCycle.classList.toggle('on', autoCycle); };
+  autoCycle = prefs.get('cycle', false);
+  swCycle.classList.toggle('on', autoCycle);
+  swCycle.onclick = () => {
+    autoCycle = !autoCycle;
+    swCycle.classList.toggle('on', autoCycle);
+    prefs.set('cycle', autoCycle);
+  };
+  showFps = prefs.get('fps', false);
+  swFps.classList.toggle('on', showFps);
+  $('fps').classList.toggle('show', showFps);
   swFps.onclick = () => {
     showFps = !showFps;
     swFps.classList.toggle('on', showFps);
     $('fps').classList.toggle('show', showFps);
+    prefs.set('fps', showFps);
   };
 
   $('go').onclick = () => {
     $('intro').classList.add('hide');
     setTimeout(() => { $('intro').style.display = 'none'; }, 700);
     ctl.enabled = true;
+    startAudio();                 // AudioContext можно завести только по жесту
     if (!isMobile) renderer.domElement.requestPointerLock?.();
   };
 }
@@ -355,10 +504,17 @@ const capForQuality = () => quality === 'LOW' ? 0 : (isMobile ? 3 : 4);
 const startDpr = () => quality === 'AUTO' && isMobile ? Math.min(2, capForQuality()) : capForQuality();
 const applyDpr = () => renderer.setPixelRatio(Math.min(devicePixelRatio || 1, CONFIG.DPR_STEPS[dprIndex]));
 
+/* Размер берём у самого контейнера, а не у окна. При входе в полноэкранный
+   режим окно ещё не пересчитано в момент события resize, и рендер оставался
+   прежнего размера — отсюда чёрные поля справа и снизу. ResizeObserver
+   срабатывает тогда, когда элемент действительно изменился. */
 function resize() {
-  camera.aspect = innerWidth / innerHeight;
+  const w = stage.clientWidth || innerWidth;
+  const h = stage.clientHeight || innerHeight;
+  if (!w || !h) return;
+  camera.aspect = w / h;
   camera.updateProjectionMatrix();
-  renderer.setSize(innerWidth, innerHeight, false);
+  renderer.setSize(w, h, false);
   applyDpr();
 }
 
@@ -394,10 +550,16 @@ function loop() {
     structMats.beacon.emissiveIntensity = 0.2 + (1 - dayMix) * (1 + Math.sin(elapsed * 4) * 0.6);
   }
 
+  updateTour(dt);
   updateFly(dt);
   if (!fly.on) updateControls(dt, camera);
 
+  /* звуку нужна позиция камеры в системе станции: и река, и ось живут там */
+  worldGroup.worldToLocal(_vAudio.copy(camera.position));
+  updateAudio(dt, _vAudio, ctl.speed * (ctl.boost ? CONFIG.SPEED_BOOST : 1), dayMix);
+
   renderer.render(scene, camera);
+  if (shotPending) { shotPending = false; grabShot(); }
 
   frames++; winT += dt;
   if (winT >= CONFIG.ADAPT.window) {
@@ -431,11 +593,16 @@ try {
   dprIndex = startDpr();
   resize();
 
+  if ('ResizeObserver' in window) new ResizeObserver(resize).observe(stage);
   addEventListener('resize', resize);
   visualViewport?.addEventListener('resize', resize);
   addEventListener('orientationchange', () => setTimeout(resize, 250));
+  for (const ev of ['fullscreenchange', 'webkitfullscreenchange']) {
+    document.addEventListener(ev, () => setTimeout(resize, 80));
+  }
   document.addEventListener('visibilitychange', () => {
     paused = document.hidden;
+    suspendAudio(paused);
     if (!paused) clock.getDelta();
   });
   renderer.domElement.addEventListener('webglcontextlost', e => {
