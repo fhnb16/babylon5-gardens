@@ -25,7 +25,7 @@
   <div id="brand"><b>ВАВИЛОН-5</b>Сады · цилиндр О'Нилла</div>
 
   <div id="topbar">
-    <div class="btn glass" id="bDay" title="День / ночь" aria-label="День или ночь">
+    <div class="btn glass" id="bDay" title="День" aria-label="Фаза освещения">
       <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.4"/><path d="M12 2.6v2.4M12 19v2.4M21.4 12H19M5 12H2.6M18.6 5.4l-1.7 1.7M7.1 16.9l-1.7 1.7M18.6 18.6l-1.7-1.7M7.1 7.1L5.4 5.4"/></svg>
     </div>
     <div class="btn glass on" id="bSnd" title="Звук" aria-label="Звук">
@@ -55,9 +55,13 @@
   </div>
 
   <div id="caption"><b></b><s></s></div>
+  <div id="traceInfo"></div>
   <div id="photobar">
     <div class="btn glass" id="bShot" aria-label="Снимок">
       <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.6"/><circle cx="12" cy="12" r="4.2"/></svg>
+    </div>
+    <div class="btn glass" id="bTrace" title="Трассировка" aria-label="Трассировка">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.4v3.2M12 18.4v3.2M2.4 12h3.2M18.4 12h3.2M5.2 5.2l2.3 2.3M16.5 16.5l2.3 2.3M18.8 5.2l-2.3 2.3M7.5 16.5l-2.3 2.3"/></svg>
     </div>
     <div class="btn glass" id="bPhotoExit" aria-label="Выйти из фото-режима">
       <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
@@ -82,8 +86,8 @@
   <div class="btn close" id="setClose"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></div>
   <h2>Настройки</h2>
   <div class="row">
-    <label>Качество<small>Плотность мира и разрешение текстур</small></label>
-    <select id="sQual"><option value="AUTO">АВТО</option><option value="LOW">НИЗКОЕ</option><option value="HIGH">ВЫСОКОЕ</option></select>
+    <label>Качество<small>Плотность мира, детализация крон, следы домов</small></label>
+    <select id="sQual"><option value="AUTO">АВТО</option><option value="LOW">НИЗКОЕ</option><option value="HIGH">ВЫСОКОЕ</option><option value="ULTRA">УЛЬТРА</option></select>
   </div>
   <div class="row">
     <label>Чувствительность обзора<small id="sSensV">1.00×</small></label>
@@ -115,6 +119,19 @@
     </select>
   </div>
   <div class="row">
+    <label>Сглаживание<small id="sAAv">только MSAA</small></label>
+    <div class="sw" id="sAAon"></div>
+  </div>
+  <div class="row" id="sAArow">
+    <label>Способ<small id="sAAcost">—</small></label>
+    <select id="sAA">
+      <option value="fxaa">FXAA</option>
+      <option value="1.25">СУПЕРСЭМПЛИНГ ×1.25</option>
+      <option value="1.5">СУПЕРСЭМПЛИНГ ×1.5</option>
+      <option value="2">СУПЕРСЭМПЛИНГ ×2</option>
+    </select>
+  </div>
+  <div class="row">
     <label>Насыщенность зелени<small id="sSatV">62%</small></label>
     <input type="range" id="sSat" min="20" max="120" value="62">
   </div>
@@ -127,7 +144,7 @@
     <input type="range" id="sWind" min="0" max="200" value="100">
   </div>
   <div class="row">
-    <label>Авто-цикл дня и ночи<small>Смена каждые 90 секунд</small></label>
+    <label>Авто-цикл освещения<small>День → закат → ночь по кругу</small></label>
     <div class="sw" id="sCycle"></div>
   </div>
   <div class="row">
@@ -162,6 +179,8 @@
       <h3>Режимы</h3>
       <p>🎞 Авто-тур — в списке точек, облёт с подписями</p>
       <p>📷 Фото-режим — HUD прячется, затвор сохраняет PNG</p>
+      <p>Снимок рендерится вчетверо крупнее и ужимается</p>
+      <p>В фото-режиме ✳ — трассировка затенения, затем затвор</p>
       <p>Сезон, качество и громкость — в настройках</p>
       <p>Все настройки и зерно сохраняются</p>
     </div>

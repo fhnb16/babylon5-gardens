@@ -10,6 +10,21 @@ const tint = (hex, k) => {
   return `rgb(${c[0]},${c[1]},${c[2]})`;
 };
 
+/** Плавная линия через точки: ведём кривую по серединам отрезков, опорные
+    точки становятся касательными. Ломаная по случайному блужданию давала
+    зигзаги, которые в парке читались как небрежная штриховка. */
+const smoothLine = (ctx, pts, sx = 1, sy = 1) => {
+  ctx.beginPath();
+  ctx.moveTo(pts[0][0] * sx, pts[0][1] * sy);
+  for (let k = 1; k < pts.length - 1; k++) {
+    ctx.quadraticCurveTo(pts[k][0] * sx, pts[k][1] * sy,
+      (pts[k][0] + pts[k + 1][0]) / 2 * sx, (pts[k][1] + pts[k + 1][1]) / 2 * sy);
+  }
+  const e = pts[pts.length - 1];
+  ctx.lineTo(e[0] * sx, e[1] * sy);
+  ctx.stroke();
+};
+
 const cv = (w, h) => {
   const c = document.createElement('canvas');
   c.width = w; c.height = h;
@@ -26,9 +41,9 @@ const tex = (c, { srgb = true, wrap = false } = {}) => {
    КОРПУС: альбедо + маска каналов (R=вода, G=растительность, B=покрытие)
    Оба холста рисуются из одних и тех же секторов CONFIG.
    ═══════════════════════════════════════════════════════════════════════════ */
-export function makeHullMaps(size, rnd) {
+export function makeHullMaps(size, maskSize, rnd) {
   const W = size, H = size, A = cv(W, H);
-  const M = cv(CONFIG.MASK_TEX, CONFIG.MASK_TEX);
+  const M = cv(maskSize, maskSize);
   const X = deg => (deg / 360) * W;
   const XM = deg => (deg / 360) * M.c.width;
   const a = A.g, m = M.g;
@@ -105,17 +120,24 @@ export function makeHullMaps(size, rnd) {
       a.fill();
     }
     /* гравийные дорожки — и в маску как покрытие */
+    /* Дорожка — плавный меандр из двух гармоник, а не случайное блуждание:
+       ломаная давала зигзаги под прямыми углами. */
     a.globalAlpha = 0.4; a.strokeStyle = '#c4b894'; a.lineWidth = 3;
     m.strokeStyle = '#000040'; m.lineWidth = 2;   // слабый B: зерно есть, фонарей нет
     for (let i = 0; i < 14; i++) {
-      let px = x0 + rnd() * (x1 - x0), py = 0;
-      const pts = [[px, py]];
-      while (py < H) { py += 26; px += (rnd() - .5) * 48; pts.push([px, py]); }
-      a.beginPath(); m.beginPath();
-      a.moveTo(pts[0][0], pts[0][1]);
-      m.moveTo(pts[0][0] / W * M.c.width, pts[0][1] / H * mh);
-      for (const [qx, qy] of pts) { a.lineTo(qx, qy); m.lineTo(qx / W * M.c.width, qy / H * mh); }
-      a.stroke(); m.stroke();
+      const base = x0 + rnd() * (x1 - x0);
+      const ph0 = rnd() * 6.2832, ph1 = rnd() * 6.2832;
+      const am0 = 16 + rnd() * 30, am1 = 5 + rnd() * 11;
+      const fr0 = 0.005 + rnd() * 0.004, fr1 = 0.017 + rnd() * 0.011;
+      const drift = (rnd() - 0.5) * 0.25;
+      const pts = [];
+      for (let py = -20; py <= H + 20; py += 16) {
+        pts.push([base + py * drift
+          + Math.sin(py * fr0 + ph0) * am0
+          + Math.sin(py * fr1 + ph1) * am1, py]);
+      }
+      smoothLine(a, pts);
+      smoothLine(m, pts, M.c.width / W, mh / H);
     }
     a.globalAlpha = 1; a.restore();
   }
@@ -276,9 +298,7 @@ export function makeHullMaps(size, rnd) {
     for (let y = -20; y <= H + 20; y += 24) pts.push([cx + Math.sin(y * 0.011 + s0) * half * 0.55 + (rnd() - .5) * 6, y]);
     const stroke = (ctx, w, col, sx, sy) => {
       ctx.strokeStyle = col; ctx.lineWidth = w; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
-      ctx.beginPath(); ctx.moveTo(pts[0][0] * sx, pts[0][1] * sy);
-      for (const [px, py] of pts) ctx.lineTo(px * sx, py * sy);
-      ctx.stroke();
+      smoothLine(ctx, pts, sx, sy);
     };
     stroke(a, half * 2 + 22, '#a8a173', 1, 1);
     stroke(a, half * 2 + 11, '#7f9a55', 1, 1);
@@ -408,8 +428,17 @@ export function makeFacade(rnd, variant) {
       }
     }
   }
-  a.g.fillStyle = 'rgba(20,26,34,.45)';
-  a.g.fillRect(0, H - 11, W, 11);
+  /* Контакт со землёй читается только если темнеет и САМ объект, а не одна
+     лишь земля под ним: плоская декаль на грунте без этого выглядит
+     наклейкой. Мягкий градиент по нижней восьмой части стены. */
+  const foot = Math.round(H * 0.13);
+  for (let y = 0; y < foot; y++) {
+    const k = y / foot;                       // 0 у пола, 1 вверх
+    a.g.fillStyle = `rgba(14,19,26,${(0.62 * Math.pow(1 - k, 1.7)).toFixed(3)})`;
+    a.g.fillRect(0, H - foot + y, W, 1);
+  }
+  a.g.fillStyle = 'rgba(20,26,34,.5)';
+  a.g.fillRect(0, H - 3, W, 3);               // тень примыкания
 
   return { map: tex(a.c), emis: tex(b.c) };
 }
@@ -506,6 +535,38 @@ export function makeBlobTexture() {
   gr.addColorStop(1, 'rgba(0,0,0,0)');
   g.fillStyle = gr; g.fillRect(0, 0, S, S);
   return tex(c);
+}
+
+/** След дома на земле. Свет — труба на оси: поперёк станции она видна под
+    5°, вдоль оси под 142°. Поэтому тень резкая поперёк улицы и растянутая
+    на десятки метров вдоль оси. Плюс тёмная кайма у самого контакта —
+    смыкание объекта с землёй, из-за которого появляется ощущение объёма. */
+export function makeFootprintTexture() {
+  const S = 256, { c, g } = cv(S, S);
+  const px = S / 2, py = S / 2;
+  const halfX = S * 0.42, halfY = S * 0.21;      // след внутри декали
+  g.clearRect(0, 0, S, S);
+  for (let y = 0; y < S; y++) {
+    const dy = Math.abs(y - py) / halfY;
+    /* вдоль оси — длинный мягкий спад */
+    const fy = dy <= 1 ? 1 : Math.max(0, 1 - (dy - 1) / 1.35);
+    if (fy <= 0) continue;
+    for (let x = 0; x < S; x++) {
+      const dx = Math.abs(x - px) / halfX;
+      /* поперёк улицы — почти резкий край */
+      const fx = dx <= 1 ? 1 : Math.max(0, 1 - (dx - 1) / 0.16);
+      if (fx <= 0) continue;
+      let a2 = fx * fy * fy;
+      /* контактная кайма: у самой кромки следа темнее */
+      const edge = Math.max(dx, dy);
+      if (edge > 0.62 && edge <= 1.04) a2 = Math.min(1, a2 * 1.9);
+      g.fillStyle = `rgba(0,0,0,${(a2 * 0.97).toFixed(3)})`;
+      g.fillRect(x, y, 1, 1);
+    }
+  }
+  const tex2 = new THREE.CanvasTexture(c);
+  tex2.colorSpace = THREE.SRGBColorSpace;
+  return tex2;
 }
 
 export function makeGlowTexture() {

@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { CONFIG } from './config.js';
 import { mulberry32, D2R, TAU, surfaceQuat, surfacePos, mergeGeos, rod, panelUV, deepDispose } from './util.js';
 import { makeEndCapTexture } from './textures.js';
+import { patchRoughnessAlpha } from './world.js';
 
 /* Материалы, которыми управляет палитра день/ночь */
 export const structMats = { sun: null, glass: [], beacon: null, liftGlass: null };
@@ -26,6 +27,7 @@ function buildAxis(group, panel) {
   const A = CONFIG.AXIS, R = CONFIG.R, HL = CONFIG.L / 2;
   const add = o => { group.add(o); parts.push(o); return o; };
   const metal = new THREE.MeshStandardMaterial({ map: panel, color: 0x9099a3, roughness: 0.45, metalness: 0.62 });
+  patchRoughnessAlpha(metal);
 
   /* --- светящаяся труба на оси --- */
   const tube = new THREE.CylinderGeometry(CONFIG.SUN.r, CONFIG.SUN.r, CONFIG.SUN.len, 20, 1, true);
@@ -218,6 +220,7 @@ function buildTower(group, panel) {
   const concrete = new THREE.MeshStandardMaterial({
     map: panel, color: 0xc0a993, roughness: 0.78, metalness: 0.06
   });
+  patchRoughnessAlpha(concrete);
   g.add(new THREE.Mesh(panelUV(mergeGeos(shell), CONFIG.PANEL_TILE, T.h / T.modelH), concrete));
 
   /* --- стекло: поясное остекление барабанов и ротонда кабинета --- */
@@ -230,6 +233,7 @@ function buildTower(group, panel) {
     color: 0x16283c, roughness: 0.09, metalness: 0.72,
     emissive: 0xffe6bd, emissiveIntensity: 0
   });
+  patchRoughnessAlpha(glassMat);
   structMats.glass.push(glassMat);
   g.add(new THREE.Mesh(panelUV(mergeGeos(glass), CONFIG.PANEL_TILE * 0.5, T.h / T.modelH), glassMat));
 

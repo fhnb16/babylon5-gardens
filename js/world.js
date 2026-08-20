@@ -4,7 +4,8 @@ import {
   mulberry32, D2R, TAU, clamp, pick, zoneAt, surfaceQuat, surfacePos, mergeGeos, rod, facadeUV, natural, cityBlock, cityCenter, cellInfo, cellUsable, pickFloors, deepDispose
 } from './util.js';
 import {
-  makeHullMaps, makeDetailTexture, makeFacade, makePanelTexture, makeSoftSprite, makeBlobTexture
+  makeHullMaps, makeDetailTexture, makeFacade, makePanelTexture, makeSoftSprite,
+  makeBlobTexture, makeFootprintTexture
 } from './textures.js';
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -132,6 +133,21 @@ function patchHullMaterial(mat, nArm, nSpar) {
   mat.customProgramCacheKey = () => 'b5-hull';
 }
 
+/** Шероховатость пишем в альфа-канал кадра. Непрозрачные материалы альфу не
+    используют — смешивание им выключено, — а трассировке она нужна: без неё
+    негде взять, что зеркально (вода, металл), а что нет. Одна строка на
+    материал вместо отдельного G-буфера с ещё одним проходом сцены. */
+export function patchRoughnessAlpha(mat) {
+  const prev = mat.onBeforeCompile;
+  mat.onBeforeCompile = (s, r) => {
+    prev?.call(mat, s, r);
+    s.fragmentShader = s.fragmentShader.replace('#include <dithering_fragment>',
+      '#include <dithering_fragment>\n gl_FragColor.a = roughnessFactor;');
+  };
+  const key = mat.customProgramCacheKey;
+  mat.customProgramCacheKey = () => (key ? key.call(mat) : '') + '-ra';
+}
+
 /** Ветер в кронах: сдвигаем вершины инстанса, фаза — из его же матрицы */
 function patchWindMaterial(mat) {
   mat.onBeforeCompile = s => {
@@ -145,9 +161,43 @@ function patchWindMaterial(mat) {
           float amp = 0.035 * uWind * ( transformed.y + 0.9 );
           transformed.x += sway * amp;
           transformed.z += cos( uTime * 1.3 + ph ) * amp * 0.6;
+          // Своя фаза у каждой вершины: крона шелестит, а не качается целиком.
+          // Смещаем ВДОЛЬ РАДИУСА, а не вдоль нормали: геометрия
+          // неиндексированная, у шести копий одной вершины шесть разных
+          // нормалей граней, и сдвиг по ним растаскивал копии — крона
+          // расходилась щелями. Радиус у всех копий общий.
+          float leafPh = ph + transformed.y * 5.3 + transformed.x * 3.1 + transformed.z * 2.7;
+          transformed += normalize( transformed ) * sin( uTime * 3.6 + leafPh ) * 0.055 * uWind;
         #endif`);
   };
   mat.customProgramCacheKey = () => 'b5-wind';
+}
+
+/** Крона: правильный икосаэдр читается как гранёный камень. Смещаем вершины
+    по их направлению — форма перестаёт быть правильным телом, — и раскрашиваем
+    каждую грань своей светлотой. Получается рябь листвы, а не многогранник.
+    Вершины дедуплицируются по координатам, иначе поверхность разойдётся. */
+function foliageGeo(detail, rnd, wobble, dither) {
+  const g = new THREE.IcosahedronGeometry(1, detail);
+  const p = g.attributes.position;
+  const seen = new Map();
+  for (let k = 0; k < p.count; k++) {
+    const x = p.getX(k), y = p.getY(k), z = p.getZ(k);
+    const key = x.toFixed(4) + ',' + y.toFixed(4) + ',' + z.toFixed(4);
+    let s = seen.get(key);
+    if (s === undefined) { s = 1 + (rnd() - 0.5) * 2 * wobble; seen.set(key, s); }
+    p.setXYZ(k, x * s, y * s, z * s);
+  }
+  g.computeVertexNormals();
+
+  /* геометрия неиндексированная — красим по граням, не по вершинам */
+  const col = new Float32Array(p.count * 3);
+  for (let f = 0; f < p.count; f += 3) {
+    const v = 1 - dither / 2 + rnd() * dither;
+    for (let k = 0; k < 3; k++) col.fill(v, (f + k) * 3, (f + k) * 3 + 3);
+  }
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  return g;
 }
 
 /** Горизонтальные грани переводим в кровельную полосу текстуры фасада:
@@ -209,19 +259,20 @@ function buildingGeo(type) {
 /* ═══════════════════════════════════════════════════════════════════════════
    СБОРКА МИРА
    ═══════════════════════════════════════════════════════════════════════════ */
-export const worldMats = { bld: [], nav: null, blob: null };
+export const worldMats = { bld: [], nav: null, blob: null, print: null };
 let parts = [];
 
 export function disposeWorld(group) {
   for (const o of parts) { group.remove(o); deepDispose(o); }
   parts = [];
-  worldMats.bld = []; worldMats.nav = null; worldMats.blob = null;
+  worldMats.bld = []; worldMats.nav = null; worldMats.blob = null; worldMats.print = null;
 }
 
 export function buildWorld(group, renderer, quality) {
   disposeWorld(group);
+  const Q = CONFIG.QUALITY[quality] || CONFIG.QUALITY.HIGH;
   const LOW = quality === 'LOW';
-  const i = LOW ? 1 : 0;
+  const i = Q.count;
   const rnd = mulberry32(CONFIG.SEED);
   const R = CONFIG.R, L = CONFIG.L, HL = L / 2;
   const maxAniso = renderer.capabilities.getMaxAnisotropy();
@@ -230,7 +281,7 @@ export function buildWorld(group, renderer, quality) {
   /* ─────────── КОРПУС ─────────── */
   const hullGeo = new THREE.CylinderGeometry(R, R, L, CONFIG.HULL_SEG, 1, true);
   hullGeo.rotateX(Math.PI / 2);
-  const { albedo, mask } = makeHullMaps(LOW ? CONFIG.HULL_TEX.LOW : CONFIG.HULL_TEX.HIGH,
+  const { albedo, mask } = makeHullMaps(Q.hullTex, Q.mask,
     mulberry32(CONFIG.SEED + 7));
 
   /* BackSide зеркалит U. Самотест сверяет реальные UV геометрии с мировым θ. */
@@ -238,7 +289,7 @@ export function buildWorld(group, renderer, quality) {
   if (!flip && !uvSelfTest(hullGeo, false)) console.warn('UV корпуса: самотест не сошёлся');
   for (const t of [albedo, mask]) {
     if (flip) { t.repeat.x = -1; t.offset.x = 0.5; }
-    t.anisotropy = Math.min(8, maxAniso);
+    t.anisotropy = Math.min(Q.aniso, maxAniso);
   }
   const detail = makeDetailTexture(mulberry32(CONFIG.SEED + 11));
   detail.anisotropy = Math.min(4, maxAniso);
@@ -259,6 +310,7 @@ export function buildWorld(group, renderer, quality) {
     map: albedo, side: THREE.BackSide, roughness: 0.95, metalness: 0.02
   });
   patchHullMaterial(hullMat, arms.length, CONFIG.AXIS.spars.length);
+  patchRoughnessAlpha(hullMat);
   add(new THREE.Mesh(hullGeo, hullMat));
   hullMat.userData.extra = [mask, detail];   // чтобы освободить при пересборке
 
@@ -354,7 +406,8 @@ export function buildWorld(group, renderer, quality) {
 
   const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), v3 = new THREE.Vector3();
   const sc = new THREE.Vector3(), qs = new THREE.Quaternion(), UP = new THREE.Vector3(0, 1, 0);
-  const shadows = [];   // [θ, z, радиус пятна]
+  const shadows = [];   // круглые пятна: [θ, z, радиус, подъём]
+  const prints = [];    // следы домов: [θ, z, ширина, глубина, поворот]
 
   const instance = (geo, mat, list, fn) => {
     const im = new THREE.InstancedMesh(geo, mat, list.length);
@@ -375,6 +428,7 @@ export function buildWorld(group, renderer, quality) {
       map, emissiveMap: emis, emissive: 0xffffff, emissiveIntensity: 0,
       roughness: 0.68, metalness: 0.1
     });
+    patchRoughnessAlpha(mat);
     worldMats.bld.push(mat);
     instance(buildingGeo(v), mat, plots[v], (k, t, z, im, info) => {
       const s = CONFIG.BLD[v];
@@ -388,7 +442,7 @@ export function buildWorld(group, renderer, quality) {
       im.setMatrixAt(k, m4);
       im.setColorAt(k, natural(tints[(info.tint * tints.length) | 0],
         0.5 + CONFIG.SATURATION * 0.5, new THREE.Color()));
-      shadows.push([t, z, Math.max(w, d) * 0.75, 0]);
+      prints.push([t, z, w, d, info.spin]);
     });
   }
 
@@ -415,8 +469,16 @@ export function buildWorld(group, renderer, quality) {
       hills.push([t, z, rad, h]);
       m4.compose(surfacePos(t, R, z, v3), surfaceQuat(t, q), sc.set(rad, h, rad));
       im.setMatrixAt(k, m4);
+      /* SRGBColorSpace обязателен: по умолчанию setHSL задаёт цвет в рабочем
+         ЛИНЕЙНОМ пространстве, и светлота 0.30 выходит как 0.58 в sRGB —
+         холмы получались вдвое ярче древесных крон и выглядели инородно.
+         Оттенок земляной: от оливкового к траве. */
+      const H = CONFIG.HILL;
       im.setColorAt(k, new THREE.Color().setHSL(
-        0.24 + rnd() * 0.07, (0.3 + rnd() * 0.2) * CONFIG.SATURATION, 0.23 + rnd() * 0.13));
+        H.hue[0] + rnd() * (H.hue[1] - H.hue[0]),
+        (H.sat[0] + rnd() * (H.sat[1] - H.sat[0])) * CONFIG.SATURATION,
+        H.lum[0] + rnd() * (H.lum[1] - H.lum[0]),
+        THREE.SRGBColorSpace));
     });
 
   /** Высота купола холма в точке — чтобы дерево стояло на склоне, а не в нём */
@@ -440,7 +502,7 @@ export function buildWorld(group, renderer, quality) {
     const u = Math.pow((rnd() + rnd()) / 2, TR.bias);    // чаще невысокие
     return TR.h[0] + u * (TR.h[1] - TR.h[0]);
   };
-  const treePts = sample(W_TREE, CONFIG.COUNT.trees[i],
+  const treePts = sample(W_TREE, Math.round(CONFIG.COUNT.trees[i] * Q.trees),
     () => treeH() * TR.crown * TR.spacing, true);
   const th = new Float32Array(treePts.length), tr = new Float32Array(treePts.length);
   const tu = new Float32Array(treePts.length);          // подъём по склону холма
@@ -450,9 +512,21 @@ export function buildWorld(group, renderer, quality) {
     tu[k] = relief(treePts[k][0], treePts[k][1]);
   }
 
+  /* Комель ствола темнеет к земле — та же причина, что и у цоколя дома:
+     без затемнения на самом объекте дерево кажется воткнутым в поверхность. */
+  const trunkGeo = new THREE.CylinderGeometry(0.075, 0.13, 1, 6);
+  {
+    const tp = trunkGeo.attributes.position;
+    const tc = new Float32Array(tp.count * 3);
+    for (let k = 0; k < tp.count; k++) {
+      const v = 0.34 + 0.66 * Math.min(1, Math.pow(tp.getY(k) + 0.5, 0.55) * 1.15);
+      tc.fill(v, k * 3, k * 3 + 3);
+    }
+    trunkGeo.setAttribute('color', new THREE.BufferAttribute(tc, 3));
+  }
   instance(
-    new THREE.CylinderGeometry(0.075, 0.13, 1, 6),
-    new THREE.MeshStandardMaterial({ color: 0x6b5236, roughness: 1 }),
+    trunkGeo,
+    new THREE.MeshStandardMaterial({ color: 0x6b5236, roughness: 1, vertexColors: true }),
     treePts,
     (k, t, z, im) => {
       const hs = th[k] / TR.trunk;                    // полная высота дерева
@@ -461,9 +535,13 @@ export function buildWorld(group, renderer, quality) {
     });
 
   const SZ = CONFIG.SEASONS[CONFIG.SEASON] || CONFIG.SEASONS.summer;
-  const crownMat = new THREE.MeshStandardMaterial({ roughness: 0.9, flatShading: true });
+  const FOL = CONFIG.FOLIAGE, det = Q.foliage;
+  const crownMat = new THREE.MeshStandardMaterial({
+    roughness: 0.9, flatShading: true, vertexColors: true
+  });
   patchWindMaterial(crownMat);
-  instance(new THREE.IcosahedronGeometry(1, 0), crownMat, treePts, (k, t, z, im) => {
+  instance(foliageGeo(det, mulberry32(CONFIG.SEED + 5), FOL.wobble, FOL.dither),
+    crownMat, treePts, (k, t, z, im) => {
     const r = tr[k];
     surfaceQuat(t, q).multiply(qs.setFromAxisAngle(UP, rnd() * TAU));
     m4.compose(surfacePos(t, R - tu[k] - (th[k] + r * 0.55), z, v3), q, sc.set(r, r * (0.85 + rnd() * 0.45), r));
@@ -474,28 +552,44 @@ export function buildWorld(group, renderer, quality) {
   });
 
   /* ─────────── КУСТЫ ─────────── */
-  const bushMat = new THREE.MeshStandardMaterial({ roughness: 1, flatShading: true });
+  const bushMat = new THREE.MeshStandardMaterial({
+    roughness: 1, flatShading: true, vertexColors: true
+  });
   patchWindMaterial(bushMat);
   const bushCols = SZ.bushes;
-  instance(new THREE.IcosahedronGeometry(1, 0), bushMat, sample(W_BUSH, CONFIG.COUNT.bushes[i], 1.0),
-    (k, t, z, im) => {
-      const s = 0.55 + rnd() * 1.0, up = relief(t, z);
+  const BS = CONFIG.BUSH;
+  const bushS = () => BS.s[0] + rnd() * (BS.s[1] - BS.s[0]);
+  instance(
+    foliageGeo(0, mulberry32(CONFIG.SEED + 6), FOL.wobble * 1.3, FOL.dither),
+    bushMat,
+    sample(W_BUSH, Math.round(CONFIG.COUNT.bushes[i] * Q.trees), () => bushS() * BS.spacing, true),
+    (k, t, z, im, rad) => {
+      const s = rad / BS.spacing, up = relief(t, z);
       surfaceQuat(t, q).multiply(qs.setFromAxisAngle(UP, rnd() * TAU));
-      m4.compose(surfacePos(t, R - up - s * 0.45, z, v3), q, sc.set(s, s * 0.7, s));
+      m4.compose(surfacePos(t, R - up - s * BS.flat * 0.45, z, v3), q,
+        sc.set(s, s * BS.flat, s));
       im.setMatrixAt(k, m4);
       im.setColorAt(k, natural(pick(rnd, bushCols), CONFIG.SATURATION, new THREE.Color()));
-      shadows.push([t, z, s * 1.4, up]);
+      shadows.push([t, z, s * 1.3, up]);
     });
 
-  /* ─────────── КОНТАКТНЫЕ ТЕНИ ─────────── */
-  const blobGeo = new THREE.PlaneGeometry(1, 1);
-  blobGeo.rotateX(-Math.PI / 2);                  // нормаль в локальный +Y
+  /* ─────────── КОНТАКТНЫЕ ТЕНИ ───────────
+     Свет — труба на оси, поэтому тень падает прямо под объект. Для крон это
+     круглое пятно, для домов — вытянутый след: поперёк улицы источник виден
+     под 5°, вдоль оси под 142°, отсюда резкая кромка и длинный шлейф.
+     Кайма у кромки работает как контактное затемнение. */
+  const decal = new THREE.PlaneGeometry(1, 1);
+  decal.rotateX(-Math.PI / 2);                    // нормаль в локальный +Y
   const blobMat = new THREE.MeshBasicMaterial({
     map: makeBlobTexture(), transparent: true, opacity: 0.85,
     depthWrite: false, fog: true
   });
   worldMats.blob = blobMat;
-  const blobs = new THREE.InstancedMesh(blobGeo, blobMat, shadows.length);
+
+  /* на LOW следы домов не строим — они идут круглыми пятнами вместе с зеленью */
+  if (!Q.footprint) for (const [t, z, w2, d2] of prints) shadows.push([t, z, Math.max(w2, d2) * 0.75, 0]);
+
+  const blobs = new THREE.InstancedMesh(decal, blobMat, shadows.length);
   blobs.frustumCulled = false;
   blobs.renderOrder = 1;
   for (let k = 0; k < shadows.length; k++) {
@@ -505,6 +599,28 @@ export function buildWorld(group, renderer, quality) {
   }
   blobs.instanceMatrix.needsUpdate = true;
   add(blobs);
+
+  if (Q.footprint) {
+    const printMat = new THREE.MeshBasicMaterial({
+      map: makeFootprintTexture(), transparent: true, opacity: 0.85,
+      depthWrite: false, fog: true
+    });
+    worldMats.print = printMat;
+    const pm = new THREE.InstancedMesh(decal, printMat, prints.length);
+    pm.frustumCulled = false;
+    pm.renderOrder = 1;
+    const P = CONFIG.PRINT;
+    for (let k = 0; k < prints.length; k++) {
+      const [t, z, w2, d2, spin] = prints[k];
+      const along = spin % 2;                     // куда развёрнут дом
+      surfaceQuat(t, q).multiply(qs.setFromAxisAngle(UP, spin * Math.PI / 2));
+      m4.compose(surfacePos(t, R - 0.05, z, v3), q,
+        sc.set((along ? d2 : w2) * P.across, 1, (along ? w2 : d2) * P.along));
+      pm.setMatrixAt(k, m4);
+    }
+    pm.instanceMatrix.needsUpdate = true;
+    add(pm);
+  }
 
   /* ─────────── ГАБАРИТНЫЕ ОГНИ ─────────── */
   const np = [];

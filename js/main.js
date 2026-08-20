@@ -6,6 +6,8 @@ import { buildWorld, worldMats, hullU, windU } from './world.js';
 import { buildStructures, structMats, updateStructures } from './structures.js';
 import { ctl, isMobile, initControls, updateControls, syncFromCamera, resetStick, stationUp } from './controls.js';
 import { audio, startAudio, updateAudio, setVolume, setEnabled, suspendAudio } from './audio.js';
+import { trace, startTrace, traceStep, stopTrace,
+  setFxaa, resizePost, renderFrame } from './photo.js';
 
 const $ = id => document.getElementById(id);
 const stage = $('stage');
@@ -43,7 +45,8 @@ let hemi, lights = [], glow, clouds, motes, moteMat, panel;
    ═══════════════════════════════════════════════════════════════════════════ */
 function boot() {
   renderer = new THREE.WebGLRenderer({
-    antialias: !isMobile, powerPreference: 'high-performance', stencil: false
+    /* MSAA включаем и на мобильных: у тайловых GPU он почти бесплатен */
+    antialias: true, powerPreference: 'high-performance', stencil: false
   });
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -66,7 +69,7 @@ function boot() {
 
   buildAmbient();
   rebuild();
-  applyPalette(1);
+  applyPalette(0);
   goTo(0, true);
 }
 
@@ -141,50 +144,58 @@ function rebuild() {
    Ночью солнечная трубка не гаснет, а тлеет холодным — ночник на оси,
    который даёт эмбиентную подсветку вместо чёрной пустоты.
    ═══════════════════════════════════════════════════════════════════════════ */
-let dayMix = 1, dayTarget = 1;
+/* Фаза освещения идёт по кругу: 0 день → 1 закат → 2 ночь → снова день.
+   Хранится дробной, поэтому переход всегда плавный, а не переключением. */
+let phase = 0, phaseTo = 0, daylight = 1;
 const _a = new THREE.Color(), _b = new THREE.Color(), _r = new THREE.Color();
-const mix = (d, n, t, out = _r) => out.copy(_a.setHex(d)).lerp(_b.setHex(n), 1 - t);
+const mixC = (a, b, t, out = _r) => out.copy(_a.setHex(a)).lerp(_b.setHex(b), t);
 
-function applyPalette(t) {
-  const D = CONFIG.DAY, N = CONFIG.NIGHT;
+function applyPalette(ph) {
+  const P = CONFIG.PHASES;
+  const i = Math.floor(ph) % P.length;
+  const A = CONFIG[P[i]], B = CONFIG[P[(i + 1) % P.length]];
+  const t = ph - Math.floor(ph);
+  const f = (k) => lerp(A[k], B[k], t);
+  daylight = f('light');
 
-  mix(D.fog, N.fog, t);
+  mixC(A.fog, B.fog, t);
   fog.color.copy(_r); scene.background.copy(_r);
-  fog.density = lerp(N.fogD, D.fogD, t);
+  fog.density = f('fogD');
 
-  hemi.color.copy(mix(D.hemiSky, N.hemiSky, t));
-  hemi.groundColor.copy(mix(D.hemiGround, N.hemiGround, t));
-  hemi.intensity = lerp(N.hemiInt, D.hemiInt, t);
+  hemi.color.copy(mixC(A.hemiSky, B.hemiSky, t));
+  hemi.groundColor.copy(mixC(A.hemiGround, B.hemiGround, t));
+  hemi.intensity = f('hemiInt');
 
-  mix(D.pointCol, N.pointCol, t);
-  for (const l of lights) { l.color.copy(_r); l.intensity = lerp(N.pointInt, D.pointInt, t); }
+  mixC(A.pointCol, B.pointCol, t);
+  for (const l of lights) { l.color.copy(_r); l.intensity = f('pointInt'); }
 
-  const sunE = lerp(N.sunEmis, D.sunEmis, t);
-  mix(D.sunCol, N.sunCol, t);
+  const sunE = f('sunEmis');
+  mixC(A.sunCol, B.sunCol, t);
   if (structMats.sun) structMats.sun.color.copy(_r).multiplyScalar(sunE);
   glow.material.color.copy(_r);
-  glow.material.opacity = lerp(N.glowOp, D.glowOp, t);
+  glow.material.opacity = f('glowOp');
 
-  const emis = lerp(N.winEmis, D.winEmis, t);
+  const emis = f('winEmis');
   for (const m of worldMats.bld) m.emissiveIntensity = emis;
   for (const m of structMats.glass) m.emissiveIntensity = emis * 0.45;
-  if (structMats.liftGlass) structMats.liftGlass.emissiveIntensity = lerp(1.4, 0.3, t);
+  if (structMats.liftGlass) structMats.liftGlass.emissiveIntensity = lerp(1.4, 0.3, daylight);
 
   if (worldMats.nav) {
-    worldMats.nav.opacity = clamp(lerp(N.navInt, D.navInt, t), 0, 1);
-    worldMats.nav.size = lerp(N.navSize, D.navSize, t);
+    worldMats.nav.opacity = clamp(f('navInt'), 0, 1);
+    worldMats.nav.size = f('navSize');
   }
   /* контактные тени слабеют вместе с источником */
-  if (worldMats.blob) worldMats.blob.opacity = lerp(0.24, 1.0, t);
+  if (worldMats.blob) worldMats.blob.opacity = lerp(0.26, 1.0, daylight);
+  if (worldMats.print) worldMats.print.opacity = lerp(0.3, 1.0, daylight);
 
-  moteMat.color.copy(mix(D.moteCol, N.moteCol, t));
-  moteMat.opacity = lerp(N.moteOp, D.moteOp, t);
-  moteMat.size = lerp(0.72, 0.55, t);
-  clouds.material.opacity = lerp(0.06, 0.22, t);
+  moteMat.color.copy(mixC(A.moteCol, B.moteCol, t));
+  moteMat.opacity = f('moteOp');
+  moteMat.size = lerp(0.72, 0.55, daylight);
+  clouds.material.opacity = lerp(0.06, 0.22, daylight);
 
-  hullU.uSparShade.value = lerp(N.sparShade, D.sparShade, t);
-  hullU.uCityGlow.value = lerp(N.cityGlow, D.cityGlow, t);
-  hullU.uWaterTint.value.copy(mix(D.waterTint, N.waterTint, t));
+  hullU.uSparShade.value = f('sparShade');
+  hullU.uCityGlow.value = f('cityGlow');
+  hullU.uWaterTint.value.copy(mixC(A.waterTint, B.waterTint, t));
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -256,6 +267,7 @@ function updateFly(dt) {
   if (fly.t >= 1) { fly.on = false; syncFromCamera(camera); }
 }
 function cancelFly() { fly.on = false; setTour(false); syncFromCamera(camera); }
+const stopTracing = () => { if (trace.active) setTrace(false); };
 
 /* ═══════════════════════════════════════════════════════════════════════════
    АВТО-ТУР
@@ -306,18 +318,63 @@ let cleanView = false, shotPending = false;
 function setClean(on) {
   cleanView = on;
   document.body.classList.toggle('clean', on);
-  if (on) closeSheets();
+  if (on) closeSheets(); else setTrace(false);
 }
-function grabShot() {
-  const name = `babylon5-${CONFIG.SEED}-${Date.now()}.png`;
-  renderer.domElement.toBlob(blob => {
+
+/* Трассировка идёт только по неподвижному кадру: любое движение мира или
+   камеры обнулило бы накопленное. Поэтому на время съёмки мир замирает. */
+function setTrace(on) {
+  const info = $('traceInfo'), btn = $('bTrace');
+  if (on && !trace.active) {
+    shotBoost = CONFIG.SHOT.scale;      // трассируем сразу в масштабе снимка
+    resize();
+    startTrace(renderer, scene, camera, windU.uWind);
+  } else if (!on && trace.active) {
+    stopTrace(windU.uWind);
+    shotBoost = 1;
+    resize();
+  }
+  btn.classList.toggle('on', trace.active);
+  info.classList.toggle('show', trace.active);
+  if (!trace.active) info.textContent = '';
+}
+function saveCanvas(w, h) {
+  /* Ужимаем крупный кадр до нативного размера: каждый пиксель усредняет
+     scale² отсчётов — то же, что делает суперсэмплинг, только без платы
+     за него в реальном времени. */
+  const src = renderer.domElement;
+  const c = document.createElement('canvas');
+  c.width = w; c.height = h;
+  const g = c.getContext('2d');
+  g.imageSmoothingEnabled = true;
+  g.imageSmoothingQuality = 'high';
+  g.drawImage(src, 0, 0, w, h);
+  c.toBlob(blob => {
     if (!blob) return;
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url; a.download = name;
+    a.href = url;
+    a.download = `babylon5-${CONFIG.SEED}-${Date.now()}.png`;
     document.body.appendChild(a); a.click(); a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 4000);
   }, 'image/png');
+}
+
+function grabShot() {
+  /* Во время трассировки кадр уже накоплен в увеличенном масштабе —
+     пересобирать его нельзя, просто ужимаем. */
+  if (trace.active) {
+    saveCanvas(Math.round(renderer.domElement.width / CONFIG.SHOT.scale),
+      Math.round(renderer.domElement.height / CONFIG.SHOT.scale));
+    return;
+  }
+  const nw = renderer.domElement.width, nh = renderer.domElement.height;
+  shotBoost = CONFIG.SHOT.scale;
+  resize();
+  renderFrame(renderer, scene, camera);
+  saveCanvas(nw, nh);
+  shotBoost = 1;
+  resize();
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -353,19 +410,30 @@ function initUI() {
   $('bPhoto').onclick = () => setClean(true);
   $('bPhotoExit').onclick = () => setClean(false);
   $('bShot').onclick = () => { shotPending = true; };
+  $('bTrace').onclick = () => setTrace(!trace.active);
 
   $('bTp').onclick = () => toggleSheet('tp');
   $('bSet').onclick = () => toggleSheet('set');
   $('bHelp').onclick = () => toggleSheet('help');
   $('tpClose').onclick = $('setClose').onclick = $('helpClose').onclick = closeSheets;
 
-  const bDay = $('bDay'), SUN = bDay.innerHTML;
-  const MOON = '<svg viewBox="0 0 24 24"><path d="M20.5 14.6A8.6 8.6 0 0 1 9.4 3.5a8.6 8.6 0 1 0 11.1 11.1z"/></svg>';
+  const bDay = $('bDay');
+  const ICONS = [
+    bDay.innerHTML,                                                     // солнце
+    '<svg viewBox="0 0 24 24"><path d="M2.6 18.6h18.8M6.4 18.6a5.6 5.6 0 0 1 11.2 0"/><path d="M12 3.4v2.4M4.6 6.9l1.7 1.7M19.4 6.9l-1.7 1.7M2.8 14.2h1.9M19.3 14.2h1.9"/></svg>',
+    '<svg viewBox="0 0 24 24"><path d="M20.5 14.6A8.6 8.6 0 0 1 9.4 3.5a8.6 8.6 0 1 0 11.1 11.1z"/></svg>'
+  ];
+  const NAMES = ['День', 'Закат', 'Ночь'];
   setDayIcon = () => {
-    bDay.innerHTML = dayTarget < 0.5 ? MOON : SUN;
-    bDay.classList.toggle('on', dayTarget < 0.5);
+    const k = ((Math.round(phaseTo) % CONFIG.PHASES.length) + CONFIG.PHASES.length) % CONFIG.PHASES.length;
+    bDay.innerHTML = ICONS[k];
+    bDay.title = NAMES[k];
+    bDay.classList.toggle('on', k > 0);
   };
-  bDay.onclick = () => { dayTarget = dayTarget > 0.5 ? 0 : 1; setDayIcon(); };
+  /* По кругу: день → закат → ночь → день. Цель — всегда СЛЕДУЮЩАЯ фаза от
+     текущей, а не «плюс один к цели»: иначе быстрые нажатия копили очередь
+     и переход растягивался на десятки секунд. */
+  bDay.onclick = () => { phaseTo = Math.floor(phase) + 1; setDayIcon(); };
 
   const bSnd = $('bSnd'), SND_ON = bSnd.innerHTML;
   const SND_OFF = '<svg viewBox="0 0 24 24"><path d="M4 9.2h3.3L12 5.3v13.4l-4.7-3.9H4z"/><path d="M16.2 9.8l5 4.4M21.2 9.8l-5 4.4"/></svg>';
@@ -398,7 +466,7 @@ function initUI() {
     prefs.set('quality', quality);
     dprCap = capForQuality(); dprIndex = startDpr(); applyDpr();
     rebuild();
-    applyPalette(easeInOut(clamp(dayMix, 0, 1)));
+    applyPalette(phase);
   };
 
   const sSeason = $('sSeason');
@@ -407,8 +475,31 @@ function initUI() {
     CONFIG.SEASON = sSeason.value;
     prefs.set('season', CONFIG.SEASON);
     rebuild();
-    applyPalette(easeInOut(clamp(dayMix, 0, 1)));
+    applyPalette(phase);
   };
+
+  /* Сглаживание: включатель отдельно от способа. MSAA работает всегда —
+     он сглаживает края треугольников и стоит почти ничего. Сверху либо FXAA
+     (дёшево, мылит мелкое), либо суперсэмплинг (честно, стоит квадрат). */
+  const sAAon = $('sAAon'), sAA = $('sAA'), sAAv = $('sAAv'), sAAcost = $('sAAcost');
+  let aaOn = prefs.get('aaOn', false);
+  sAA.value = prefs.get('aaMode', '1.25');
+
+  const applyAA = () => {
+    const fx = aaOn && sAA.value === 'fxaa';
+    ssaa = aaOn && !fx ? parseFloat(sAA.value) : 1;
+    setFxaa(renderer, fx);
+    sAAon.classList.toggle('on', aaOn);
+    $('sAArow').classList.toggle('off', !aaOn);
+    sAAv.textContent = !aaOn ? 'только MSAA' : fx ? 'MSAA + FXAA' : `MSAA + ×${ssaa}`;
+    sAAcost.textContent = fx
+      ? 'один проход поверх кадра'
+      : `${(ssaa * ssaa).toFixed(2)}× фрагментов`;
+    resize();
+  };
+  sAAon.onclick = () => { aaOn = !aaOn; prefs.set('aaOn', aaOn); applyAA(); };
+  sAA.onchange = () => { prefs.set('aaMode', sAA.value); applyAA(); };
+  applyAA();
 
   const sSat = $('sSat');
   sSat.value = Math.round(CONFIG.SATURATION * 100);
@@ -418,7 +509,7 @@ function initUI() {
     CONFIG.SATURATION = sSat.value / 100;
     prefs.set('sat', +sSat.value);
     rebuild();
-    applyPalette(easeInOut(clamp(dayMix, 0, 1)));
+    applyPalette(phase);
   };
   sSat.oninput = () => { $('sSatV').textContent = sSat.value + '%'; };
 
@@ -454,7 +545,7 @@ function initUI() {
     else prefs.set('seed', CONFIG.SEED);
     showSeed();
     rebuild();
-    applyPalette(easeInOut(clamp(dayMix, 0, 1)));
+    applyPalette(phase);
   };
   showSeed();
   sSeed.onchange = () => applySeed(sSeed.value);
@@ -500,9 +591,17 @@ function initUI() {
    ПРОИЗВОДИТЕЛЬНОСТЬ
    ═══════════════════════════════════════════════════════════════════════════ */
 let dprIndex = 0, dprCap = 0, paused = false, frames = 0, winT = 0, upT = 0;
-const capForQuality = () => quality === 'LOW' ? 0 : (isMobile ? 3 : 4);
+const capForQuality = () => Math.min(CONFIG.QUALITY[currentQuality()].dpr, isMobile ? 3 : 4);
 const startDpr = () => quality === 'AUTO' && isMobile ? Math.min(2, capForQuality()) : capForQuality();
-const applyDpr = () => renderer.setPixelRatio(Math.min(devicePixelRatio || 1, CONFIG.DPR_STEPS[dprIndex]));
+let ssaa = 1, shotBoost = 1;
+/* Множитель суперсэмплинга применяется ПОВЕРХ плотности экрана. Раньше здесь
+   стоял min(devicePixelRatio, шаг) — на обычном мониторе 1× он намертво
+   запирал рендер на 1×, и никакого сглаживания сверх MSAA получить было
+   нельзя. Адаптив по-прежнему двигает шаг, а не множитель. */
+const renderScale = () => Math.min(
+  CONFIG.SSAA_MAX * CONFIG.SHOT.max,
+  Math.min(devicePixelRatio || 1, CONFIG.DPR_STEPS[dprIndex]) * ssaa * shotBoost);
+const applyDpr = () => renderer.setPixelRatio(renderScale());
 
 /* Размер берём у самого контейнера, а не у окна. При входе в полноэкранный
    режим окно ещё не пересчитано в момент события resize, и рендер оставался
@@ -516,6 +615,7 @@ function resize() {
   camera.updateProjectionMatrix();
   renderer.setSize(w, h, false);
   applyDpr();
+  resizePost(renderer);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -528,6 +628,16 @@ function loop() {
   requestAnimationFrame(loop);
   if (paused) return;
   const dt = Math.min(0.05, clock.getDelta());
+
+  if (trace.active) {
+    const done = traceStep();
+    $('traceInfo').textContent = done >= 1
+      ? `готово · ${trace.total * CONFIG.PHOTO.rays} лучей на пиксель`
+      : `свет · ${(done * 100) | 0}% · ${trace.sample} из ${trace.total}`;
+    if (shotPending) { shotPending = false; grabShot(); }
+    return;
+  }
+
   elapsed += dt;
 
   worldGroup.rotation.z += omega * dt;
@@ -535,19 +645,23 @@ function loop() {
   glow.rotation.z = Math.atan2(camera.position.x, -camera.position.y);
   updateStructures(dt);
 
+  /* Авто-режим гонит фазу по кругу непрерывно: день сам перетекает в закат,
+     закат в ночь, ночь снова в день. Ручное переключение двигает цель на одну
+     фазу вперёд — переход всё равно идёт плавно, а не скачком. */
   if (autoCycle) {
     cycleT += dt;
-    if (cycleT > CONFIG.AUTO_CYCLE_PERIOD) {
-      cycleT = 0; dayTarget = dayTarget > 0.5 ? 0 : 1; setDayIcon();
-    }
+    if (cycleT > CONFIG.AUTO_CYCLE_PERIOD) { cycleT = 0; phaseTo += 1; setDayIcon(); }
   }
-  if (Math.abs(dayMix - dayTarget) > 5e-4) {
-    const step = dt / CONFIG.FADE;
-    dayMix += Math.sign(dayTarget - dayMix) * Math.min(step, Math.abs(dayTarget - dayMix));
-    applyPalette(easeInOut(clamp(dayMix, 0, 1)));
+  if (phase < phaseTo) {
+    phase = Math.min(phaseTo, phase + dt / CONFIG.FADE);
+    applyPalette(phase);
+  } else if (phase >= CONFIG.PHASES.length) {
+    /* держим счётчики в пределах круга, чтобы не росли бесконечно */
+    phase -= CONFIG.PHASES.length; phaseTo -= CONFIG.PHASES.length;
   }
   if (structMats.beacon) {
-    structMats.beacon.emissiveIntensity = 0.2 + (1 - dayMix) * (1 + Math.sin(elapsed * 4) * 0.6);
+    structMats.beacon.emissiveIntensity =
+      0.2 + (1 - daylight) * (1 + Math.sin(elapsed * 4) * 0.6);
   }
 
   updateTour(dt);
@@ -556,9 +670,9 @@ function loop() {
 
   /* звуку нужна позиция камеры в системе станции: и река, и ось живут там */
   worldGroup.worldToLocal(_vAudio.copy(camera.position));
-  updateAudio(dt, _vAudio, ctl.speed * (ctl.boost ? CONFIG.SPEED_BOOST : 1), dayMix);
+  updateAudio(dt, _vAudio, ctl.speed * (ctl.boost ? CONFIG.SPEED_BOOST : 1), daylight);
 
-  renderer.render(scene, camera);
+  renderFrame(renderer, scene, camera);
   if (shotPending) { shotPending = false; grabShot(); }
 
   frames++; winT += dt;
@@ -571,7 +685,7 @@ function loop() {
     } else upT = 0;
     if (showFps) {
       const r = renderer.info.render;
-      $('fps').textContent = `${fps.toFixed(0)} fps   dpr ${CONFIG.DPR_STEPS[dprIndex]}\n`
+      $('fps').textContent = `${fps.toFixed(0)} fps   рендер ×${renderScale().toFixed(2)}\n`
         + `draw ${r.calls}   tri ${(r.triangles / 1000).toFixed(0)}k`;
     }
     frames = 0; winT = 0;
@@ -586,7 +700,8 @@ try {
   if (!(probe.getContext('webgl2') || probe.getContext('webgl'))) throw new Error('WebGL недоступен');
 
   boot();
-  initControls(renderer.domElement, stage, () => fly.on, cancelFly);
+  initControls(renderer.domElement, stage, () => fly.on || trace.active,
+    () => { cancelFly(); stopTracing(); });
   initUI();
 
   dprCap = capForQuality();
@@ -605,6 +720,7 @@ try {
     suspendAudio(paused);
     if (!paused) clock.getDelta();
   });
+  addEventListener('keydown', stopTracing);
   renderer.domElement.addEventListener('webglcontextlost', e => {
     e.preventDefault(); paused = true;
     $('fatal').classList.add('show');

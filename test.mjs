@@ -75,9 +75,30 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
     if (o.isInstancedMesh && o.count === 0) emptyInst++;
   });
   ok(draws <= 30, `Бюджет отрисовки: ${draws} вызовов (лимит 30)`);
+
+  /* Треугольники: плотная зелень с детализированными кронами легко
+     разгоняет счёт, а один вызов отрисовки этого не показывает. */
+  const tris = q => {
+    const gg = new THREE.Group();
+    buildWorld(gg, fakeRenderer, q);
+    buildStructures(gg, fakeRenderer, q, null);
+    let n = 0;
+    gg.traverse(o => {
+      if (!o.isMesh && !o.isPoints) return;
+      const idx = o.geometry.index ? o.geometry.index.count : o.geometry.attributes.position.count;
+      n += (idx / 3) * (o.isInstancedMesh ? o.count : 1);
+    });
+    return n;
+  };
+  const hi = tris('HIGH'), lo = tris('LOW'), ul = tris('ULTRA');
+  ok(hi < 700000, `Треугольников в HIGH: ${(hi / 1000) | 0}k (лимит 700k)`);
+  ok(lo < 200000, `Треугольников в LOW: ${(lo / 1000) | 0}k (лимит 200k) — мобильный бюджет`);
+  ok(ul < 1600000, `Треугольников в ULTRA: ${(ul / 1000) | 0}k (лимит 1.6M)`);
+  ok(lo < hi * 0.45 && hi < ul * 0.6, 'Каждый пресет заметно тяжелее предыдущего по геометрии, а не только по разрешению');
   ok(emptyInst === 0, 'Ни один InstancedMesh не пустой');
 
   /* --- контактные тени: по одной на дерево, куст и здание --- */
+  buildWorld(group, fakeRenderer, 'LOW');          // вернуть мир после замеров бюджета
   const blob = group.children.find(o => o.material === worldMats.blob);
   const counts = group.children.filter(o => o.isInstancedMesh).map(o => o.count);
   ok(blob && blob.count > 0 && blob.count <= Math.max(...counts) * 6,
@@ -618,7 +639,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   const g = new THREE.Group();
   buildWorld(g, fakeRenderer, 'HIGH');
   const ins = g.children.filter(o => o.isInstancedMesh);
-  const trunk = ins.find(o => !o.material.map && !o.material.flatShading && o.count > 300);
+  const trunk = ins.find(o => !o.material.map && !o.material.flatShading && !o.instanceColor && o.count > 300);
   ok(!!trunk, 'Стволы деревьев найдены');
 
   const m = new THREE.Matrix4(), p = new THREE.Vector3(), s = new THREE.Vector3(), q = new THREE.Quaternion();
@@ -655,7 +676,257 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   }
   ok(tooClose === 0,
      `Кроны не смыкаются: минимальный просвет ${(minGap * 100).toFixed(0)}% от требуемого`);
-  ok(TR.spacing > 1.2, `Деревья расставлены с шагом в ${TR.spacing} радиуса кроны`);
+  ok(TR.spacing >= 1.0, `Кроны не пересекаются: шаг ${TR.spacing} радиуса кроны`);
+  ok(trunk.count > 2000, `Зелени густо: ${trunk.count} деревьев`);
+}
+
+/* ══ 3f4b. Холмы земляного цвета, дорожки плавные ══════════════════════ */
+{
+  const g = new THREE.Group();
+  buildWorld(g, fakeRenderer, 'HIGH');
+  const ins = g.children.filter(o => o.isInstancedMesh);
+  const hill = ins.find(o => o.material?.flatShading && !o.material.vertexColors
+    && o.count <= CONFIG.COUNT.hills[0]);
+  const crown = ins.find(o => o.material?.vertexColors && o.instanceColor && o.count > 2000);
+  const lum = c => 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
+  const col = new THREE.Color();
+
+  let hMax = 0, hSum = 0;
+  for (let k = 0; k < hill.count; k++) { hill.getColorAt(k, col); const l = lum(col); hMax = Math.max(hMax, l); hSum += l; }
+  let cSum = 0, n = 0;
+  for (let k = 0; k < crown.count; k += 7) { crown.getColorAt(k, col); cSum += lum(col); n++; }
+  const hAvg = hSum / hill.count, cAvg = cSum / n;
+
+  ok(hAvg < cAvg,
+     `Холм темнее кроны: ${hAvg.toFixed(3)} против ${cAvg.toFixed(3)}`);
+  ok(hMax < 0.18, `Самый светлый холм ${hMax.toFixed(3)} — земляной, а не нежно-мятный`);
+
+  /* оттенок должен оставаться земляным, без ухода в бирюзу */
+  const hsl = { h: 0, s: 0, l: 0 };
+  let hueMin = 1, hueMax = 0;
+  for (let k = 0; k < hill.count; k++) {
+    hill.getColorAt(k, col); col.getHSL(hsl, THREE.SRGBColorSpace);
+    hueMin = Math.min(hueMin, hsl.h); hueMax = Math.max(hueMax, hsl.h);
+  }
+  ok(hueMax <= 0.34, `Оттенок холмов не уходит в бирюзу (макс ${hueMax.toFixed(2)})`);
+
+  /* setHSL по умолчанию работает в ЛИНЕЙНОМ пространстве — цвет выходит
+     заметно светлее задуманного. Требуем явного указания sRGB. */
+  const wsrc = readFileSync(new URL('./js/world.js', import.meta.url), 'utf8');
+  const hslCalls = wsrc.split('setHSL(').slice(1).map(s => s.slice(0, s.indexOf('));')));
+  ok(hslCalls.length > 0 && hslCalls.every(s => /SRGBColorSpace/.test(s)),
+     `Все setHSL (${hslCalls.length}) задают цвет в sRGB, а не в рабочем линейном пространстве`);
+
+  /* дорожки: плавная кривая вместо ломаной */
+  const tsrc = readFileSync(new URL('./js/textures.js', import.meta.url), 'utf8');
+  ok(/quadraticCurveTo/.test(tsrc), 'Линии ведутся кривыми, а не отрезками');
+  const parks = tsrc.slice(tsrc.indexOf('── ПАРКИ'), tsrc.indexOf('── ГОРОДА'));
+  ok(!/px \+= \(rnd\(\) - \.5\)/.test(parks), 'Случайного блуждания в дорожках больше нет');
+  ok(/smoothLine\(a, pts\)/.test(parks), 'Дорожка рисуется плавной линией');
+  ok(/Math\.sin\(py \* fr0/.test(parks) && /Math\.sin\(py \* fr1/.test(parks),
+     'Меандр складывается из двух гармоник — крупные изгибы и мелкие');
+}
+
+/* ══ 3f4c. Следы домов и контактное затемнение ═════════════════════════ */
+{
+  const Q = CONFIG.QUALITY;
+  ok(!!Q.LOW && !!Q.HIGH && !!Q.ULTRA, `Пресеты качества: ${Object.keys(Q).join(', ')}`);
+  ok(Q.LOW.footprint === false && Q.HIGH.footprint && Q.ULTRA.footprint,
+     'Следы домов включаются на высоком и ультра, на низком — нет');
+  ok(Q.ULTRA.foliage > Q.HIGH.foliage && Q.HIGH.foliage > Q.LOW.foliage,
+     `Детализация крон растёт: ${Q.LOW.foliage} → ${Q.HIGH.foliage} → ${Q.ULTRA.foliage}`);
+  ok(Q.ULTRA.mask > Q.HIGH.mask, 'На ультра маска корпуса вдвое подробнее — фонари чётче');
+
+  /* форма следа выведена из геометрии источника, а не подобрана */
+  const P = CONFIG.PRINT;
+  const d = CONFIG.R - 4 * CONFIG.FLOOR_H;                 // от крыши дома до оси
+  const across = 2 * Math.atan(CONFIG.SUN.r / d) * 180 / Math.PI;
+  const along = 2 * Math.atan(CONFIG.SUN.len / 2 / d) * 180 / Math.PI;
+  ok(along > across * 10,
+     `Источник вытянут: поперёк станции ${across.toFixed(1)}°, вдоль оси ${along.toFixed(0)}°`);
+  ok(P.along > P.across * 1.8,
+     `След вытянут в ту же сторону: ${P.across}× поперёк против ${P.along}× вдоль`);
+
+  /* на высоком следы домов — отдельный инстанс, на низком их нет */
+  for (const [q, want] of [['HIGH', true], ['LOW', false]]) {
+    const g = new THREE.Group();
+    buildWorld(g, fakeRenderer, q);
+    const has = !!worldMats.print;
+    ok(has === want, `${q}: отдельные следы домов ${want ? 'есть' : 'не строятся'}`);
+    if (has) {
+      const pm = g.children.find(o => o.material === worldMats.print);
+      ok(pm.count > 100, `${q}: следов домов ${pm.count}`);
+      const m2 = new THREE.Matrix4(), p2 = new THREE.Vector3(), s2 = new THREE.Vector3(), q2 = new THREE.Quaternion();
+      let elongated = 0;
+      for (let k = 0; k < pm.count; k++) {
+        pm.getMatrixAt(k, m2); m2.decompose(p2, q2, s2);
+        if (s2.z > s2.x) elongated++;
+      }
+      ok(elongated === pm.count, 'Каждый след вытянут вдоль оси станции');
+    }
+  }
+}
+
+/* ══ 3f4d. Три фазы освещения и читаемый контакт ═══════════════════════ */
+{
+  const P = CONFIG.PHASES;
+  ok(P.length === 3 && P.join() === 'DAY,DUSK,NIGHT',
+     `Фазы по кругу: ${P.map(k => k.toLowerCase()).join(' → ')} → день`);
+
+  /* закат обязан лежать между днём и ночью, а не быть третьим ни на что
+     не похожим состоянием: иначе переход дёргается */
+  const fill = k => CONFIG[k].hemiInt + CONFIG[k].pointInt * CONFIG.LIGHT_Z.length;
+  ok(fill('DAY') > fill('DUSK') && fill('DUSK') > fill('NIGHT'),
+     `Свет убывает монотонно: ${fill('DAY').toFixed(2)} → ${fill('DUSK').toFixed(2)} → ${fill('NIGHT').toFixed(2)}`);
+  ok(CONFIG.DAY.light === 1 && CONFIG.NIGHT.light === 0
+     && CONFIG.DUSK.light > 0 && CONFIG.DUSK.light < 1,
+     `Доля дня в фазах: ${P.map(k => CONFIG[k].light).join(' → ')}`);
+  ok(CONFIG.DAY.winEmis < CONFIG.DUSK.winEmis && CONFIG.DUSK.winEmis < CONFIG.NIGHT.winEmis,
+     'Окна загораются постепенно: на закате уже, но не в полную силу');
+
+  /* закат золотой: тёплый оттенок сильнее, чем у дня и ночи */
+  const warm = hex => { const c = new THREE.Color(hex); return c.r - c.b; };
+  ok(warm(CONFIG.DUSK.sunCol) > warm(CONFIG.DAY.sunCol)
+     && warm(CONFIG.DUSK.hemiSky) > warm(CONFIG.DAY.hemiSky),
+     'Закат теплее дня по оттенку — золотой, а не просто тусклый');
+  ok(warm(CONFIG.NIGHT.sunCol) < 0, 'Ночь холодная — лунная');
+
+  /* у всех фаз одинаковый набор полей, иначе смешивание даст NaN */
+  const keys = Object.keys(CONFIG.DAY).sort().join();
+  for (const k of P) ok(Object.keys(CONFIG[k]).sort().join() === keys,
+     `Фаза ${k} описана тем же набором полей`);
+
+  const msrc = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+  ok(/phaseTo \+= 1/.test(msrc), 'Кнопка двигает фазу на одну вперёд, а не переключает день/ночь');
+  ok(/phase = Math\.min\(phaseTo, phase \+ dt \/ CONFIG\.FADE\)/.test(msrc),
+     'Переход идёт дробной фазой — плавно, а не скачком');
+  ok(/phase -= CONFIG\.PHASES\.length/.test(msrc), 'Счётчики фаз не растут бесконечно');
+  ok(!/dayMix|dayTarget/.test(msrc), 'Старой двухфазной модели не осталось');
+  /* Переход должен быть заметен, но давать отклик на нажатие. Девять секунд
+     читались как «кнопка не работает». */
+  ok(CONFIG.FADE >= 2 && CONFIG.FADE <= 5,
+     `Переход занимает ${CONFIG.FADE} с — виден, но отзывчив`);
+  ok(/phaseTo = Math\.floor\(phase\) \+ 1/.test(msrc),
+     'Цель — следующая фаза от текущей: быстрые нажатия не копят очередь');
+  /* авто-цикл прибавлять цель может: он срабатывает по таймеру, когда
+     переход уже завершён, и очереди не создаёт */
+  ok(/cycleT > CONFIG\.AUTO_CYCLE_PERIOD.*phaseTo \+= 1/.test(msrc),
+     'Авто-цикл двигает фазу по таймеру');
+  ok(!/bDay\.onclick = \(\) => \{ phaseTo \+= 1/.test(msrc),
+     'Кнопка очередь не копит');
+  ok(CONFIG.AUTO_CYCLE_PERIOD > CONFIG.FADE * 3,
+     `Стоянка в фазе ${CONFIG.AUTO_CYCLE_PERIOD} с заметно длиннее перехода`);
+
+  /* контакт: темнеет не только земля, но и низ самого объекта */
+  const tsrc = readFileSync(new URL('./js/textures.js', import.meta.url), 'utf8');
+  ok(/const foot = Math\.round\( ?H \* 0\.13 ?\)/.test(tsrc),
+     'У фасада есть градиент затемнения по нижней части стены');
+  const wsrc = readFileSync(new URL('./js/world.js', import.meta.url), 'utf8');
+  ok(/trunkGeo\.setAttribute\('color'/.test(wsrc), 'Комель ствола темнеет к земле');
+
+  /* численно: низ ствола заметно темнее верха */
+  const g = new THREE.Group();
+  buildWorld(g, fakeRenderer, 'HIGH');
+  const trunk = g.children.find(o => o.isInstancedMesh && !o.material.map
+    && !o.material.flatShading && !o.instanceColor && o.count > 300);
+  const tp = trunk.geometry.attributes.position, tc = trunk.geometry.attributes.color;
+  let low = 9, high = 0;
+  for (let k = 0; k < tp.count; k++) {
+    if (tp.getY(k) < -0.45) low = Math.min(low, tc.getX(k));
+    if (tp.getY(k) > 0.45) high = Math.max(high, tc.getX(k));
+  }
+  ok(low < high * 0.55, `Комель темнее кроны ствола: ${low.toFixed(2)} против ${high.toFixed(2)}`);
+
+  /* затенение в трассировке не должно съедать дальний план */
+  const psrc = readFileSync(new URL('./js/photo.js', import.meta.url), 'utf8');
+  ok(/ao = mix\( 1\.0, ao, fogAmt \)/.test(psrc),
+     'Затенение гаснет по закону тумана — иначе дальний план сереет и теряет контраст');
+  ok(/if \( pxR < 2\.0 \) break/.test(psrc),
+     'Лучи не пускаются, когда радиус проецируется меньше двух пикселей — там только шум');
+}
+
+/* ══ 3f5. Куст — подлесок, крона — листва ══════════════════════════════ */
+{
+  const g = new THREE.Group();
+  buildWorld(g, fakeRenderer, 'HIGH');
+  const ins = g.children.filter(o => o.isInstancedMesh);
+  const m = new THREE.Matrix4(), p = new THREE.Vector3(), s = new THREE.Vector3(), q = new THREE.Quaternion();
+
+  const trunk = ins.find(o => !o.material.map && !o.material.flatShading && !o.instanceColor && o.count > 300);
+  const foliage = ins.filter(o => o.material?.flatShading && o.material.vertexColors);
+  ok(foliage.length === 2, 'Кроны и кусты — отдельные инстансы с вершинными цветами');
+
+  /* какой из них куст: у него нет парного ствола, берём меньший по габариту */
+  const size = im => { im.geometry.computeBoundingBox(); return im.geometry.boundingBox.max.y; };
+  let maxBush = 0, maxTree = 0;
+  const bush = ins.find(o => o.count === CONFIG.COUNT.bushes[0] || (o.material?.vertexColors && o.count < 2000));
+  for (let k = 0; k < bush.count; k++) { bush.getMatrixAt(k, m); m.decompose(p, q, s); maxBush = Math.max(maxBush, s.y * 2); }
+  for (let k = 0; k < trunk.count; k++) { trunk.getMatrixAt(k, m); m.decompose(p, q, s); maxTree = Math.max(maxTree, s.y / CONFIG.TREE.trunk * 0.98); }
+  ok(maxBush < maxTree * 0.5,
+     `Самый крупный куст ${(maxBush * 10).toFixed(1)} м — вдвое ниже самого высокого дерева ${(maxTree * 10).toFixed(1)} м`);
+  ok(maxBush * 10 < 7, `Куст остаётся подлеском: до ${(maxBush * 10).toFixed(1)} м в высоту`);
+
+  /* крона не должна быть правильным многогранником */
+  const geo = foliage[0].geometry;
+  const pos = geo.attributes.position;
+  let rMin = 9, rMax = 0;
+  for (let k = 0; k < pos.count; k++) {
+    const r = Math.hypot(pos.getX(k), pos.getY(k), pos.getZ(k));
+    rMin = Math.min(rMin, r); rMax = Math.max(rMax, r);
+  }
+  ok(rMax / rMin > 1.15,
+     `Форма кроны неправильная: радиус гуляет ${rMin.toFixed(2)}…${rMax.toFixed(2)}`);
+  ok(geo.attributes.color, 'У кроны есть вершинные цвета — пятнистость листвы');
+
+  /* пятнистость назначена по граням, а не по вершинам */
+  const col = geo.attributes.color;
+  let perFace = true, spread = 0;
+  for (let f = 0; f < col.count && perFace; f += 3) {
+    const v = col.getX(f);
+    if (Math.abs(col.getX(f + 1) - v) > 1e-6 || Math.abs(col.getX(f + 2) - v) > 1e-6) perFace = false;
+    spread = Math.max(spread, Math.abs(v - 1));
+  }
+  ok(perFace, 'Светлота задана на грань — листва рябит, а не переливается градиентом');
+  ok(spread > 0.05, `Разброс светлоты граней ±${(spread * 100).toFixed(0)}%`);
+
+  /* поверхность осталась замкнутой: одинаковые вершины смещены одинаково */
+  const byKey = new Map();
+  let split = 0;
+  for (let k = 0; k < pos.count; k++) {
+    const dir = new THREE.Vector3(pos.getX(k), pos.getY(k), pos.getZ(k)).normalize();
+    const key = dir.x.toFixed(3) + ',' + dir.y.toFixed(3) + ',' + dir.z.toFixed(3);
+    const r = Math.hypot(pos.getX(k), pos.getY(k), pos.getZ(k));
+    if (byKey.has(key)) { if (Math.abs(byKey.get(key) - r) > 1e-4) split++; }
+    else byKey.set(key, r);
+  }
+  ok(split === 0, 'Общие вершины смещены согласованно — крона не расходится по швам');
+
+  /* шелест листвы в шейдере */
+  const wsrc3 = readFileSync(new URL('./js/world.js', import.meta.url), 'utf8');
+  ok(/transformed \+= normalize\( transformed \) \* sin\( uTime/.test(wsrc3),
+     'У каждой вершины кроны своя фаза — листва шелестит, а не качается целиком');
+  ok(!/transformed \+= normal \*/.test(wsrc3),
+     'Шелест идёт по радиусу, а не по нормали: у копий одной вершины нормали разные, и крона рвалась бы');
+
+  /* численно: копии одной вершины смещаются одинаково */
+  const fg = foliage[0].geometry.attributes.position;
+  const byXYZ = new Map();
+  for (let k = 0; k < fg.count; k++) {
+    const key = fg.getX(k).toFixed(4) + ',' + fg.getY(k).toFixed(4) + ',' + fg.getZ(k).toFixed(4);
+    if (!byXYZ.has(key)) byXYZ.set(key, []);
+    byXYZ.get(key).push(k);
+  }
+  const nrm = foliage[0].geometry.attributes.normal;
+  let differing = 0, shared = 0;
+  for (const ids of byXYZ.values()) {
+    if (ids.length < 2) continue;
+    shared++;
+    const set = new Set(ids.map(k =>
+      nrm.getX(k).toFixed(2) + ',' + nrm.getY(k).toFixed(2) + ',' + nrm.getZ(k).toFixed(2)));
+    if (set.size > 1) differing++;
+  }
+  ok(differing === shared && shared > 10,
+     `У ${differing} общих вершин нормали граней различаются — смещать по ним нельзя`);
 }
 
 /* ══ 3g. Ничего не торчит из холмов и конструкций ══════════════════════ */
@@ -938,8 +1209,10 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   const mCode = msrc.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
   ok(!/preserveDrawingBuffer/.test(mCode),
      'preserveDrawingBuffer не включён — снимок берётся сразу после отрисовки');
-  ok(msrc.indexOf('if (shotPending)') > msrc.indexOf('renderer.render(scene, camera);'),
+  ok(msrc.lastIndexOf('if (shotPending)') > msrc.indexOf('renderer.render(scene, camera);'),
      'Захват стоит после render, иначе буфер уже очищен');
+  ok(msrc.indexOf('if (shotPending)') > msrc.indexOf('traceStep()'),
+     'В режиме трассировки захват идёт после показа накопленного');
   ok(/body\.clean #topbar/.test(css), 'В фото-режиме HUD скрывается');
   ok(html.includes('id="bShot"') && html.includes('id="bPhotoExit"'), 'Есть затвор и выход');
 
@@ -961,6 +1234,195 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   }
   ok(CONFIG.SEASONS.autumn.accent > CONFIG.SEASONS.summer.accent, 'Осенью цветных крон больше, чем летом');
   ok(html.includes('id="sSeason"'), 'Сезон переключается из настроек');
+}
+
+/* ══ 3h2. Трассировка в фото-режиме ════════════════════════════════════ */
+{
+  const src = readFileSync(new URL('./js/photo.js', import.meta.url), 'utf8');
+  const P = CONFIG.PHOTO;
+
+  /* Зерно не успевает попасть на глаз: 10 лучей за кадр дают к третьему кадру
+     (50 мс) шум около 18%. Это ожидаемо — накопление по одному лучу на кадр
+     показывало бы зерно, но сходилось бы в десять раз дольше. */
+  const noiseAt = frames => 1 / Math.sqrt(frames * P.rays);
+  ok(noiseAt(3) < 0.25,
+     `К третьему кадру шум ${(noiseAt(3) * 100) | 0}% — зерно физически не успевает проявиться`);
+  ok(noiseAt(P.samples) < 0.05,
+     `К концу накопления шум ${(noiseAt(P.samples) * 100).toFixed(0)}%`);
+
+  ok(P.rays >= 4 && P.samples >= 32,
+     `Лучей на пиксель: ${P.rays} за кадр × ${P.samples} кадров = ${P.rays * P.samples}`);
+  ok(P.radius > 0.3 && P.radius < 2,
+     `Дальность луча ${P.radius} юнита = ${P.radius * 10} м — масштаб контактного затенения`);
+
+  /* ─── Свет считается, а не только затеняется ─── */
+  ok(/bounce \+= texture2D\( tBeauty, suv \)\.rgb \* w/.test(src),
+     'Луч приносит цвет поверхности, в которую упёрся, — это переотражение, а не только загораживание');
+  ok(/vec3 cur = col \* ao \+ col \* gi \+ refl/.test(src),
+     'Итог складывается из затенения, переотражённого света и зеркальной составляющей');
+  ok(P.bounce > 0, `Сила переотражения ${P.bounce}`);
+
+  /* отражения */
+  ok(/vec3 Rd = reflect\( V, N \)/.test(src), 'Отражённый луч считается точно');
+  ok(/for \( int i = 0; i < REF_STEPS; i \+\+ \)/.test(src),
+     `Марш отражения по буферу глубины, ${P.refSteps} шагов`);
+  ok(/st \*= 1\.35/.test(src), 'Шаг марша растёт: вдали точность не нужна');
+  ok(/pow\( 1\.0 - max\( 0\.0, dot\( -V, N \) \), 4\.0 \)/.test(src),
+     'Френель: под острым углом отражает сильнее — как в жизни');
+  ok(/smoothstep\( 0\.0, 0\.2, edge \)/.test(src),
+     'У края экрана отражение гаснет, а не обрывается');
+  ok(P.reflect > 0 && P.refStep > 0, `Отражения: сила ${P.reflect}, шаг ${P.refStep}`);
+
+  /* шероховатость берётся из альфы кадра, а не из отдельного прохода */
+  ok(/float rough = beauty\.a/.test(src), 'Шероховатость читается из альфа-канала кадра');
+  const wsrc = readFileSync(new URL('./js/world.js', import.meta.url), 'utf8');
+  ok(/export function patchRoughnessAlpha/.test(wsrc), 'Материалы пишут шероховатость в альфу');
+  ok(/gl_FragColor\.a = roughnessFactor/.test(wsrc),
+     'Пишется именно шероховатость — по ней трассировка отличает воду и металл от травы');
+  const ssrc = readFileSync(new URL('./js/structures.js', import.meta.url), 'utf8');
+  ok((wsrc.match(/patchRoughnessAlpha\(/g) || []).length >= 3
+     && (ssrc.match(/patchRoughnessAlpha\(/g) || []).length >= 3,
+     'Патч применён и к корпусу с домами, и к металлу с бетоном и стеклом');
+
+  /* туман гасит все три составляющие, а не одну */
+  ok(/gi \*= fogAmt/.test(src) && /refl \*= fogAmt/.test(src),
+     'Дальний план не получает ни переотражений, ни бликов — там уже туман');
+
+  /* Затенение обязано быть местным: модель «радиус / дальность» давала вклад
+     даже от объектов за сотню метров, и по кадру это складывалось в дымку. */
+  ok(/dz < uRadius \* 2\.0/.test(src),
+     'Учитываются только загораживатели ближе двух радиусов');
+  ok(!/occ \+= clamp\( uRadius \/ max/.test(src),
+     'Старой модели с бесконечным хвостом не осталось');
+  ok(/1\.0 - smoothstep\( uRadius, uRadius \* 2\.0, dz \)/.test(src),
+     'Вклад плавно сходит к нулю на границе радиуса');
+  ok(!/S\.fog = null/.test(src),
+     'Туман сцены не переключается ради буфера нормалей — это плодило по два варианта программы на материал');
+
+  /* лучи должны идти по косинусному распределению в полусфере вокруг нормали */
+  ok(/sqrt\( max\( 0\.0, 1\.0 - u \) \)/.test(src), 'Распределение лучей косинусное');
+  ok(/vec3 T = normalize\( cross\( up, N \) \)/.test(src), 'Базис строится вокруг нормали пикселя');
+  ok(/for \( int i = 0; i < RAYS; i \+\+ \)/.test(src), 'Пучок лучей на пиксель');
+  ok(/texture2D\( tDepth, suv \)/.test(src), 'Пересечение проверяется по буферу глубины');
+
+  /* накопление обязано усреднять, а не заменять */
+  ok(/uBlend\.value = 1 \/ \(n \+ 1\)/.test(src),
+     'Вес кадра 1/(n+1) — накопленное усредняется, а не подменяется последним');
+  ok(/mix\( texture2D\( tPrev, vUv \)\.rgb, cur, uBlend \)/.test(src), 'Кадры складываются в накопитель');
+
+  /* субпиксельное смещение даёт сглаживание заодно */
+  ok(/halton/.test(src) && /setViewOffset/.test(src),
+     'Каждый кадр смещён на долю пикселя — накопление даёт и сглаживание');
+
+  /* корпус рисуется изнанкой: односторонний материал нормалей потерял бы пол */
+  ok(/MeshNormalMaterial\(\{ side: THREE\.DoubleSide \}\)/.test(src),
+     'Материал нормалей двусторонний — иначе земля не попадёт в буфер глубины');
+
+  /* прозрачное не должно записывать глубину */
+  ok(/function hideTransparent/.test(src) && /o\.visible = false/.test(src),
+     'Пятна теней и пылинки скрыты на время съёмки нормалей');
+
+  /* в буфер three пишет линейно и без тонмаппинга — переводим сами */
+  ok(/vec3 aces\( vec3 x \)/.test(src) && /0\.0031308/.test(src),
+     'Накопитель линейный, тонмаппинг и sRGB применяются на показе');
+  ok(/HalfFloatType/.test(src), 'Накопитель хранит HDR, а не 8 бит на канал');
+
+  /* мир обязан замереть */
+  ok(/windUniform\.value = 0/.test(src), 'Ветер останавливается: движение обнулило бы накопленное');
+  const msrc = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+  ok(/if \(trace\.active\) \{[\s\S]{0,400}?return;/.test(msrc),
+     'Пока идёт съёмка, мир не вращается и камера не двигается');
+  ok(/fly\.on \|\| trace\.active/.test(msrc), 'Ввод во время съёмки её прекращает');
+  ok(/addEventListener\('keydown', stopTracing\)/.test(msrc), 'Клавиша тоже прекращает');
+  ok(/else setTrace\(false\)/.test(msrc), 'Выход из фото-режима останавливает трассировку');
+
+  /* дойдя до конца, не жжём кадры впустую */
+  ok(/if \(n >= trace\.total\)/.test(src), 'Набрав нужное число кадров, только показываем результат');
+
+  /* ресурсы освобождаются */
+  ok(/rtNormal\?\.depthTexture\?\.dispose\(\)/.test(src), 'Буфер глубины освобождается');
+  ok(!/setPixelRatio/.test(src),
+     'Масштабом рендера владеет только main — двух хозяев у него нет');
+
+  const html = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
+  ok(html.includes('id="bTrace"') && html.includes('id="traceInfo"'),
+     'В фото-режиме есть кнопка трассировки и индикатор прогресса');
+}
+
+/* ══ 3h3. Сглаживание ══════════════════════════════════════════════════ */
+{
+  const msrc = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+
+  ok(/antialias: true/.test(msrc),
+     'MSAA включён и на мобильных: у тайловых GPU он почти бесплатен');
+
+  /* Ключевая правка: множитель суперсэмплинга обязан идти ПОВЕРХ плотности
+     экрана. Прежний min(devicePixelRatio, шаг) на мониторе 1× намертво
+     запирал рендер на 1×, и сглаживания сверх MSAA получить было нельзя. */
+  ok(/Math\.min\(devicePixelRatio \|\| 1, CONFIG\.DPR_STEPS\[dprIndex\]\) \* ssaa/.test(msrc),
+     'Множитель применяется поверх плотности экрана, а не отсекается ею');
+  ok(/CONFIG\.SSAA_MAX \* CONFIG\.SHOT\.max/.test(msrc), 'Итоговый масштаб ограничен сверху');
+
+  ok(CONFIG.SSAA[0] === 1 && CONFIG.SSAA[CONFIG.SSAA.length - 1] > 1.5,
+     `Ступени суперсэмплинга: ${CONFIG.SSAA.join(', ')}`);
+  ok(CONFIG.SSAA.every((v, i, a) => i === 0 || v > a[i - 1]), 'Ступени возрастают');
+  ok(CONFIG.SSAA_MAX >= CONFIG.SSAA[CONFIG.SSAA.length - 1],
+     'Предел не ниже самой верхней ступени, иначе она недостижима');
+
+  /* стоимость должна быть понятна из чисел, а не на ощупь */
+  const cost = s => s * s;
+  ok(cost(CONFIG.SSAA[1]) < 1.7 && cost(CONFIG.SSAA[3]) === 4,
+     `Стоимость по фрагментам: ${CONFIG.SSAA.map(s => '×' + cost(s).toFixed(2)).join(', ')}`);
+
+  ok(/prefs\.set\('aaOn'/.test(msrc) && /prefs\.set\('aaMode'/.test(msrc),
+     'И включатель, и способ сглаживания сохраняются');
+  ok(/рендер ×\$\{renderScale\(\)/.test(msrc),
+     'Счётчик кадров показывает фактический масштаб рендера');
+
+  const html = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
+  ok(html.includes('id="sAA"'), 'Сглаживание переключается из настроек');
+
+  /* адаптив по-прежнему двигает ступень, а не множитель */
+  ok(/dprIndex--/.test(msrc) && !/ssaa--/.test(msrc),
+     'Под нагрузкой снижается ступень плотности, а выбранный пользователем множитель остаётся');
+}
+
+/* ══ 3h4. Снимок в увеличенном разрешении и FXAA ═══════════════════════ */
+{
+  const msrc = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+  const psrc = readFileSync(new URL('./js/photo.js', import.meta.url), 'utf8');
+  const S = CONFIG.SHOT;
+
+  ok(S.scale >= 2, `Снимок рендерится ×${S.scale} по стороне = ×${S.scale * S.scale} пикселей`);
+  ok(S.max >= S.scale, 'Верхний предел не ниже масштаба снимка');
+  ok(/g\.drawImage\(src, 0, 0, w, h\)/.test(msrc), 'Крупный кадр ужимается до нативного размера');
+  ok(/imageSmoothingQuality = 'high'/.test(msrc), 'Даунскейл идёт с фильтрацией, а не выбрасыванием пикселей');
+  ok(/shotBoost = CONFIG\.SHOT\.scale;\s*\n\s*resize\(\);\s*\n\s*renderFrame/.test(msrc),
+     'Перед снимком масштаб поднимается и кадр перерисовывается');
+  ok(/shotBoost = 1;\s*\n\s*resize\(\);/.test(msrc), 'После снимка масштаб возвращается');
+
+  /* трассировка идёт сразу в масштабе снимка: пересобрать её нельзя */
+  ok(/shotBoost = CONFIG\.SHOT\.scale;\s*\/\/ трассируем/.test(msrc),
+     'Трассировка ведётся сразу в увеличенном масштабе');
+  ok(/if \(trace\.active\) \{\s*\n\s*saveCanvas/.test(msrc),
+     'Накопленный кадр не перерисовывается, а только ужимается');
+
+  /* FXAA */
+  ok(/FXAA_FRAG/.test(psrc) && /export function setFxaa/.test(psrc), 'FXAA доступен как альтернатива');
+  ok(/lMax - lMin < max\( 0\.0312/.test(psrc),
+     'Ровные участки FXAA не трогает — иначе фильтр мылит всё подряд');
+  ok(/vec3 fetch\( vec2 uv \) \{ return toScreen/.test(psrc),
+     'FXAA сглаживает экранные значения: по линейному HDR контраст яркости считается неверно');
+  ok(/export const TONEMAP_GLSL/.test(psrc) && (psrc.match(/\$\{TONEMAP_GLSL\}/g) || []).length === 2,
+     'Тонмаппинг общий для трассировки и FXAA, а не скопирован дважды');
+  ok(/renderer\.setRenderTarget\(fxRT\)/.test(psrc), 'Кадр идёт через буфер только при включённом FXAA');
+  ok(/if \(!fxOn \|\| !fxRT\)/.test(psrc), 'Без FXAA лишнего прохода нет');
+  ok(/resizePost\(renderer\)/.test(msrc), 'Буфер FXAA пересоздаётся при изменении размера');
+
+  const html = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
+  ok(html.includes('id="sAAon"') && html.includes('id="sAA"'),
+     'Сглаживание: отдельно включатель, отдельно способ');
+  ok(html.includes('>FXAA<'), 'FXAA есть в списке способов');
 }
 
 /* ══ 3i. Звук реагирует на то, где находится камера ════════════════════ */
@@ -1106,7 +1568,15 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   ok(N.cityGlow > 0, 'Улицы ночью светятся сами: видно, где стоят огни');
   ok(N.navSize > D.navSize, 'Габаритные огни ночью крупнее');
   ok(N.sunEmis > 0.3, 'Солнечная труба ночью тлеет как ночник, а не гаснет');
-  ok(N.fogD < 0.005, 'Туман ночью не съедает дальний план');
+  /* Туман считаем по длине станции, а не «на глаз»: FogExp2 на 3 км при
+     плотности 0.0035 оставлял от дальнего торца треть цвета — две трети
+     кадра были туманом, и днём это читалось как молоко. */
+  const survives = k => Math.exp(-Math.pow(CONFIG.L * CONFIG[k].fogD, 2));
+  ok(survives('DAY') > 0.6,
+     `Днём до дальнего торца доходит ${(survives('DAY') * 100) | 0}% цвета сцены`);
+  ok(survives('DAY') > survives('DUSK') && survives('DUSK') > survives('NIGHT'),
+     `Туман густеет к ночи: ${CONFIG.PHASES.map(k => ((survives(k) * 100) | 0) + '%').join(' → ')}`);
+  ok(survives('NIGHT') > 0.3, 'Но и ночью дальний план не пропадает целиком');
   for (const k of Object.keys(D)) ok(k in N, `Поле палитры «${k}» задано и для ночи`);
 }
 
