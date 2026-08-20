@@ -206,7 +206,7 @@ function makeTargets(w, h) {
     minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter
   });
   rtBeauty = new THREE.WebGLRenderTarget(w, h, {
-    type: THREE.HalfFloatType, depthBuffer: true,
+    type: THREE.HalfFloatType, depthBuffer: true, samples: CONFIG.MSAA_SAMPLES,
     minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter
   });
   accum = [0, 1].map(() => new THREE.WebGLRenderTarget(w, h, {
@@ -426,8 +426,12 @@ export function resizePost(renderer) {
   const s = new THREE.Vector2();
   renderer.getDrawingBufferSize(s);
   fxRT?.dispose();
+  /* samples обязателен: antialias: true работает ТОЛЬКО для канваса. Уводя
+     кадр в буфер, мы молча теряли MSAA, и FXAA лишь возвращал потерянное —
+     разницы на глаз ноль, зато лишний проход. Многосэмпловый буфер даёт
+     оба сглаживания сразу. */
   fxRT = new THREE.WebGLRenderTarget(s.x, s.y, {
-    type: THREE.HalfFloatType, depthBuffer: true,
+    type: THREE.HalfFloatType, depthBuffer: true, samples: CONFIG.MSAA_SAMPLES,
     minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter
   });
   fxMat.uniforms.tScene.value = fxRT.texture;

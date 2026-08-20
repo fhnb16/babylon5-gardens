@@ -1416,6 +1416,21 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   ok(/export const TONEMAP_GLSL/.test(psrc) && (psrc.match(/\$\{TONEMAP_GLSL\}/g) || []).length === 2,
      'Тонмаппинг общий для трассировки и FXAA, а не скопирован дважды');
   ok(/renderer\.setRenderTarget\(fxRT\)/.test(psrc), 'Кадр идёт через буфер только при включённом FXAA');
+
+  /* Цепочка вывода: последним всегда идёт рендер в канвас */
+  const rf = psrc.slice(psrc.indexOf('export function renderFrame'));
+  const body = rf.slice(0, rf.indexOf('\n}'));
+  ok(body.lastIndexOf('setRenderTarget(null)') < body.lastIndexOf('render(fxScene, fxCam)'),
+     'Перед выводом квада цель сброшена в канвас');
+  ok(/setRenderTarget\(null\);\s*\n\s*renderer\.render\(scene, camera\)/.test(body),
+     'Без FXAA сцена рисуется прямо в канвас');
+
+  /* antialias у рендерера действует только на канвас: буферам нужен samples */
+  ok(/samples: CONFIG\.MSAA_SAMPLES/.test(psrc),
+     `Буферы постобработки многосэмпловые (${CONFIG.MSAA_SAMPLES}×) — иначе включение FXAA молча отключало MSAA`);
+  ok((psrc.match(/samples: CONFIG\.MSAA_SAMPLES/g) || []).length >= 2,
+     'И буфер FXAA, и буфер кадра трассировки');
+  ok(CONFIG.MSAA_SAMPLES >= 2, 'Сэмплов достаточно, чтобы края читались');
   ok(/if \(!fxOn \|\| !fxRT\)/.test(psrc), 'Без FXAA лишнего прохода нет');
   ok(/resizePost\(renderer\)/.test(msrc), 'Буфер FXAA пересоздаётся при изменении размера');
 

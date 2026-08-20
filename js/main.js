@@ -491,6 +491,7 @@ function initUI() {
     setFxaa(renderer, fx);
     sAAon.classList.toggle('on', aaOn);
     $('sAArow').classList.toggle('off', !aaOn);
+    aaLabel = !aaOn ? 'MSAA' : fx ? 'MSAA+FXAA' : `MSAA+SSAA×${ssaa}`;
     sAAv.textContent = !aaOn ? 'только MSAA' : fx ? 'MSAA + FXAA' : `MSAA + ×${ssaa}`;
     sAAcost.textContent = fx
       ? 'один проход поверх кадра'
@@ -593,7 +594,7 @@ function initUI() {
 let dprIndex = 0, dprCap = 0, paused = false, frames = 0, winT = 0, upT = 0;
 const capForQuality = () => Math.min(CONFIG.QUALITY[currentQuality()].dpr, isMobile ? 3 : 4);
 const startDpr = () => quality === 'AUTO' && isMobile ? Math.min(2, capForQuality()) : capForQuality();
-let ssaa = 1, shotBoost = 1;
+let ssaa = 1, shotBoost = 1, aaLabel = 'MSAA';
 /* Множитель суперсэмплинга применяется ПОВЕРХ плотности экрана. Раньше здесь
    стоял min(devicePixelRatio, шаг) — на обычном мониторе 1× он намертво
    запирал рендер на 1×, и никакого сглаживания сверх MSAA получить было
@@ -685,7 +686,7 @@ function loop() {
     } else upT = 0;
     if (showFps) {
       const r = renderer.info.render;
-      $('fps').textContent = `${fps.toFixed(0)} fps   рендер ×${renderScale().toFixed(2)}\n`
+      $('fps').textContent = `${fps.toFixed(0)} fps   рендер ×${renderScale().toFixed(2)}   ${aaLabel}\n`
         + `draw ${r.calls}   tri ${(r.triangles / 1000).toFixed(0)}k`;
     }
     frames = 0; winT = 0;
