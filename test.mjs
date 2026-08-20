@@ -613,6 +613,51 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   ok(pickFloors(0.5, [3, 3]) === 3, 'Вырожденный диапазон возвращает единственное значение');
 }
 
+/* ══ 3f4. Деревья ниже домов и стоят не вплотную ═══════════════════════ */
+{
+  const g = new THREE.Group();
+  buildWorld(g, fakeRenderer, 'HIGH');
+  const ins = g.children.filter(o => o.isInstancedMesh);
+  const trunk = ins.find(o => !o.material.map && !o.material.flatShading && o.count > 300);
+  ok(!!trunk, 'Стволы деревьев найдены');
+
+  const m = new THREE.Matrix4(), p = new THREE.Vector3(), s = new THREE.Vector3(), q = new THREE.Quaternion();
+  const TR = CONFIG.TREE;
+  const hs = [], pts = [];
+  for (let k = 0; k < trunk.count; k++) {
+    trunk.getMatrixAt(k, m); m.decompose(p, q, s);
+    hs.push(s.y / TR.trunk * 0.98);                    // полная высота над своей землёй
+    pts.push([Math.atan2(p.x, p.y), p.z, s.y / TR.trunk]);
+  }
+  hs.sort((a, b) => a - b);
+  const med = hs[hs.length >> 1], max = hs[hs.length - 1];
+  const maxBld = Math.max(...CONFIG.BLD.map(b => b.floors[1])) * CONFIG.FLOOR_H;
+  const medBld = 4 * CONFIG.FLOOR_H;
+
+  ok(max <= maxBld,
+     `Самое высокое дерево ${(max * 10).toFixed(1)} м не выше самого высокого дома ${(maxBld * 10).toFixed(1)} м`);
+  ok(med < medBld,
+     `Обычное дерево ${(med * 10).toFixed(1)} м ниже обычного дома ${(medBld * 10).toFixed(1)} м`);
+  ok(hs.filter(h => h > maxBld).length === 0, 'Ни одно дерево не перерастает застройку');
+  ok(max / hs[0] > 2.2, `Разброс высот заметный: от ${(hs[0] * 10).toFixed(1)} до ${(max * 10).toFixed(1)} м`);
+
+  /* деревья не стоят вплотную: расстояние соразмерно кронам */
+  const gapA = (a, b) => Math.abs(((a - b + Math.PI) % TAU + TAU) % TAU - Math.PI);
+  let tooClose = 0, minGap = 1e9;
+  for (let a = 0; a < pts.length; a++) {
+    for (let b = a + 1; b < pts.length; b++) {
+      if (Math.abs(pts[a][1] - pts[b][1]) > 6) continue;          // грубый отсев по z
+      const d = Math.hypot(gapA(pts[a][0], pts[b][0]) * CONFIG.R, pts[a][1] - pts[b][1]);
+      const need = (pts[a][2] + pts[b][2]) * TR.crown * TR.spacing;
+      minGap = Math.min(minGap, d / need);
+      if (d < need * 0.98) tooClose++;
+    }
+  }
+  ok(tooClose === 0,
+     `Кроны не смыкаются: минимальный просвет ${(minGap * 100).toFixed(0)}% от требуемого`);
+  ok(TR.spacing > 1.2, `Деревья расставлены с шагом в ${TR.spacing} радиуса кроны`);
+}
+
 /* ══ 3g. Ничего не торчит из холмов и конструкций ══════════════════════ */
 {
   const group = new THREE.Group();

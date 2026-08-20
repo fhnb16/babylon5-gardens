@@ -431,20 +431,32 @@ export function buildWorld(group, renderer, quality) {
   };
 
   /* ─────────── ДЕРЕВЬЯ ─────────── */
-  const treePts = sample(W_TREE, CONFIG.COUNT.trees[i], 1.6);
+  /* Полная высота дерева — одно число; ствол и крона выводятся из него.
+     Раньше они выбирались независимо и в сумме давали до 87 м. Радиус,
+     которым дерево резервирует место, пропорционален высоте, поэтому
+     высокие стоят просторнее низких, а лес перестаёт быть сплошным. */
+  const TR = CONFIG.TREE;
+  const treeH = () => {
+    const u = Math.pow((rnd() + rnd()) / 2, TR.bias);    // чаще невысокие
+    return TR.h[0] + u * (TR.h[1] - TR.h[0]);
+  };
+  const treePts = sample(W_TREE, CONFIG.COUNT.trees[i],
+    () => treeH() * TR.crown * TR.spacing, true);
   const th = new Float32Array(treePts.length), tr = new Float32Array(treePts.length);
   const tu = new Float32Array(treePts.length);          // подъём по склону холма
   for (let k = 0; k < treePts.length; k++) {
-    th[k] = 1.7 + rnd() * 2.8; tr[k] = 1.1 + rnd() * 1.7;
+    const H = treePts[k][2] / (TR.crown * TR.spacing);   // восстанавливаем высоту
+    th[k] = H * TR.trunk; tr[k] = H * TR.crown;
     tu[k] = relief(treePts[k][0], treePts[k][1]);
   }
 
   instance(
-    new THREE.CylinderGeometry(0.13, 0.22, 1, 6),
+    new THREE.CylinderGeometry(0.075, 0.13, 1, 6),
     new THREE.MeshStandardMaterial({ color: 0x6b5236, roughness: 1 }),
     treePts,
     (k, t, z, im) => {
-      m4.compose(surfacePos(t, R - tu[k] - th[k] / 2, z, v3), surfaceQuat(t, q), sc.set(1, th[k], 1));
+      const hs = th[k] / TR.trunk;                    // полная высота дерева
+      m4.compose(surfacePos(t, R - tu[k] - th[k] / 2, z, v3), surfaceQuat(t, q), sc.set(hs, th[k], hs));
       im.setMatrixAt(k, m4);
     });
 
