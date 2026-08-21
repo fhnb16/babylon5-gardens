@@ -64,31 +64,83 @@ function buildAxis(group, panel, panelNormal) {
      направление. С единственным рельсом встречные кабины проходили сквозь
      друг друга. Углы (0° и 180°) выбраны между фермами. */
   const railR = A.spineR + 2.8;
+  const RB = CONFIG.RAILBEAM;
   for (const side of A.railAngles) {
     const c = Math.cos(side), sn = Math.sin(side);
-    const put = (w, d, ox, oy) => spine.push(rod(w, CONFIG.SUN.len, d,
-      ox * c + oy * sn, -ox * sn + oy * c, 0, Math.PI / 2));
-    put(1.5, 0.7, 0, railR);
-    put(0.34, 0.34, -0.8, railR + 0.55);
-    put(0.34, 0.34, 0.8, railR + 0.55);
+    const put = (w, len, d, ox, oy, oz = 0, rx = Math.PI / 2) =>
+      spine.push(rod(w, len, d, ox * c + oy * sn, -ox * sn + oy * c, oz, rx));
+
+    /* Ходовая балка — решётчатая ферма, а не палка: четыре пояса и раскосы
+       по отсекам. Поезд весом в сотни тонн на прямой трубе выглядел
+       игрушечно, а ферма сразу читается как несущая конструкция. */
+    for (const [ox, oy] of [[-RB.w, RB.h], [RB.w, RB.h], [-RB.w, -RB.h], [RB.w, -RB.h]]) {
+      put(RB.chord, CONFIG.SUN.len, RB.chord, ox, railR + oy);
+    }
+    const bays = Math.round(CONFIG.SUN.len / RB.bay);
+    for (let k = 0; k < bays; k++) {
+      const z0 = -CONFIG.SUN.len / 2 + k * RB.bay;
+      /* раскосы крест-накрест: по бортам и снизу */
+      for (const [ax, ay, tilt] of [[-RB.w, 0, 1], [RB.w, 0, -1], [0, -RB.h, 1]]) {
+        const d = new THREE.BoxGeometry(RB.brace, RB.brace, Math.hypot(RB.bay, RB.h * 2));
+        d.rotateX(Math.atan2(RB.h * 2, RB.bay) * tilt);
+        const g0 = rod(0, 0, 0, 0, 0, 0);
+        d.translate(0, 0, 0);
+        const px = ax || 0, py = railR + ay;
+        d.translate(px * c + py * sn, -px * sn + py * c, z0 + RB.bay / 2);
+        spine.push(d);
+      }
+      /* поперечины на границах отсеков */
+      const cross = new THREE.BoxGeometry(RB.w * 2, RB.brace, RB.brace);
+      cross.translate(0, railR - RB.h, z0);
+      cross.rotateZ(-side);
+      spine.push(cross);
+    }
   }
   add(new THREE.Mesh(panelUV(mergeGeos(spine), CONFIG.PANEL_TILE), metal));
 
   /* --- кабины осевого лифта --- */
   /* длинная сторона кабины — вдоль оси (локальный Z), +Y смотрит на ось */
-  const carBody = panelUV(mergeGeos([
-    rod(2.6, 2.2, 6.4, 0, 0, 0),
-    rod(2.9, 2.5, 0.5, 0, 0, 3.3),
-    rod(2.9, 2.5, 0.5, 0, 0, -3.3),
-    rod(0.5, 2.6, 0.5, 0, 1.6, 0)           // токосъёмник вверх, к рельсу
-  ]), CONFIG.PANEL_TILE);
+  /* Кабина: скруглённый корпус, юбка, тележка с катками, поручни и
+     светящаяся полоса по борту. Прежние три коробки читались как ящик. */
+  const CR = CONFIG.LIFTCAR;
+  const carParts = [
+    rod(CR.w, CR.h, CR.len, 0, 0, 0),                       // корпус
+    rod(CR.w * 0.86, CR.h * 0.5, CR.len * 0.06, 0, CR.h * 0.5, CR.len * 0.47),
+    rod(CR.w * 0.86, CR.h * 0.5, CR.len * 0.06, 0, CR.h * 0.5, -CR.len * 0.47),
+    rod(CR.w * 1.06, CR.h * 0.22, CR.len * 0.94, 0, -CR.h * 0.42, 0),  // юбка
+    rod(CR.w * 0.34, CR.h * 0.6, CR.len * 0.3, 0, CR.h * 0.72, 0)      // тележка
+  ];
+  /* носовые скосы — обтекаемость читается силуэтом */
+  for (const sgn of [-1, 1]) {
+    const nose = new THREE.BoxGeometry(CR.w * 0.9, CR.h * 0.78, CR.len * 0.14);
+    nose.rotateX(sgn * 0.34);
+    nose.translate(0, -CR.h * 0.08, sgn * CR.len * 0.53);
+    carParts.push(nose);
+  }
+  /* катки по рельсу */
+  for (const sgn of [-1, 1]) {
+    for (const sx of [-1, 1]) {
+      const wheel = new THREE.CylinderGeometry(0.3, 0.3, 0.22, 10);
+      wheel.rotateZ(Math.PI / 2);
+      wheel.translate(sx * CR.w * 0.4, CR.h * 0.95, sgn * CR.len * 0.3);
+      carParts.push(wheel);
+    }
+  }
+  const carBody = panelUV(mergeGeos(carParts), CONFIG.PANEL_TILE);
+
+  /* Остекление: сплошная лента по бортам и лобовые окна */
   const carGlass = mergeGeos([
-    rod(2.72, 1.4, 4.6, 0, 0.15, 0),        // поясные окна по бортам
-    rod(2.3, 1.4, 0.1, 0, 0.15, 3.35)
+    rod(CR.w * 1.02, CR.h * 0.52, CR.len * 0.86, 0, CR.h * 0.06, 0),
+    rod(CR.w * 0.8, CR.h * 0.5, CR.len * 1.02, 0, CR.h * 0.06, 0)
   ]);
+  /* Снаружи стекло светится, изнутри становится прозрачным: в кабине
+     смотреть надо сквозь него, а не на подсвеченную плёнку. Обе стороны
+     нужны сразу, поэтому материал двусторонний, а прозрачность и свечение
+     переключает поездка. */
   structMats.liftGlass = new THREE.MeshStandardMaterial({
     color: 0x16283c, roughness: 0.1, metalness: 0.7,
-    emissive: 0xffe0b0, emissiveIntensity: 0.35
+    emissive: 0xffe0b0, emissiveIntensity: 0.35,
+    transparent: true, opacity: 1, side: THREE.DoubleSide
   });
   liftCount = A.railAngles.length;
   lifts = {
@@ -353,4 +405,27 @@ export function updateStructures(dt) {
   }
   lifts.body.instanceMatrix.needsUpdate = true;
   lifts.glass.instanceMatrix.needsUpdate = true;
+}
+
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ПОЕЗДКА НА МОНОРЕЛЬСЕ
+   ═══════════════════════════════════════════════════════════════════════════ */
+/** Положение кабины k в системе станции: точка и направление движения */
+export function liftSeat(k, outPos, outDir) {
+  if (!lifts) return false;
+  const i = k % lifts.z.length;
+  const a = lifts.ang[i];
+  outPos.set(Math.sin(a) * lifts.r, Math.cos(a) * lifts.r, lifts.z[i]);
+  outDir.set(0, 0, lifts.dir[i]);
+  return true;
+}
+export const liftCount2 = () => (lifts ? lifts.z.length : 0);
+
+/** Изнутри стекло прозрачное, снаружи — светящееся */
+export function setLiftInside(inside) {
+  const m = structMats.liftGlass;
+  if (!m) return;
+  m.opacity = inside ? CONFIG.LIFTCAR.insideOpacity : 1;
+  m.depthWrite = !inside;
 }

@@ -200,7 +200,35 @@ const AO_FRAG = `
         vec3 hitCol = vec3( 0.0 );
         float got = 0.0;
 
+        /* Сперва марш по экрану: только он видит фермы, деревья и дома —
+           всё, что стоит между водой и бортом. Аналитика их не знает, и
+           одной ею река выходила чёрной с белой полосой солнца. */
+        vec3 mp = P;
+        float mst = uRefStep * ( 0.6 + 0.8 * hash( vec3( vUv * uRes, uSeed ) ) );
+        for ( int i = 0; i < REF_STEPS; i ++ ) {
+          mp += Rd * mst;
+          vec4 mc = uProj * vec4( mp, 1.0 );
+          vec2 muv = ( mc.xy / mc.w ) * 0.5 + 0.5;
+          if ( muv.x < 0.0 || muv.x > 1.0 || muv.y < 0.0 || muv.y > 1.0 ) break;
+          float md = texture2D( tDepth, muv ).x;
+          if ( md < 1.0 ) {
+            vec3 mh = viewPos( muv, md );
+            float mg = mh.z - mp.z;
+            if ( mg > 0.0 && mg < mst * 2.0 && mh.z < P.z
+                 && length( muv - vUv ) * uRes.y > 2.0 ) {
+              vec2 me = abs( muv - 0.5 ) * 2.0;
+              /* у кромки кадра гасим и уступаем место аналитике */
+              got = smoothstep( 0.0, 0.14, 1.0 - max( me.x, me.y ) );
+              hitCol = texture2D( tBeauty, muv ).rgb;
+              break;
+            }
+          }
+          mst *= 1.35;
+        }
+
         /* труба-солнце: ближний корень, луч идёт снаружи внутрь */
+        vec3 farCol = vec3( 0.0 );
+        float farGot = 0.0;
         float a = dot( wd.xy, wd.xy );
         if ( a > 1e-6 ) {
           float b = 2.0 * dot( wo.xy, wd.xy );
@@ -209,13 +237,13 @@ const AO_FRAG = `
           if ( disc > 0.0 ) {
             float tS = ( -b - sqrt( disc ) ) / ( 2.0 * a );
             if ( tS > 0.02 && abs( wo.z + wd.z * tS ) < uHullL * 0.5 ) {
-              hitCol = vec3( 1.0, 0.94, 0.78 ) * uSunGlow;
-              got = 1.0;
+              farCol = vec3( 1.0, 0.94, 0.78 ) * uSunGlow;
+              farGot = 1.0;
             }
           }
 
           /* борт станции: дальний корень, мы внутри цилиндра */
-          if ( got < 0.5 ) {
+          if ( farGot < 0.5 ) {
             float cH = dot( wo.xy, wo.xy ) - uHullR * uHullR;
             float dH = b * b - 4.0 * a * cH;
             if ( dH > 0.0 ) {
@@ -227,16 +255,20 @@ const AO_FRAG = `
                 float th = atan( hw.x, hw.y ) - uWorldRot;
                 float uu = fract( 0.5 - th / 6.28318531 );
                 float vv = hw.z / uHullL + 0.5;
-                hitCol = texture2D( tHull, vec2( uu, vv ) ).rgb;
-                got = 1.0;
+                farCol = texture2D( tHull, vec2( uu, vv ) ).rgb;
+                farGot = 1.0;
               }
             }
           }
         }
 
-        if ( got > 0.5 ) {
+        /* Экранное попадание в приоритете, аналитика добирает остаток:
+           там, где луч ушёл за кадр, борт цилиндра всё равно есть. */
+        vec3 mix2 = hitCol * got + farCol * farGot * ( 1.0 - got );
+        float any = max( got, farGot );
+        if ( any > 0.001 ) {
           float fres = pow( 1.0 - max( 0.0, dot( -V, N ) ), 4.0 );
-          refl = hitCol * smoothness * ( 0.05 + 0.95 * fres ) * uReflect;
+          refl = mix2 * smoothness * ( 0.05 + 0.95 * fres ) * uReflect;
         }
       }
 

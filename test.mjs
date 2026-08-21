@@ -8,7 +8,8 @@ import { CONFIG } from './js/config.js';
 import { D2R, TAU, zoneAt, mulberry32, clamp as clampNum, tpVec, aimAt, natural,
   cityBlock, cityCenter, cellInfo, cellUsable, pickFloors, surfacePos, mergeGeos, rod } from './js/util.js';
 import { buildWorld, worldMats, hullU, uvSelfTest } from './js/world.js';
-import { buildStructures, structMats, updateStructures } from './js/structures.js';
+import { buildStructures, structMats, updateStructures,
+  liftSeat, liftCount2, setLiftInside } from './js/structures.js';
 import { fieldAt, waterLevel, windLevel, humLevel, birdLevel } from './js/audio.js';
 import { stationUp } from './js/controls.js';
 
@@ -1342,8 +1343,14 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
      оба — цилиндры вдоль оси, и пересечение решается формулой. Экранный
      марш давал чёрные пятна там, где луч уходил за кадр. */
   ok(/vec3 Rd = reflect\( V, N \)/.test(src), 'Отражённый луч считается точно');
-  ok(!/for \( int i = 0; i < REF_STEPS; i \+\+ \)/.test(src),
-     'Марша по буферу глубины не осталось');
+  /* Марш по экрану видит фермы, деревья и дома — аналитика их не знает.
+     Одной аналитикой река выходила чёрной с белой полосой солнца. Поэтому
+     марш идёт первым, а аналитика добирает то, что ушло за кадр. */
+  ok(/for \( int i = 0; i < REF_STEPS; i \+\+ \)/.test(src), 'Экранный марш на месте');
+  ok(/vec3 mix2 = hitCol \* got \+ farCol \* farGot \* \( 1\.0 - got \)/.test(src),
+     'Аналитика домешивается по недостающей доле, а не заменяет марш');
+  ok(/got = smoothstep\( 0\.0, 0\.14, 1\.0 - max\( me\.x, me\.y \) \)/.test(src),
+     'У кромки кадра экранное попадание гаснет и уступает место аналитике');
   ok(/float disc = b \* b - 4\.0 \* a \* c0/.test(src), 'Пересечение с трубой-солнцем решается формулой');
   ok(/float dH = b \* b - 4\.0 \* a \* cH/.test(src), 'Пересечение с бортом станции — тоже');
   ok(/\( -b - sqrt\( disc \) \)/.test(src) && /\( -b \+ sqrt\( dH \) \)/.test(src),
@@ -2284,6 +2291,63 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
     .filter(id => !/V$/.test(id) && !['sAAcost', 'sAArow', 'sAArow2', 'sAArow3', 'sAAv'].includes(id));
   ok(ids.length >= 18, `Настроек всего: ${ids.length}`);
   ok(new Set(ids).size === ids.length, 'Дублей при перекладке нет');
+}
+
+/* ══ 3h24. Монорельс: ферма, кабина, поездка ═══════════════════════════ */
+{
+  const g = new THREE.Group();
+  const res = buildWorld(g, fakeRenderer, 'HIGH');
+  buildStructures(g, fakeRenderer, 'HIGH', res.panel, res.panelNormal);
+
+  /* ходовая балка — решётка, а не труба */
+  const RB = CONFIG.RAILBEAM;
+  ok(RB.bay > 0 && RB.chord > 0 && RB.brace > 0, `Балка: пояс ${RB.chord}, раскос ${RB.brace}, отсек ${RB.bay}`);
+  const ssrc = readFileSync(new URL('./js/structures.js', import.meta.url), 'utf8');
+  ok(/раскосы крест-накрест/.test(ssrc), 'У балки есть раскосы');
+  ok(/поперечины на границах отсеков/.test(ssrc), 'И поперечины');
+  const bays = Math.round(CONFIG.SUN.len / RB.bay);
+  ok(bays > 40, `Отсеков по длине: ${bays}`);
+
+  /* кабина */
+  const CR = CONFIG.LIFTCAR;
+  ok(CR.len > CR.w * 2, `Кабина вытянута вдоль пути: ${CR.len} против ${CR.w}`);
+  ok(/носовые скосы/.test(ssrc), 'У кабины есть носовые скосы');
+  ok(/катки по рельсу/.test(ssrc), 'И катки');
+
+  /* стекло: снаружи светится, изнутри прозрачно */
+  ok(structMats.liftGlass.transparent, 'Стекло кабины прозрачное по типу');
+  ok(structMats.liftGlass.side === THREE.DoubleSide, 'Двустороннее: смотрят и снаружи, и изнутри');
+  setLiftInside(true);
+  const inOp = structMats.liftGlass.opacity, inDw = structMats.liftGlass.depthWrite;
+  setLiftInside(false);
+  ok(inOp < 0.3 && structMats.liftGlass.opacity === 1,
+     `Изнутри стекло почти прозрачно (${inOp}), снаружи плотное`);
+  ok(inDw === false, 'Изнутри стекло не пишет глубину — иначе оно перекрыло бы вид');
+  ok(structMats.liftGlass.emissiveIntensity >= 0, 'Снаружи стекло светится');
+
+  /* посадка и движение */
+  ok(liftCount2() === CONFIG.AXIS.railAngles.length, `Кабин: ${liftCount2()}`);
+  const p = new THREE.Vector3(), d = new THREE.Vector3();
+  liftSeat(0, p, d);
+  const r0 = Math.hypot(p.x, p.y), z0 = p.z;
+  ok(r0 > CONFIG.SUN.r && r0 < 20, `Кабина у оси: r = ${r0.toFixed(1)}`);
+  ok(Math.abs(d.z) === 1, 'Направление движения задано вдоль оси');
+  updateStructures(2);
+  liftSeat(0, p, d);
+  ok(Math.abs(p.z - z0) > 1, `За две секунды кабина уехала на ${Math.abs(p.z - z0).toFixed(0)} юнитов`);
+
+  const msrc = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+  ok(/function updateRide/.test(msrc), 'Камеру ведёт кабина');
+  ok(/updateControls\(dt, camera\); updateRide\(\)/.test(msrc),
+     'Обзор остаётся за игроком: положение задаёт кабина, поворот — нет');
+  ok(/_rp\.y \+= CONFIG\.LIFTCAR\.eye/.test(msrc), 'Камера на высоте глаз, а не в полу кабины');
+  ok(/let best = 0, bestD = Infinity/.test(msrc),
+     'Садимся в ближайшую кабину — переход не выглядит телепортом');
+  const html = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
+  ok(html.includes('id="bRide"') && html.includes('id="bRideExit"'),
+     'Вход в поездку в списке точек, выход отдельной кнопкой');
+  ok(/setRide\(false\); setTour/.test(msrc) && /setTour\(false\);\s*\n\s*fly\.on = false/.test(msrc),
+     'Поездка и авто-тур друг друга выключают');
 }
 
 /* ══ 3i. Звук реагирует на то, где находится камера ════════════════════ */

@@ -3,7 +3,8 @@ import { CONFIG } from './config.js';
 import { mulberry32, clamp, lerp, easeInOut, tpVec, aimAt, fadeByFog, TAU } from './util.js';
 import { makeSoftSprite, makeGlowTexture } from './textures.js';
 import { buildWorld, worldMats, hullU, windU, updateTraffic, trafficMeshes } from './world.js';
-import { buildStructures, structMats, updateStructures } from './structures.js';
+import { buildStructures, structMats, updateStructures,
+  liftSeat, liftCount2, setLiftInside } from './structures.js';
 import { ctl, isMobile, initControls, updateControls, syncFromCamera, resetStick, stationUp } from './controls.js';
 import { audio, startAudio, updateAudio, setVolume, setEnabled, suspendAudio } from './audio.js';
 import { trace, startTrace, traceStep, stopTrace,
@@ -388,6 +389,49 @@ function updateTour(dt) {
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
+   ПОЕЗДКА НА МОНОРЕЛЬСЕ
+
+   Камера садится в кабину и едет вместе с ней, обзор при этом свободный —
+   как из глаз пассажира. Управление положением отдаётся кабине, а поворот
+   остаётся за игроком: перехватывать ещё и взгляд значило бы отобрать у него
+   единственное, ради чего в поездку и садятся.
+   ═══════════════════════════════════════════════════════════════════════════ */
+const ride = { on: false, car: 0 };
+const _rp = new THREE.Vector3(), _rd = new THREE.Vector3();
+
+function setRide(on) {
+  ride.on = on && liftCount2() > 0;
+  $('rideBar').classList.toggle('show', ride.on);
+  $('bRide').classList.toggle('on', ride.on);
+  setLiftInside(ride.on);
+  if (ride.on) {
+    setTour(false);
+    fly.on = false;
+    ctl.enabled = true;
+    /* садимся в ближайшую кабину: так переход не выглядит телепортом */
+    let best = 0, bestD = Infinity;
+    for (let k = 0; k < liftCount2(); k++) {
+      liftSeat(k, _rp, _rd);
+      worldGroup.localToWorld(_rp);
+      const d = _rp.distanceToSquared(camera.position);
+      if (d < bestD) { bestD = d; best = k; }
+    }
+    ride.car = best;
+  } else {
+    syncFromCamera(camera);
+  }
+}
+
+/** Камеру ведёт кабина, взгляд остаётся за игроком */
+function updateRide() {
+  if (!ride.on) return;
+  if (!liftSeat(ride.car, _rp, _rd)) { setRide(false); return; }
+  _rp.y += CONFIG.LIFTCAR.eye;              // глаз пассажира выше пола кабины
+  worldGroup.localToWorld(_rp);
+  camera.position.copy(_rp);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
    ФОТО-РЕЖИМ
    Снимок берётся сразу после отрисовки кадра: так не нужен
    preserveDrawingBuffer, который стоит производительности всё время.
@@ -491,11 +535,13 @@ function initUI() {
     const d = document.createElement('div');
     d.className = 'tp';
     d.innerHTML = `<i>${tp.ico}</i><div><b>${tp.name}</b><s>${tp.hint}</s></div>`;
-    d.addEventListener('click', () => { closeSheets(); setTour(false); goTo(i); });
+    d.addEventListener('click', () => { closeSheets(); setTour(false); setRide(false); goTo(i); });
     list.appendChild(d);
   });
 
-  $('bTour').onclick = () => { closeSheets(); setTour(!tour.on); };
+  $('bTour').onclick = () => { closeSheets(); setRide(false); setTour(!tour.on); };
+  $('bRide').onclick = () => { closeSheets(); setRide(!ride.on); };
+  $('bRideExit').onclick = () => setRide(false);
   $('bPhoto').onclick = () => setClean(true);
   $('bPhotoExit').onclick = () => setClean(false);
   $('bShot').onclick = () => { shotPending = true; };
@@ -902,7 +948,8 @@ function loop() {
 
   updateTour(dt);
   updateFly(dt);
-  if (!fly.on) updateControls(dt, camera);
+  if (!fly.on && !ride.on) updateControls(dt, camera);
+  else if (ride.on) { updateControls(dt, camera); updateRide(); }
 
   /* звуку нужна позиция камеры в системе станции: и река, и ось живут там */
   worldGroup.worldToLocal(_vAudio.copy(camera.position));

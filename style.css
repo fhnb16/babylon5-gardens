@@ -96,6 +96,22 @@ body.clean #topbar,body.clean #brand,body.clean #pad,body.clean #fps{display:non
 body.clean #photobar{display:flex}
 #photobar .btn{width:56px;height:56px;border-radius:50%}
 #photobar .btn.on{background:rgba(255,217,160,.22);color:var(--accent)}
+#rideBar{
+  position:absolute;left:50%;transform:translateX(-50%);
+  bottom:calc(20px + var(--sab));display:none;align-items:center;gap:14px;
+  padding:9px 10px 9px 17px;border-radius:14px;white-space:nowrap;
+  background:rgba(14,22,36,.74);border:1px solid rgba(180,214,255,.22);
+  font:600 10px/1 ui-sans-serif,system-ui;letter-spacing:.16em;color:var(--dim);
+}
+#rideBar.show{display:flex}
+#rideBar i{
+  font-style:normal;padding:7px 13px;border-radius:10px;cursor:pointer;
+  background:rgba(255,217,160,.16);border:1px solid rgba(255,217,160,.32);
+  color:var(--accent);
+}
+#rideBar i:hover{background:rgba(255,217,160,.26)}
+body.clean #rideBar{display:none}
+
 #traceInfo{
   position:absolute;left:50%;transform:translateX(-50%);
   bottom:calc(94px + var(--sab));display:none;pointer-events:none;
@@ -263,7 +279,23 @@ body.clean #photobar{display:flex}
   #photobar{bottom:calc(10px + var(--sab));gap:10px}
   #photobar .btn{width:46px;height:46px;min-width:46px;min-height:46px}
   #photobar #bShot{width:54px;height:54px}
-  #traceInfo{bottom:calc(70px + var(--sab))}
+  #rideBar{
+  position:absolute;left:50%;transform:translateX(-50%);
+  bottom:calc(20px + var(--sab));display:none;align-items:center;gap:14px;
+  padding:9px 10px 9px 17px;border-radius:14px;white-space:nowrap;
+  background:rgba(14,22,36,.74);border:1px solid rgba(180,214,255,.22);
+  font:600 10px/1 ui-sans-serif,system-ui;letter-spacing:.16em;color:var(--dim);
+}
+#rideBar.show{display:flex}
+#rideBar i{
+  font-style:normal;padding:7px 13px;border-radius:10px;cursor:pointer;
+  background:rgba(255,217,160,.16);border:1px solid rgba(255,217,160,.32);
+  color:var(--accent);
+}
+#rideBar i:hover{background:rgba(255,217,160,.26)}
+body.clean #rideBar{display:none}
+
+#traceInfo{bottom:calc(70px + var(--sab))}
   #caption{bottom:calc(74px + var(--sab))}
   #caption b{font-size:clamp(15px,3.2vw,20px)}
 }
