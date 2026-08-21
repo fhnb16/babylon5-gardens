@@ -26,6 +26,8 @@ const forEachInstance = (arr, fn) => {
   }
 };
 
+const smaaTexNearest = s => /smaaTex\[1\]\.minFilter = THREE\.NearestFilter/.test(s);
+
 let fails = 0;
 const ok = (c, m) => { console.log((c ? '  ok  ' : '  FAIL') + '  ' + m); if (!c) fails++; };
 const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
@@ -1391,39 +1393,78 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
 /* ══ 3h3. Сглаживание ══════════════════════════════════════════════════ */
 {
   const msrc = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+  const psrc = readFileSync(new URL('./js/photo.js', import.meta.url), 'utf8');
+  const html = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
 
-  ok(/antialias: true/.test(msrc),
-     'MSAA включён и на мобильных: у тайловых GPU он почти бесплатен');
+  /* «Выкл» обязан выключать ВСЁ. MSAA канваса задаётся при создании рендерера
+     и на лету не выключается — поэтому канвас создаётся без него, а MSAA
+     берётся из буфера постобработки. */
+  ok(/antialias: false/.test(msrc), 'Канвас создаётся без MSAA — иначе «выкл» его не уберёт');
+  ok(/samples: taaOn \? 0 : samples/.test(psrc), 'Число сэмплов буфера задаётся режимом');
+  ok(/setFxaa\(renderer, !!mode \|\| glowOn \|\| raysOn/.test(psrc)
+     && /if \(!fxOn\) \{ disposeFxaa\(\); return; \}/.test(psrc),
+     'Без режима и без эффектов буфер вообще не создаётся — прямой рендер в канвас');
 
-  /* Ключевая правка: множитель суперсэмплинга обязан идти ПОВЕРХ плотности
-     экрана. Прежний min(devicePixelRatio, шаг) на мониторе 1× намертво
-     запирал рендер на 1×, и сглаживания сверх MSAA получить было нельзя. */
-  ok(/Math\.min\(devicePixelRatio \|\| 1, CONFIG\.DPR_STEPS\[dprIndex\]\) \* ssaa/.test(msrc),
-     'Множитель применяется поверх плотности экрана, а не отсекается ею');
-  ok(/CONFIG\.SSAA_MAX \* CONFIG\.SHOT\.max/.test(msrc), 'Итоговый масштаб ограничен сверху');
+  /* режимы описаны данными, а не разбросаны по коду */
+  const M = CONFIG.AA_MODES;
+  ok(M.length >= 6, `Режимов сглаживания: ${M.length}`);
+  ok(M.every(mo => mo.id && mo.label && 'samples' in mo && 'ssaa' in mo && mo.filter),
+     'У каждого режима есть все поля');
+  ok(new Set(M.map(mo => mo.id)).size === M.length, 'Идентификаторы режимов не дублируются');
+  ok(/for \(const mo of CONFIG\.AA_MODES\)/.test(msrc),
+     'Список в интерфейсе строится из данных, а не дублирует их в разметке');
+  ok(!/<option value="fxaa"/.test(html), 'В разметке режимы не захардкожены');
 
-  ok(CONFIG.SSAA[0] === 1 && CONFIG.SSAA[CONFIG.SSAA.length - 1] > 1.5,
-     `Ступени суперсэмплинга: ${CONFIG.SSAA.join(', ')}`);
-  ok(CONFIG.SSAA.every((v, i, a) => i === 0 || v > a[i - 1]), 'Ступени возрастают');
-  ok(CONFIG.SSAA_MAX >= CONFIG.SSAA[CONFIG.SSAA.length - 1],
-     'Предел не ниже самой верхней ступени, иначе она недостижима');
+  /* набор способов */
+  const ids = M.map(mo => mo.id).join(' ');
+  for (const [what, re] of [['MSAA', /msaa/], ['FXAA', /fxaa/], ['TAA', /taa/], ['SSAA', /ssaa/]])
+    ok(re.test(ids), `Есть ${what}`);
+  const msaa = M.filter(mo => mo.samples > 0 && mo.filter === 'none' && mo.ssaa === 1);
+  ok(msaa.length >= 2 && msaa.every((mo, i, a) => i === 0 || mo.samples >= a[i - 1].samples),
+     `Ступени MSAA: ${msaa.map(mo => '×' + mo.samples).join(', ')}`);
+  const ss = M.filter(mo => mo.ssaa > 1);
+  ok(ss.length >= 3, `Ступени суперсэмплинга: ${ss.map(mo => mo.ssaa).join(', ')}`);
+  ok(ss.every(mo => mo.samples > 0), 'Суперсэмплинг идёт поверх MSAA, а не вместо');
 
-  /* стоимость должна быть понятна из чисел, а не на ощупь */
-  const cost = s => s * s;
-  ok(cost(CONFIG.SSAA[1]) < 1.7 && cost(CONFIG.SSAA[3]) === 4,
-     `Стоимость по фрагментам: ${CONFIG.SSAA.map(s => '×' + cost(s).toFixed(2)).join(', ')}`);
+  /* TAA */
+  ok(/TAA_FRAG/.test(psrc), 'TAA реализован');
+  ok(/uPrevVP \* vec4\( w\.xyz \/ w\.w, 1\.0 \)/.test(psrc),
+     'История берётся перепроецированием, а не по тем же координатам');
+  ok(/deltaRot\.makeRotationZ\(prevRot - worldRot\)/.test(psrc),
+     'Вращение станции отменяется поворотом назад — иначе история уезжает вместе с миром');
+  ok(/clamp\( texture2D\( tHist, hUv \)\.rgb, lo, hi \)/.test(psrc),
+     'История отбраковывается по соседям — то, что двигалось иначе, заменяется текущим кадром');
+  ok(/uHasHist/.test(psrc), 'Первый кадр берётся целиком, без пустой истории');
+  ok(/filter === 'taa' \? 0 : windBase/.test(msrc),
+     'При TAA ветер приглушается: качающийся лес тянулся бы шлейфом');
+  ok(CONFIG.TAA.blend > 0.5 && CONFIG.TAA.blend < 1, `Доля истории ${CONFIG.TAA.blend}`);
+  ok(M.find(mo => mo.filter === 'taa').samples === 0,
+     'TAA и MSAA не совмещаются: перепроецированию нужна глубина буфера');
+
+  /* --- SMAA --- */
+  const lut = readFileSync(new URL('./js/smaa-lut.js', import.meta.url), 'utf8');
+  const sh = readFileSync(new URL('./js/smaa-shaders.js', import.meta.url), 'utf8');
+  ok(/export const SMAA_AREA/.test(lut) && /export const SMAA_SEARCH/.test(lut),
+     'Обе таблицы SMAA на месте');
+  const areaLen = (lut.match(/SMAA_AREA = '([^']+)'/) || [])[1]?.length || 0;
+  ok(areaLen > 30000, `Таблица покрытия ${(areaLen / 1024) | 0} КБ — она и делает SMAA настоящим SMAA`);
+  for (const k of ['EDGES', 'WEIGHTS', 'BLEND']) {
+    ok(new RegExp(`SMAA_${k}_FRAG`).test(sh), `Проход «${k.toLowerCase()}» на месте`);
+  }
+  ok(/tArea: \{ value: smaaTex\[0\] \}/.test(psrc) && /tSearch: \{ value: smaaTex\[1\] \}/.test(psrc),
+     'Таблицы подключены к проходу весов — без них алгоритм вырождается в MLAA');
+  ok(/pass\(fxMat, smaaRT\[0\]\)/.test(psrc),
+     'SMAA получает уже тонмаппенный кадр: по линейному HDR контраст яркости считается неверно');
+  ok(/pass\(smaaMat\[2\], null\)/.test(psrc), 'Последний проход SMAA идёт в канвас');
+  ok(CONFIG.AA_MODES.some(mo => mo.filter === 'smaa'), 'SMAA есть в списке способов');
+  ok(smaaTexNearest(psrc), 'Таблица поиска берётся без интерполяции — иначе веса плывут');
 
   ok(/prefs\.set\('aaOn'/.test(msrc) && /prefs\.set\('aaMode'/.test(msrc),
-     'И включатель, и способ сглаживания сохраняются');
-  ok(/рендер ×\$\{renderScale\(\)/.test(msrc),
-     'Счётчик кадров показывает фактический масштаб рендера');
-
-  const html = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
-  ok(html.includes('id="sAA"'), 'Сглаживание переключается из настроек');
-
-  /* адаптив по-прежнему двигает ступень, а не множитель */
+     'И включатель, и способ сохраняются');
+  ok(html.includes('id="sAAon"') && html.includes('id="sAA"'),
+     'Сглаживание: отдельно включатель, отдельно способ');
   ok(/dprIndex--/.test(msrc) && !/ssaa--/.test(msrc),
-     'Под нагрузкой снижается ступень плотности, а выбранный пользователем множитель остаётся');
+     'Под нагрузкой снижается ступень плотности, а выбранный режим остаётся');
 }
 
 /* ══ 3h4. Снимок в увеличенном разрешении и FXAA ═══════════════════════ */
@@ -1466,10 +1507,9 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   ok(/pass\(fxMat, null\)/.test(body), 'Финальный проход идёт в канвас');
 
   /* antialias у рендерера действует только на канвас: буферам нужен samples */
-  ok(/samples: CONFIG\.MSAA_SAMPLES/.test(psrc),
-     `Буферы постобработки многосэмпловые (${CONFIG.MSAA_SAMPLES}×) — иначе включение FXAA молча отключало MSAA`);
-  ok((psrc.match(/samples: CONFIG\.MSAA_SAMPLES/g) || []).length >= 2,
-     'И буфер FXAA, и буфер кадра трассировки');
+  ok(/samples: taaOn \? 0 : samples/.test(psrc),
+     'У буфера кадра число сэмплов задаётся выбранным режимом');
+  ok(/samples: CONFIG\.MSAA_SAMPLES/.test(psrc), 'Буфер кадра трассировки многосэмпловый');
   ok(CONFIG.MSAA_SAMPLES >= 2, 'Сэмплов достаточно, чтобы края читались');
   ok(/if \(!fxOn \|\| !fxRT\)/.test(psrc), 'Без FXAA лишнего прохода нет');
   ok(/resizePost\(renderer\)/.test(msrc), 'Буфер FXAA пересоздаётся при изменении размера');
@@ -1477,7 +1517,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   const html = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
   ok(html.includes('id="sAAon"') && html.includes('id="sAA"'),
      'Сглаживание: отдельно включатель, отдельно способ');
-  ok(html.includes('>FXAA<'), 'FXAA есть в списке способов');
+  ok(CONFIG.AA_MODES.some(mo => mo.filter === 'fxaa'), 'FXAA есть в списке способов');
 }
 
 /* ══ 3h5. Карты нормалей ═══════════════════════════════════════════════ */
@@ -1546,7 +1586,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
 
   /* --- один буфер на всех --- */
   ok(/export function setPost/.test(psrc), 'FXAA, свечение и лучи включают общую цепочку');
-  ok(/setPost\(renderer, \{ fxaa: fx, glow: glowOn, rays: raysOn \}\)/.test(msrc),
+  ok(/setPost\(renderer, \{ mode: mo, glow: glowOn, rays: raysOn \}\)/.test(msrc),
      'Настройки сходятся в один вызов');
   ok(/uFxaa < 0\.5/.test(psrc), 'Свечение можно включить без FXAA');
 

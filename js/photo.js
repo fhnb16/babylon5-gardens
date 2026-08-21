@@ -1,5 +1,11 @@
 import * as THREE from 'three';
 import { CONFIG } from './config.js';
+import { SMAA_AREA, SMAA_SEARCH } from './smaa-lut.js';
+import {
+  SMAA_EDGES_VERT, SMAA_EDGES_FRAG,
+  SMAA_WEIGHTS_VERT, SMAA_WEIGHTS_FRAG,
+  SMAA_BLEND_VERT, SMAA_BLEND_FRAG
+} from './smaa-shaders.js';
 
 /* ═══════════════════════════════════════════════════════════════════════════
    ТРАССИРОВКА ДЛЯ ФОТО-РЕЖИМА
@@ -456,20 +462,108 @@ const RAYS_FRAG = `
   }
 `;
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   TAA — накопление по кадрам с перепроецированием
+
+   Обычное накопление здесь бесполезно: мир непрерывно вращается, и без
+   поправки история размажется. Но вращение — жёсткий поворот вокруг оси Z,
+   и его можно точно отменить: точка, которая сейчас в P, кадр назад была в
+   Rz(−Δ)·P. По ней и берётся история.
+
+   Отбраковка по соседям гасит остальное: всё, что подвинулось иначе
+   (машины, лифт, качающиеся кроны), выпадает за диапазон окружающих
+   пикселей и заменяется текущим кадром. Ветер при TAA приглушается — иначе
+   лес тянется шлейфом.
+   ═══════════════════════════════════════════════════════════════════════════ */
+const TAA_FRAG = `
+  precision highp float;
+  varying vec2 vUv;
+  uniform sampler2D tCur, tHist, tDepth;
+  uniform mat4 uInvVP, uPrevVP;
+  uniform float uBlend, uClamp, uHasHist;
+  uniform vec2 uRes;
+
+  void main() {
+    vec3 cur = texture2D( tCur, vUv ).rgb;
+    float d = texture2D( tDepth, vUv ).x;
+
+    /* окно соседей: по нему отбраковывается устаревшая история */
+    vec3 lo = cur, hi = cur;
+    for ( int y = -1; y <= 1; y ++ ) {
+      for ( int x = -1; x <= 1; x ++ ) {
+        vec3 c = texture2D( tCur, vUv + vec2( float( x ), float( y ) ) / uRes ).rgb;
+        lo = min( lo, c ); hi = max( hi, c );
+      }
+    }
+    vec3 mid = ( lo + hi ) * 0.5;
+    lo = mid + ( lo - mid ) * uClamp;
+    hi = mid + ( hi - mid ) * uClamp;
+
+    /* где этот пиксель был кадр назад */
+    vec4 w = uInvVP * vec4( vUv * 2.0 - 1.0, d * 2.0 - 1.0, 1.0 );
+    vec4 pc = uPrevVP * vec4( w.xyz / w.w, 1.0 );
+    vec2 hUv = ( pc.xy / pc.w ) * 0.5 + 0.5;
+
+    float valid = uHasHist
+      * step( 0.0, hUv.x ) * step( hUv.x, 1.0 )
+      * step( 0.0, hUv.y ) * step( hUv.y, 1.0 );
+    vec3 hist = clamp( texture2D( tHist, hUv ).rgb, lo, hi );
+    gl_FragColor = vec4( mix( cur, hist, uBlend * valid ), 1.0 );
+  }
+`;
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   SMAA — три прохода по референсной реализации
+
+   Кромки → веса → смешивание. Второй проход и есть весь смысл алгоритма: по
+   двум таблицам он узнаёт, какую долю пикселя закрасить при данной паре длин
+   соседних кромок. Без таблиц это выродилось бы в MLAA, который проигрывает
+   даже FXAA.
+
+   Работает по ЭКРАННЫМ значениям, как и FXAA: контраст яркости по линейному
+   HDR считается неверно. Поэтому перед SMAA кадр тонмаппится в отдельный
+   буфер, а после — просто выводится.
+   ═══════════════════════════════════════════════════════════════════════════ */
+let smaaOn = false, smaaRT = [], smaaMat = [], smaaTex = [];
+
+function loadLut(src, format) {
+  const tx = new THREE.Texture();
+  const img = new Image();
+  img.onload = () => { tx.image = img; tx.needsUpdate = true; };
+  img.src = src;
+  tx.minFilter = THREE.LinearFilter;
+  tx.magFilter = THREE.LinearFilter;
+  tx.generateMipmaps = false;
+  tx.flipY = false;
+  if (format) tx.format = format;
+  return tx;
+}
+
 let fxOn = false, fxRT = null, fxMat = null, fxQuad = null, fxScene = null, fxCam = null;
+let taaMat = null, taaRT = [], taaIdx = 0, taaHas = 0;
+const prevVP = new THREE.Matrix4(), curVP = new THREE.Matrix4();
+const deltaRot = new THREE.Matrix4();
+let prevRot = 0;
 let glowOn = false, raysOn = false;
 let brRT = null, blRT = null, rayRT = null;
 let brMat = null, blurMat = null, rayMat = null;
 const sunUV = new THREE.Vector2(0.5, 0.5);
 let sunVisible = false;
 
-/** Свечение, лучи и FXAA живут на одном буфере: включён любой — цепочка нужна */
-export function setPost(renderer, { fxaa = false, glow = false, rays = false } = {}) {
+/** Свечение, лучи и любое сглаживание, кроме «выкл», живут на одном буфере.
+    Без режима и без эффектов буфер не создаётся вовсе — прямой рендер в канвас. */
+export function setPost(renderer, { mode = null, glow = false, rays = false } = {}) {
   glowOn = !!glow; raysOn = !!rays;
-  setFxaa(renderer, !!fxaa || glowOn || raysOn, !!fxaa);
+  aaMode = mode;
+  samples = mode ? mode.samples : 0;
+  fxaaFilter = !!mode && mode.filter === 'fxaa';
+  taaOn = !!mode && mode.filter === 'taa';
+  smaaOn = !!mode && mode.filter === 'smaa';
+  setFxaa(renderer, !!mode || glowOn || raysOn, fxaaFilter);
 }
 
-let fxaaFilter = false;
+let fxaaFilter = false, aaMode = null, samples = 0, taaOn = false;
+
 export function setFxaa(renderer, on, filter = true) {
   fxOn = !!on;
   fxaaFilter = filter;
@@ -527,7 +621,12 @@ export function setSunScreen(camera, worldGroup) {
 }
 
 function disposeFxaa() {
-  for (const t of [fxRT, brRT, blRT, rayRT]) t?.dispose();
+  for (const t of [fxRT, brRT, blRT, rayRT, ...taaRT, ...smaaRT]) t?.dispose();
+  for (const mm of smaaMat) mm.dispose();
+  for (const tx of smaaTex) tx.dispose();
+  smaaMat = []; smaaTex = []; smaaRT = [];
+  fxRT?.depthTexture?.dispose();
+  taaMat?.dispose(); taaMat = null; taaRT = []; taaHas = 0;
   for (const m of [fxMat, brMat, blurMat, rayMat]) m?.dispose();
   fxQuad?.geometry.dispose();
   fxRT = brRT = blRT = rayRT = null;
@@ -551,19 +650,80 @@ export function resizePost(renderer) {
   fxMat.uniforms.tGlow.value = brRT.texture;
   fxMat.uniforms.tRays.value = rayRT.texture;
   fxRT?.dispose();
-  /* samples обязателен: antialias: true работает ТОЛЬКО для канваса. Уводя
-     кадр в буфер, мы молча теряли MSAA, и FXAA лишь возвращал потерянное —
-     разницы на глаз ноль, зато лишний проход. Многосэмпловый буфер даёт
-     оба сглаживания сразу. */
+  /* MSAA берётся отсюда: у канваса он задаётся при создании рендерера и на
+     лету не выключается, а «выкл» обязан выключать всё. TAA перепроецирует
+     историю и требует глубину; с многосэмпловым буфером глубина доступна не
+     везде, но TAA и MSAA в одном режиме и не встречаются. */
+  const depth = taaOn ? new THREE.DepthTexture(s.x, s.y) : null;
+  if (depth) { depth.format = THREE.DepthFormat; depth.type = THREE.UnsignedIntType; }
   fxRT = new THREE.WebGLRenderTarget(s.x, s.y, {
-    type: THREE.HalfFloatType, depthBuffer: true, samples: CONFIG.MSAA_SAMPLES,
+    type: THREE.HalfFloatType, depthBuffer: true,
+    samples: taaOn ? 0 : samples,
+    depthTexture: depth || undefined,
     minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter
   });
   fxMat.uniforms.uRes.value.set(s.x, s.y);
+
+  /* SMAA: три прохода, каждому нужен свой буфер. Первый принимает уже
+     тонмаппенный кадр — по линейному HDR контраст яркости считается неверно. */
+  for (const t of smaaRT) t?.dispose();
+  smaaRT = [];
+  if (smaaOn) {
+    const ldr = () => new THREE.WebGLRenderTarget(s.x, s.y, {
+      depthBuffer: false, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter
+    });
+    smaaRT = [ldr(), ldr(), ldr()];        // тонмаппенный кадр, кромки, веса
+    if (!smaaMat.length) {
+      smaaTex = [
+        loadLut(SMAA_AREA),
+        loadLut(SMAA_SEARCH, THREE.RGBAFormat)
+      ];
+      smaaTex[1].minFilter = THREE.NearestFilter;
+      smaaTex[1].magFilter = THREE.NearestFilter;
+      const mk = (vert, frag, uniforms) => new THREE.ShaderMaterial({
+        vertexShader: vert, fragmentShader: frag, uniforms
+      });
+      smaaMat = [
+        mk(SMAA_EDGES_VERT, SMAA_EDGES_FRAG, {
+          tDiffuse: { value: null }, resolution: { value: new THREE.Vector2() }
+        }),
+        mk(SMAA_WEIGHTS_VERT, SMAA_WEIGHTS_FRAG, {
+          tDiffuse: { value: null }, tArea: { value: smaaTex[0] },
+          tSearch: { value: smaaTex[1] }, resolution: { value: new THREE.Vector2() }
+        }),
+        mk(SMAA_BLEND_VERT, SMAA_BLEND_FRAG, {
+          tDiffuse: { value: null }, tColor: { value: null },
+          resolution: { value: new THREE.Vector2() }
+        })
+      ];
+    }
+    for (const mm of smaaMat) mm.uniforms.resolution.value.set(1 / s.x, 1 / s.y);
+  }
+
+  for (const t of taaRT) t?.dispose();
+  taaRT = [];
+  if (taaOn) {
+    taaRT = [0, 1].map(() => new THREE.WebGLRenderTarget(s.x, s.y, {
+      type: THREE.HalfFloatType, depthBuffer: false,
+      minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter
+    }));
+    taaMat = taaMat || new THREE.ShaderMaterial({
+      vertexShader: VERT, fragmentShader: TAA_FRAG,
+      uniforms: {
+        tCur: { value: null }, tHist: { value: null }, tDepth: { value: null },
+        uInvVP: { value: new THREE.Matrix4() }, uPrevVP: { value: new THREE.Matrix4() },
+        uBlend: { value: CONFIG.TAA.blend }, uClamp: { value: CONFIG.TAA.clamp },
+        uHasHist: { value: 0 }, uRes: { value: new THREE.Vector2() }
+      }
+    });
+    taaMat.uniforms.tDepth.value = fxRT.depthTexture;
+    taaMat.uniforms.uRes.value.set(s.x, s.y);
+    taaHas = 0;
+  }
 }
 
 /** Обычный кадр: напрямую или через FXAA */
-export function renderFrame(renderer, scene, camera) {
+export function renderFrame(renderer, scene, camera, worldRotZ = 0) {
   if (!fxOn || !fxRT) {
     renderer.setRenderTarget(null);
     renderer.render(scene, camera);
@@ -571,7 +731,35 @@ export function renderFrame(renderer, scene, camera) {
   }
   renderer.setRenderTarget(fxRT);
   renderer.render(scene, camera);
-  composite(renderer, fxRT.texture, renderer.toneMappingExposure);
+
+  let src = fxRT.texture;
+  if (taaOn && taaRT.length) src = runTaa(renderer, camera, worldRotZ);
+  composite(renderer, src, renderer.toneMappingExposure);
+}
+
+/** Накопление с перепроецированием. worldRot — текущий поворот мира вокруг Z:
+    им отменяется вращение станции, иначе история уезжает вместе с ней. */
+function runTaa(renderer, camera, worldRot) {
+  const cur = taaRT[taaIdx], hist = taaRT[1 - taaIdx];
+  curVP.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+
+  taaMat.uniforms.tCur.value = fxRT.texture;
+  taaMat.uniforms.tHist.value = hist.texture;
+  taaMat.uniforms.uInvVP.value.copy(curVP).invert();
+  /* прошлый кадр = прошлая камера × поворот мира назад на Δ */
+  deltaRot.makeRotationZ(prevRot - worldRot);
+  taaMat.uniforms.uPrevVP.value.multiplyMatrices(prevVP, deltaRot);
+  taaMat.uniforms.uHasHist.value = taaHas;
+
+  fxQuad.material = taaMat;
+  renderer.setRenderTarget(cur);
+  renderer.render(fxScene, fxCam);
+
+  prevVP.copy(curVP);
+  prevRot = worldRot;
+  taaHas = 1;
+  taaIdx = 1 - taaIdx;
+  return cur.texture;
 }
 
 /** Свечение, лучи, тонмаппинг и FXAA поверх готового HDR-кадра.
@@ -615,6 +803,20 @@ export function composite(renderer, srcTexture, exposure) {
   fxMat.uniforms.uRays.value = raysOn && sunVisible ? P.rays : 0;
   fxMat.uniforms.uExposure.value = exposure;
   fxMat.uniforms.uFxaa.value = fxaaFilter ? 1 : 0;
+
+  if (smaaOn && smaaRT.length) {
+    /* тонмаппим в буфер, сглаживаем экранные значения, выводим */
+    pass(fxMat, smaaRT[0]);
+    smaaMat[0].uniforms.tDiffuse.value = smaaRT[0].texture;
+    pass(smaaMat[0], smaaRT[1]);
+    smaaMat[1].uniforms.tDiffuse.value = smaaRT[1].texture;
+    pass(smaaMat[1], smaaRT[2]);
+    smaaMat[2].uniforms.tDiffuse.value = smaaRT[2].texture;
+    smaaMat[2].uniforms.tColor.value = smaaRT[0].texture;
+    pass(smaaMat[2], null);
+    return true;
+  }
+
   pass(fxMat, null);
   return true;
 }

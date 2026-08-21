@@ -313,8 +313,26 @@ export const CONFIG = {
      Шестнадцать отсекли бы 75%, но подняли бы вызовы до 159 — на мобильном
      это уже дороже сэкономленного. */
   CHUNKS: 8,
+  /* Режимы сглаживания. MSAA канваса задаётся при создании рендерера и на
+     лету не выключается, поэтому канвас создаётся без него, а MSAA берётся из
+     буфера постобработки: там число сэмплов меняется в любой момент.
+     ssaa — множитель разрешения, работает поверх любого режима. */
+  AA_MODES: [
+    { id: 'msaa2',   label: 'MSAA ×2',        samples: 2, ssaa: 1,    filter: 'none' },
+    { id: 'msaa4',   label: 'MSAA ×4',        samples: 4, ssaa: 1,    filter: 'none' },
+    { id: 'msaa8',   label: 'MSAA ×8',        samples: 8, ssaa: 1,    filter: 'none' },
+    { id: 'fxaa',    label: 'FXAA',           samples: 0, ssaa: 1,    filter: 'fxaa' },
+    { id: 'fxaa4',   label: 'FXAA + MSAA ×4', samples: 4, ssaa: 1,    filter: 'fxaa' },
+    { id: 'smaa',    label: 'SMAA',           samples: 0, ssaa: 1,    filter: 'smaa' },
+    { id: 'smaa4',   label: 'SMAA + MSAA ×4', samples: 4, ssaa: 1,    filter: 'smaa' },
+    { id: 'taa',     label: 'TAA',            samples: 0, ssaa: 1,    filter: 'taa' },
+    { id: 'ssaa125', label: 'SSAA ×1.25',     samples: 4, ssaa: 1.25, filter: 'none' },
+    { id: 'ssaa15',  label: 'SSAA ×1.5',      samples: 4, ssaa: 1.5,  filter: 'none' },
+    { id: 'ssaa2',   label: 'SSAA ×2',        samples: 4, ssaa: 2,    filter: 'none' }
+  ],
+  /* Доля истории в TAA и ширина отбраковки по соседям */
+  TAA: { blend: 0.88, clamp: 1.0 },
   MSAA_SAMPLES: 4,
-  SSAA: [1, 1.25, 1.5, 2],
   /* Снимок делается крупнее экрана и ужимается до нативного размера: каждый
      пиксель усредняет scale² отсчётов. ×2 по стороне — это 4K из 1080p. */
   SHOT: { scale: 2, max: 4 },

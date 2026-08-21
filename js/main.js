@@ -46,7 +46,9 @@ let hemi, lights = [], glow, clouds, motes, moteMat, panel;
 function boot() {
   renderer = new THREE.WebGLRenderer({
     /* MSAA включаем и на мобильных: у тайловых GPU он почти бесплатен */
-    antialias: true, powerPreference: 'high-performance', stencil: false
+    /* MSAA берётся из буфера постобработки: у канваса он задаётся при
+       создании и на лету не выключается, а «выкл» обязан выключать всё */
+    antialias: false, powerPreference: 'high-performance', stencil: false
   });
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -394,7 +396,7 @@ function grabShot() {
   const nw = renderer.domElement.width, nh = renderer.domElement.height;
   shotBoost = CONFIG.SHOT.scale;
   resize();
-  renderFrame(renderer, scene, camera);
+  renderFrame(renderer, scene, camera, worldGroup.rotation.z);
   saveCanvas(nw, nh);
   shotBoost = 1;
   resize();
@@ -504,21 +506,36 @@ function initUI() {
   /* Сглаживание: включатель отдельно от способа. MSAA работает всегда —
      он сглаживает края треугольников и стоит почти ничего. Сверху либо FXAA
      (дёшево, мылит мелкое), либо суперсэмплинг (честно, стоит квадрат). */
+  /* Сглаживание: выключатель отдельно от способа. «Выкл» гасит всё, включая
+     MSAA, — потому канвас и создаётся без antialias. Способы описаны данными
+     в CONFIG.AA_MODES, список строится из них. */
   const sAAon = $('sAAon'), sAA = $('sAA'), sAAv = $('sAAv'), sAAcost = $('sAAcost');
-  let aaOn = prefs.get('aaOn', false);
-  sAA.value = prefs.get('aaMode', '1.25');
+  for (const mo of CONFIG.AA_MODES) {
+    const op = document.createElement('option');
+    op.value = mo.id; op.textContent = mo.label.toUpperCase();
+    sAA.appendChild(op);
+  }
+  let aaOn = prefs.get('aaOn', true);
+  sAA.value = prefs.get('aaMode', 'msaa4');
+  if (!CONFIG.AA_MODES.some(mo => mo.id === sAA.value)) sAA.value = 'msaa4';
 
+  const COST = {
+    none: s => `${(s.samples || 1)}× сэмплов, ${(s.ssaa * s.ssaa).toFixed(2)}× фрагментов`,
+    fxaa: s => s.samples ? 'фильтр поверх MSAA' : 'один проход поверх кадра',
+    taa: () => 'накопление по кадрам, ветер приглушён',
+    smaa: s => s.samples ? 'три прохода поверх MSAA' : 'три прохода по таблицам'
+  };
   const applyAA = () => {
-    const fx = aaOn && sAA.value === 'fxaa';
-    ssaa = aaOn && !fx ? parseFloat(sAA.value) : 1;
-    setPost(renderer, { fxaa: fx, glow: glowOn, rays: raysOn });
+    const mo = aaOn ? CONFIG.AA_MODES.find(x => x.id === sAA.value) : null;
+    ssaa = mo ? mo.ssaa : 1;
+    setPost(renderer, { mode: mo, glow: glowOn, rays: raysOn });
+    /* TAA размазывает всё, что двигается само: ветер на время приглушаем */
+    windU.uWind.value = mo && mo.filter === 'taa' ? 0 : windBase;
     sAAon.classList.toggle('on', aaOn);
     $('sAArow').classList.toggle('off', !aaOn);
-    aaLabel = !aaOn ? 'MSAA' : fx ? 'MSAA+FXAA' : `MSAA+SSAA×${ssaa}`;
-    sAAv.textContent = !aaOn ? 'только MSAA' : fx ? 'MSAA + FXAA' : `MSAA + ×${ssaa}`;
-    sAAcost.textContent = fx
-      ? 'один проход поверх кадра'
-      : `${(ssaa * ssaa).toFixed(2)}× фрагментов`;
+    aaLabel = mo ? mo.label : 'без сглаживания';
+    sAAv.textContent = mo ? mo.label : 'выключено';
+    sAAcost.textContent = mo ? COST[mo.filter](mo) : '—';
     resize();
   };
   sAAon.onclick = () => { aaOn = !aaOn; prefs.set('aaOn', aaOn); applyAA(); };
@@ -600,7 +617,8 @@ function initUI() {
   const sWind = $('sWind');
   sWind.value = prefs.get('wind', 100);
   sWind.oninput = () => {
-    windU.uWind.value = sWind.value / 100;
+    windBase = sWind.value / 100;
+    windU.uWind.value = windBase;
     $('sWindV').textContent = sWind.value > 0 ? sWind.value + '%' : 'штиль';
     prefs.set('wind', +sWind.value);
   };
@@ -649,7 +667,7 @@ function initUI() {
 let dprIndex = 0, dprCap = 0, paused = false, frames = 0, winT = 0, upT = 0;
 const capForQuality = () => Math.min(CONFIG.QUALITY[currentQuality()].dpr, isMobile ? 3 : 4);
 const startDpr = () => quality === 'AUTO' && isMobile ? Math.min(2, capForQuality()) : capForQuality();
-let ssaa = 1, shotBoost = 1, aaLabel = 'MSAA';
+let ssaa = 1, shotBoost = 1, aaLabel = 'MSAA', windBase = 1;
 let glowOn = true, raysOn = true, trafficOn = true;
 /* Множитель суперсэмплинга применяется ПОВЕРХ плотности экрана. Раньше здесь
    стоял min(devicePixelRatio, шаг) — на обычном мониторе 1× он намертво
@@ -734,7 +752,7 @@ function loop() {
   worldGroup.worldToLocal(_vAudio.copy(camera.position));
   updateAudio(dt, _vAudio, ctl.speed * (ctl.boost ? CONFIG.SPEED_BOOST : 1), daylight);
 
-  renderFrame(renderer, scene, camera);
+  renderFrame(renderer, scene, camera, worldGroup.rotation.z);
   if (shotPending) { shotPending = false; grabShot(); }
 
   frames++; winT += dt;
