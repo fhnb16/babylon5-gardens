@@ -57,7 +57,7 @@ const AO_FRAG = `
   uniform sampler2D tBeauty, tNormal, tDepth, tPrev;
   uniform mat4 uProj, uProjInv;
   uniform vec2 uRes;
-  uniform float uRadius, uIntensity, uSeed, uBlend, uBias, uFogD, uBounce, uReflect, uRefStep;
+  uniform float uRadius, uIntensity, uSeed, uBlend, uBias, uFogD, uBounce, uReflect, uRefStep, uRefGrow;
   uniform float uAoNear, uAoFar, uDebug;
   uniform vec3 uSunA, uSunB, uSunU, uSunV;   // труба-солнце в видовых координатах
   uniform float uSunR, uShadow, uAmbient;
@@ -223,7 +223,7 @@ const AO_FRAG = `
               break;
             }
           }
-          mst *= 1.35;
+          mst *= uRefGrow;
         }
 
         /* труба-солнце: ближний корень, луч идёт снаружи внутрь */
@@ -423,6 +423,7 @@ export function startTrace(renderer, scene, camera, windUniform) {
       uBias: { value: P.bias }, uSeed: { value: 0 }, uBlend: { value: 1 },
       uFogD: { value: 0 }, uBounce: { value: P.bounce },
       uReflect: { value: P.reflect }, uRefStep: { value: P.refStep },
+      uRefGrow: { value: P.refGrow },
       uAoNear: { value: P.aoNear }, uAoFar: { value: P.aoFar },
       uDebug: { value: 0 },
       uSunA: { value: new THREE.Vector3() }, uSunB: { value: new THREE.Vector3() },
