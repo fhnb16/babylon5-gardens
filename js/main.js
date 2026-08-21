@@ -350,13 +350,22 @@ function updateTour(dt) {
    Снимок берётся сразу после отрисовки кадра: так не нужен
    preserveDrawingBuffer, который стоит производительности всё время.
    ═══════════════════════════════════════════════════════════════════════════ */
-let cleanView = false, shotPending = false;
+let cleanView = false, shotPending = false, omegaSaved = 0;
 
 function setClean(on) {
   cleanView = on;
   document.body.classList.toggle('clean', on);
-  if (on) closeSheets();
-  else { setTraceDebug(0); $('bDebug').classList.remove('on'); setTrace(false); }
+  if (on) {
+    closeSheets();
+    /* Станцию останавливаем: снимок делается с неподвижного кадра, а
+       вращение к тому же обнуляет накопление трассировки. Скорость
+       запоминаем и возвращаем на выходе. */
+    omegaSaved = omega;
+    omega = 0;
+  } else {
+    omega = omegaSaved;
+    setTraceDebug(0); $('bDebug').classList.remove('on'); setTrace(false);
+  }
 }
 
 /* Трассировка идёт только по неподвижному кадру: любое движение мира или
@@ -719,6 +728,17 @@ function initUI() {
     if (!sw) continue;
     row.style.cursor = 'pointer';
     row.addEventListener('click', e => { if (e.target !== sw) sw.click(); });
+  }
+
+  /* Вкладки настроек: девятнадцать строк в одном свитке не читались */
+  const tabBtns = [...document.querySelectorAll('.tabbtn')];
+  const tabs = [...document.querySelectorAll('.tab')];
+  for (const b of tabBtns) {
+    b.addEventListener('click', () => {
+      for (const x of tabBtns) x.classList.toggle('on', x === b);
+      for (const t of tabs) t.classList.toggle('on', t.dataset.tab === b.dataset.tab);
+      $('set').scrollTop = 0;
+    });
   }
 
   $('go').onclick = () => {

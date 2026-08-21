@@ -1325,8 +1325,11 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   ok(P.shadow > 0 && P.shadowSteps >= 8, `Сила прямого света ${P.shadow}`);
 
   const psrc2 = readFileSync(new URL('./js/photo.js', import.meta.url), 'utf8');
-  ok(/_sunP\.set\(0, 0, -S\.len \/ 2\)\.applyMatrix4\(C\.matrixWorldInverse\)/.test(psrc2),
+  ok(/_sunP\.set\(0, 0, -SUN\.len \/ 2\)\.applyMatrix4\(C\.matrixWorldInverse\)/.test(psrc2),
      'Труба переводится в видовые координаты камерой');
+  /* S на уровне модуля — это сцена; локальное объявление того же имени
+     давало обращение к переменной до инициализации и роняло трассировку */
+  ok(!/^\s\sconst S = /m.test(psrc2), 'Имя сцены не затеняется внутри функций');
   ok(/setAmbientShare/.test(psrc2), 'Доля рассеянного света берётся из текущей палитры');
   const msrc2 = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
   ok(/setAmbientShare\(hemi\.intensity \/ \(hemi\.intensity \+ lights\.length/.test(msrc2),
@@ -2040,6 +2043,82 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   const msrc = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
   ok(/mode\.filter\.includes\('taa'\)\) mode\.samples = 0/.test(msrc),
      'TAA сбрасывает MSAA в любом сочетании');
+}
+
+/* ══ 3h18. Шейдеры компилируемы, имена не затеняются ═══════════════════ */
+{
+  /* Макросы SMAA зашиты в код проходов, а не приходят uniform. Без них
+     шейдер просто не компилируется: 'SMAA_THRESHOLD' undeclared identifier. */
+  const sh = readFileSync(new URL('./js/smaa-shaders.js', import.meta.url), 'utf8');
+  const used = [...new Set([...sh.matchAll(/SMAA_[A-Z_]+/g)].map(m => m[0]))]
+    .filter(n => !/^SMAA_(EDGES|WEIGHTS|BLEND)/.test(n));
+  const declared = [...sh.matchAll(/^\s*(SMAA_[A-Z_]+):/gm)].map(m => m[1]);
+  const missing = used.filter(n => !declared.includes(n));
+  ok(missing.length === 0,
+     `Все ${used.length} макросов SMAA объявлены${missing.length ? ' (нет: ' + missing.join(', ') + ')' : ''}`);
+  const psrc = readFileSync(new URL('./js/photo.js', import.meta.url), 'utf8');
+  ok(/SMAA_EDGES_DEFINES/.test(psrc) && /SMAA_WEIGHTS_DEFINES/.test(psrc),
+     'Константы передаются материалам через defines');
+
+  /* Затенение имён модульного уровня — источник ошибок «до инициализации» */
+  for (const f of ['js/photo.js', 'js/main.js', 'js/world.js']) {
+    const src = readFileSync(new URL('./' + f, import.meta.url), 'utf8');
+    const top = [...src.matchAll(/^(?:let|const)\s+([A-Za-z_$][\w$]*)/gm)].map(m => m[1]);
+    const inner = [...src.matchAll(/^\s\s+const\s+([A-Za-z_$][\w$]*)\s*=/gm)].map(m => m[1]);
+    const clash = [...new Set(inner.filter(n => top.includes(n)))];
+    ok(clash.length === 0, `${f}: имена модуля не затеняются${clash.length ? ' (' + clash.join(', ') + ')' : ''}`);
+  }
+}
+
+/* ══ 3h19. Интерфейс: вкладки, порядок кнопок, фото-режим ══════════════ */
+{
+  const html = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
+  const css = readFileSync(new URL('./style.css', import.meta.url), 'utf8');
+  const msrc = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+
+  /* Девятнадцать строк в одном свитке не читались — разложены по вкладкам */
+  const tabs = [...html.matchAll(/class="tabbtn[^"]*" data-tab="(\d+)"/g)].map(m => m[1]);
+  ok(tabs.length >= 3, `Вкладок настроек: ${tabs.length}`);
+  const panes = [...html.matchAll(/class="tab[^"]*" data-tab="(\d+)"/g)].map(m => m[1]);
+  ok(new Set(panes).size === new Set(tabs).size, 'У каждой вкладки есть своя панель');
+  ok((html.match(/class="tabbtn on"/g) || []).length === 1
+     && (html.match(/class="tab on"/g) || []).length === 1,
+     'Ровно одна вкладка открыта при старте');
+  ok(/\.tab\{display:none\}/.test(css) && /\.tab\.on\{display:block\}/.test(css),
+     'Скрытые вкладки не занимают места');
+  ok(/tabBtns/.test(msrc) && /t\.dataset\.tab === b\.dataset\.tab/.test(msrc),
+     'Переключение вкладок привязано');
+
+  /* каждая настройка попала ровно в одну вкладку */
+  const setSheet = html.slice(html.indexOf('id="set"'), html.indexOf('id="help"'));
+  const ctrlIds = [...setSheet.matchAll(/id="(s[A-Z]\w*)"/g)].map(m => m[1])
+    .filter(id => !/V$/.test(id) && !['sAAcost', 'sAArow', 'sAArow2', 'sAArow3', 'sAAv'].includes(id));
+  ok(ctrlIds.length >= 17, `Настроек разложено по вкладкам: ${ctrlIds.length}`);
+  ok(new Set(ctrlIds).size === ctrlIds.length, 'Ни одна настройка не продублирована при переносе');
+
+  /* порядок кнопок: часто нужное сверху */
+  const bar = html.slice(html.indexOf('<div id="topbar">'), html.indexOf('<div id="pad">'));
+  const order = [...bar.matchAll(/id="(b\w+)"/g)].map(m => m[1]);
+  ok(order[0] === 'bSet', 'Настройки — первая кнопка');
+  ok(order[1] === 'bFs', 'Полный экран под настройками');
+  ok(order[2] === 'bHelp', 'Помощь под полным экраном');
+  ok(order[order.length - 1] === 'bDay', 'Фаза освещения — в самом низу');
+
+  /* фото-режим останавливает станцию */
+  ok(/omegaSaved = omega;\s*\n\s*omega = 0;/.test(msrc),
+     'Вход в фото-режим останавливает вращение станции');
+  ok(/omega = omegaSaved;/.test(msrc), 'Выход возвращает прежнюю скорость');
+
+  /* ракурсы на башню: за целью должен оставаться цилиндр, а не торец */
+  for (const i of [1, 2]) {
+    const tp = CONFIG.TP[i];
+    const behind = Math.abs(tp.look[2] - Math.sign(tp.look[2] - tp.pos[2]) * (-CONFIG.L / 2));
+    const room = tp.pos[2] > tp.look[2]
+      ? tp.look[2] + CONFIG.L / 2
+      : CONFIG.L / 2 - tp.look[2];
+    ok(room > CONFIG.L * 0.5,
+       `«${tp.name}»: за целью ещё ${(room * 10) | 0} м цилиндра, а не ближний торец`);
+  }
 }
 
 /* ══ 3i. Звук реагирует на то, где находится камера ════════════════════ */

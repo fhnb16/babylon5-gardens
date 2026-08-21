@@ -25,17 +25,13 @@
   <div id="brand"><b>ВАВИЛОН-5</b>Сады · цилиндр О'Нилла</div>
 
   <div id="topbar">
-    <div class="btn glass" id="bDay" title="День" aria-label="Фаза освещения">
-      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.4"/><path d="M12 2.6v2.4M12 19v2.4M21.4 12H19M5 12H2.6M18.6 5.4l-1.7 1.7M7.1 16.9l-1.7 1.7M18.6 18.6l-1.7-1.7M7.1 7.1L5.4 5.4"/></svg>
-    </div>
-    <div class="btn glass on" id="bSnd" title="Звук" aria-label="Звук">
-      <svg viewBox="0 0 24 24"><path d="M4 9.2h3.3L12 5.3v13.4l-4.7-3.9H4z"/><path d="M15.6 9.4a3.6 3.6 0 0 1 0 5.2"/><path d="M18.2 6.8a7.2 7.2 0 0 1 0 10.4"/></svg>
-    </div>
-    <div class="btn glass" id="bTp" title="Телепорты" aria-label="Телепорты">
-      <svg viewBox="0 0 24 24"><path d="M12 21s7-6.1 7-11a7 7 0 1 0-14 0c0 4.9 7 11 7 11z"/><circle cx="12" cy="10" r="2.6"/></svg>
-    </div>
+    <!-- Порядок по частоте обращения: настройки сверху, редко нужная
+         фаза освещения — внизу, у большого пальца её трогают реже всего -->
     <div class="btn glass" id="bSet" title="Настройки" aria-label="Настройки">
       <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.1"/><path d="M19.4 14.5a1.6 1.6 0 0 0 .33 1.77l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.6 1.6 0 0 0-1.77-.33 1.6 1.6 0 0 0-1 1.47V21a2 2 0 1 1-4 0v-.11a1.6 1.6 0 0 0-1.05-1.46 1.6 1.6 0 0 0-1.77.33l-.06.06A2 2 0 1 1 4.4 17l.06-.06a1.6 1.6 0 0 0 .33-1.77 1.6 1.6 0 0 0-1.47-1H3a2 2 0 1 1 0-4h.11a1.6 1.6 0 0 0 1.46-1.05 1.6 1.6 0 0 0-.33-1.77L4.2 7.3A2 2 0 1 1 7 4.46l.06.06a1.6 1.6 0 0 0 1.77.33H9a1.6 1.6 0 0 0 1-1.47V3a2 2 0 1 1 4 0v.11a1.6 1.6 0 0 0 1 1.47 1.6 1.6 0 0 0 1.77-.33l.06-.06A2 2 0 1 1 19.6 7l-.06.06a1.6 1.6 0 0 0-.33 1.77V9a1.6 1.6 0 0 0 1.47 1H21a2 2 0 1 1 0 4h-.11a1.6 1.6 0 0 0-1.47 1z"/></svg>
+    </div>
+    <div class="btn glass" id="bFs" title="Во весь экран" aria-label="Во весь экран">
+      <svg viewBox="0 0 24 24"><path d="M3.5 9V3.5H9M15 3.5h5.5V9M20.5 15v5.5H15M9 20.5H3.5V15"/></svg>
     </div>
     <div class="btn glass" id="bHelp" title="Справка" aria-label="Справка">
       <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9.2"/><path d="M9.3 9.2a2.8 2.8 0 0 1 5.4.9c0 1.9-2.7 2.4-2.7 4"/><path d="M12 17.4h.01"/></svg>
@@ -43,8 +39,14 @@
     <div class="btn glass" id="bPhoto" title="Фото-режим" aria-label="Фото-режим">
       <svg viewBox="0 0 24 24"><path d="M3.2 8.4h3.4l1.5-2.3h7.8l1.5 2.3h3.4v10.4H3.2z"/><circle cx="12" cy="13.3" r="3.4"/></svg>
     </div>
-    <div class="btn glass" id="bFs" title="Во весь экран" aria-label="Во весь экран">
-      <svg viewBox="0 0 24 24"><path d="M3.5 9V3.5H9M15 3.5h5.5V9M20.5 15v5.5H15M9 20.5H3.5V15"/></svg>
+    <div class="btn glass" id="bTp" title="Телепорты" aria-label="Телепорты">
+      <svg viewBox="0 0 24 24"><path d="M12 21s7-6.1 7-11a7 7 0 1 0-14 0c0 4.9 7 11 7 11z"/><circle cx="12" cy="10" r="2.6"/></svg>
+    </div>
+    <div class="btn glass on" id="bSnd" title="Звук" aria-label="Звук">
+      <svg viewBox="0 0 24 24"><path d="M4 9.2h3.3L12 5.3v13.4l-4.7-3.9H4z"/><path d="M15.6 9.4a3.6 3.6 0 0 1 0 5.2"/><path d="M18.2 6.8a7.2 7.2 0 0 1 0 10.4"/></svg>
+    </div>
+    <div class="btn glass" id="bDay" title="День" aria-label="Фаза освещения">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.4"/><path d="M12 2.6v2.4M12 19v2.4M21.4 12H19M5 12H2.6M18.6 5.4l-1.7 1.7M7.1 16.9l-1.7 1.7M18.6 18.6l-1.7-1.7M7.1 7.1L5.4 5.4"/></svg>
     </div>
   </div>
 
@@ -88,17 +90,16 @@
   <div class="grip"></div>
   <div class="btn close" id="setClose"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></div>
   <h2>Настройки</h2>
+  <div class="tabs">
+    <button class="tabbtn on" data-tab="0">МИР</button>
+    <button class="tabbtn" data-tab="1">КАРТИНКА</button>
+    <button class="tabbtn" data-tab="2">ДВИЖЕНИЕ</button>
+    <button class="tabbtn" data-tab="3">ПРОЧЕЕ</button>
+  </div>
+  <div class="tab on" data-tab="0">
   <div class="row">
     <label>Качество<small>Плотность мира, детализация крон, следы домов</small></label>
     <select id="sQual"><option value="AUTO">АВТО</option><option value="LOW">НИЗКОЕ</option><option value="HIGH">ВЫСОКОЕ</option><option value="ULTRAM">УЛЬТРА (ТЕЛЕФОН)</option><option value="ULTRA">УЛЬТРА (ПК)</option></select>
-  </div>
-  <div class="row">
-    <label>Чувствительность обзора<small id="sSensV">1.00×</small></label>
-    <input type="range" id="sSens" min="30" max="250" value="100">
-  </div>
-  <div class="row">
-    <label>Скорость вращения<small id="sRotV">оборот за 240 с</small></label>
-    <input type="range" id="sRot" min="0" max="100" value="19">
   </div>
   <div class="row">
     <label>Зерно генерации<small id="sSeedV">заводское</small></label>
@@ -121,6 +122,29 @@
       <option value="winter">Зима</option>
     </select>
   </div>
+  <div class="row">
+    <label>Плотность зелени<small id="sGreenV">100%</small></label>
+    <select id="sGreen">
+      <option value="0">100% — ПОЛНАЯ</option>
+      <option value="1">75%</option>
+      <option value="2">50%</option>
+      <option value="3">30% — САМАЯ ЛЁГКАЯ</option>
+    </select>
+  </div>
+  <div class="row">
+    <label>Дальность прорисовки<small id="sFarV">5.2 км</small></label>
+    <select id="sFar">
+      <option value="0">5.2 КМ — ВСЯ СТАНЦИЯ</option>
+      <option value="1">3.8 КМ</option>
+      <option value="2">2.6 КМ — САМАЯ ЛЁГКАЯ</option>
+    </select>
+  </div>
+  <div class="row">
+    <label>Насыщенность зелени<small id="sSatV">62%</small></label>
+    <input type="range" id="sSat" min="20" max="120" value="62">
+  </div>
+  </div>
+  <div class="tab" data-tab="1">
   <div class="row">
     <label>Сглаживание<small id="sAAv">только MSAA</small></label>
     <div class="sw" id="sAAon"></div>
@@ -149,30 +173,15 @@
     <label>Трафик на магистралях<small>Огни машин на улицах</small></label>
     <div class="sw" id="sTraffic"></div>
   </div>
+  </div>
+  <div class="tab" data-tab="2">
   <div class="row">
-    <label>Плотность зелени<small id="sGreenV">100%</small></label>
-    <select id="sGreen">
-      <option value="0">100% — ПОЛНАЯ</option>
-      <option value="1">75%</option>
-      <option value="2">50%</option>
-      <option value="3">30% — САМАЯ ЛЁГКАЯ</option>
-    </select>
+    <label>Чувствительность обзора<small id="sSensV">1.00×</small></label>
+    <input type="range" id="sSens" min="30" max="250" value="100">
   </div>
   <div class="row">
-    <label>Дальность прорисовки<small id="sFarV">5.2 км</small></label>
-    <select id="sFar">
-      <option value="0">5.2 КМ — ВСЯ СТАНЦИЯ</option>
-      <option value="1">3.8 КМ</option>
-      <option value="2">2.6 КМ — САМАЯ ЛЁГКАЯ</option>
-    </select>
-  </div>
-  <div class="row">
-    <label>Насыщенность зелени<small id="sSatV">62%</small></label>
-    <input type="range" id="sSat" min="20" max="120" value="62">
-  </div>
-  <div class="row">
-    <label>Громкость<small id="sVolV">55%</small></label>
-    <input type="range" id="sVol" min="0" max="100" value="55">
+    <label>Скорость вращения<small id="sRotV">оборот за 240 с</small></label>
+    <input type="range" id="sRot" min="0" max="100" value="19">
   </div>
   <div class="row">
     <label>Ветер в кронах<small id="sWindV">100%</small></label>
@@ -182,9 +191,16 @@
     <label>Авто-цикл освещения<small>День → закат → ночь по кругу</small></label>
     <div class="sw" id="sCycle"></div>
   </div>
+  </div>
+  <div class="tab" data-tab="3">
+  <div class="row">
+    <label>Громкость<small id="sVolV">55%</small></label>
+    <input type="range" id="sVol" min="0" max="100" value="55">
+  </div>
   <div class="row">
     <label>Счётчик кадров<small>FPS и вызовы отрисовки</small></label>
     <div class="sw" id="sFps"></div>
+  </div>
   </div>
 </section>
 

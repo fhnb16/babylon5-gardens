@@ -277,12 +277,12 @@ function buildingGeo(type) {
    ═══════════════════════════════════════════════════════════════════════════ */
 export const worldMats = { bld: [], nav: null, blob: null, print: null,
   trafficBody: null, trafficLamp: null, trafficMesh: null };
-let parts = [];
+let sceneParts = [];
 let traffic = null;
 
 export function disposeWorld(group) {
-  for (const o of parts) { group.remove(o); deepDispose(o); }
-  parts = [];
+  for (const o of sceneParts) { group.remove(o); deepDispose(o); }
+  sceneParts = [];
   worldMats.bld = []; worldMats.nav = null; worldMats.blob = null;
   worldMats.print = null; worldMats.trafficBody = null;
   worldMats.trafficLamp = null; worldMats.trafficMesh = null; traffic = null;
@@ -296,7 +296,7 @@ export function buildWorld(group, renderer, quality) {
   const rnd = mulberry32(CONFIG.SEED);
   const R = CONFIG.R, L = CONFIG.L, HL = L / 2;
   const maxAniso = renderer.capabilities.getMaxAnisotropy();
-  const add = o => { group.add(o); parts.push(o); return o; };
+  const add = o => { group.add(o); sceneParts.push(o); return o; };
 
   /* ─────────── КОРПУС ─────────── */
   const hullGeo = new THREE.CylinderGeometry(R, R, L, CONFIG.HULL_SEG, 1, true);
@@ -834,7 +834,7 @@ export function buildWorld(group, renderer, quality) {
   });
   add(new THREE.Points(ng, worldMats.nav));
 
-  return { panel, panelNormal, drawn: parts.length };
+  return { panel, panelNormal, drawn: sceneParts.length };
 }
 
 /** Самотест ориентации UV: сверяем реальные UV геометрии с мировым θ */

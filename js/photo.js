@@ -2,8 +2,8 @@ import * as THREE from 'three';
 import { CONFIG } from './config.js';
 import { SMAA_AREA, SMAA_SEARCH } from './smaa-lut.js';
 import {
-  SMAA_EDGES_VERT, SMAA_EDGES_FRAG,
-  SMAA_WEIGHTS_VERT, SMAA_WEIGHTS_FRAG,
+  SMAA_EDGES_VERT, SMAA_EDGES_FRAG, SMAA_EDGES_DEFINES,
+  SMAA_WEIGHTS_VERT, SMAA_WEIGHTS_FRAG, SMAA_WEIGHTS_DEFINES,
   SMAA_BLEND_VERT, SMAA_BLEND_FRAG
 } from './smaa-shaders.js';
 
@@ -437,10 +437,10 @@ export function traceStep() {
   /* Труба-солнце в видовых координатах. Ось станции неподвижна относительно
      вращения мира (вращение идёт вокруг неё же), поэтому достаточно перевести
      её концы камерой. uSunU и uSunV — перпендикуляры для обхвата трубы. */
-  const S = CONFIG.SUN, HL = CONFIG.L / 2;
-  _sunP.set(0, 0, -S.len / 2).applyMatrix4(C.matrixWorldInverse);
+  const SUN = CONFIG.SUN;
+  _sunP.set(0, 0, -SUN.len / 2).applyMatrix4(C.matrixWorldInverse);
   aoMat.uniforms.uSunA.value.copy(_sunP);
-  _sunP.set(0, 0, S.len / 2).applyMatrix4(C.matrixWorldInverse);
+  _sunP.set(0, 0, SUN.len / 2).applyMatrix4(C.matrixWorldInverse);
   aoMat.uniforms.uSunB.value.copy(_sunP);
   _sunAxis.subVectors(aoMat.uniforms.uSunB.value, aoMat.uniforms.uSunA.value).normalize();
   _sunU.set(1, 0, 0).cross(_sunAxis);
@@ -821,17 +821,17 @@ export function resizePost(renderer) {
       ];
       smaaTex[1].minFilter = THREE.NearestFilter;
       smaaTex[1].magFilter = THREE.NearestFilter;
-      const mk = (vert, frag, uniforms) => new THREE.ShaderMaterial({
-        vertexShader: vert, fragmentShader: frag, uniforms
+      const mk = (vert, frag, uniforms, defines) => new THREE.ShaderMaterial({
+        defines: defines || {}, vertexShader: vert, fragmentShader: frag, uniforms
       });
       smaaMat = [
         mk(SMAA_EDGES_VERT, SMAA_EDGES_FRAG, {
           tDiffuse: { value: null }, resolution: { value: new THREE.Vector2() }
-        }),
+        }, SMAA_EDGES_DEFINES),
         mk(SMAA_WEIGHTS_VERT, SMAA_WEIGHTS_FRAG, {
           tDiffuse: { value: null }, tArea: { value: smaaTex[0] },
           tSearch: { value: smaaTex[1] }, resolution: { value: new THREE.Vector2() }
-        }),
+        }, SMAA_WEIGHTS_DEFINES),
         mk(SMAA_BLEND_VERT, SMAA_BLEND_FRAG, {
           tDiffuse: { value: null }, tColor: { value: null },
           resolution: { value: new THREE.Vector2() }

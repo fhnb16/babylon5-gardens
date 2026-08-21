@@ -9,6 +9,19 @@
    переписывать его своими словами значило бы только внести ошибки.
    ═══════════════════════════════════════════════════════════════════════════ */
 
+/* Константы алгоритма. Без них шейдеры не компилируются: SMAA_THRESHOLD,
+   SMAA_MAX_SEARCH_STEPS и размеры таблицы покрытия зашиты в код проходов как
+   макросы, а не как uniform. Значения — из референсной реализации. */
+export const SMAA_EDGES_DEFINES = {
+  SMAA_THRESHOLD: '0.1'
+};
+export const SMAA_WEIGHTS_DEFINES = {
+  SMAA_MAX_SEARCH_STEPS: '8',
+  SMAA_AREATEX_MAX_DISTANCE: '16',
+  SMAA_AREATEX_PIXEL_SIZE: '( 1.0 / vec2( 160.0, 560.0 ) )',
+  SMAA_AREATEX_SUBTEX_SIZE: '( 1.0 / 7.0 )'
+};
+
 export const SMAA_EDGES_VERT = `
 
 		uniform vec2 resolution;
