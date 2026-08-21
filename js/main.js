@@ -8,7 +8,7 @@ import { ctl, isMobile, initControls, updateControls, syncFromCamera, resetStick
 import { audio, startAudio, updateAudio, setVolume, setEnabled, suspendAudio } from './audio.js';
 import { trace, startTrace, traceStep, stopTrace,
   setPost, setSunScreen, resizePost, renderFrame,
-  setTraceDebug, DEBUG_NAMES } from './photo.js';
+  setTraceDebug, DEBUG_NAMES, setAmbientShare } from './photo.js';
 
 const $ = id => document.getElementById(id);
 const stage = $('stage');
@@ -227,6 +227,9 @@ function applyPalette(ph) {
   moteMat.size = lerp(0.72, 0.55, daylight);
   clouds.material.opacity = lerp(0.06, 0.22, daylight);
 
+  /* столько света остаётся в тени от осевых источников — по нему
+     трассировка и решает, насколько темнить затенённое */
+  setAmbientShare(hemi.intensity / (hemi.intensity + lights.length * f('pointInt') + 1e-6));
   hullU.uSparShade.value = f('sparShade');
   hullU.uCityGlow.value = f('cityGlow');
   hullU.uWaterTint.value.copy(mixC(A.waterTint, B.waterTint, t));
@@ -555,10 +558,12 @@ function initUI() {
       ssaa: parseFloat(sScale.value)
     } : null;
     /* TAA живёт на своём буфере с глубиной и с MSAA не сочетается */
-    if (mode && mode.filter === 'taa') mode.samples = 0;
+    /* TAA живёт на своём буфере с глубиной: многосэмпловый буфер с
+       прикреплённой глубиной работает не везде */
+    if (mode && mode.filter.includes('taa')) mode.samples = 0;
     ssaa = mode ? mode.ssaa : 1;
     setPost(renderer, { mode, glow: glowOn, rays: raysOn });
-    windU.uWind.value = mode && mode.filter === 'taa' ? 0 : windBase;
+    windU.uWind.value = mode && mode.filter.includes('taa') ? 0 : windBase;
 
     sAAon.classList.toggle('on', aaOn);
     for (const id of ['sAArow', 'sAArow2', 'sAArow3']) $(id).classList.toggle('off', !aaOn);
@@ -569,7 +574,8 @@ function initUI() {
     sAAv.textContent = mode ? aaLabel : 'выключено';
     /* цена в полноэкранных проходах — по ней и видно, за что платим */
     const px = mode ? mode.ssaa * mode.ssaa : 1;
-    const post = !mode || mode.filter === 'none' ? (mode ? 1 : 0) : mode.filter === 'taa' ? 2 : 2;
+    const post = !mode ? 0 : 1 + (mode.filter.includes('taa') ? 1 : 0)
+      + (mode.filter.includes('smaa') ? 3 : 0);
     sAAcost.textContent = mode
       ? `${px.toFixed(2)}× пикселей, ${post} прохода поверх`
       : 'прямой рендер в канвас';

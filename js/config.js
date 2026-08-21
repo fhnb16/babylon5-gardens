@@ -282,7 +282,8 @@ export const CONFIG = {
        практически готовую картинку, и оставшиеся 95 кадров правили то, чего
        глаз не различает: индикатор считал пустоту. Три луча дают 58% на первом
        кадре, и схождение видно своими глазами, как и должно быть. */
-    rays: 8, samples: 220, radius: 1.4, intensity: 2.0, bias: 0.015,
+    rays: 8, samples: 200, radius: 1.4, intensity: 2.0, bias: 0.015,
+    shadow: 1.0, shadowSteps: 16,   // прямой свет: сила и шагов марша к солнцу
     bounce: 3.0,          // сила переотражённого света
     reflect: 1.25,        // сила зеркальных отражений
     refSteps: 20, refStep: 0.35,  // марш отражённого луча: шагов и стартовый шаг
@@ -343,12 +344,18 @@ export const CONFIG = {
   AA_MSAA: [
     { v: 0, label: 'нет' }, { v: 2, label: '×2' }, { v: 4, label: '×4' }, { v: 8, label: '×8' }
   ],
+  /* Все сочетания, которые физически возможны. TAA идёт со своим буфером
+     глубины и с MSAA не совмещается, зато складывается с любым фильтром
+     кромок: накопление даёт подпиксельные выборки, фильтр правит остаток. */
   AA_FILTER: [
-    { id: 'none', label: 'нет' },
-    { id: 'fxaa', label: 'FXAA' },
-    { id: 'smaa', label: 'SMAA' },
+    { id: 'none',     label: 'нет' },
+    { id: 'fxaa',     label: 'FXAA' },
+    { id: 'smaa',     label: 'SMAA' },
     { id: 'smaafxaa', label: 'SMAA + FXAA' },
-    { id: 'taa', label: 'TAA' }
+    { id: 'taa',      label: 'TAA' },
+    { id: 'taafxaa',  label: 'TAA + FXAA' },
+    { id: 'taasmaa',  label: 'TAA + SMAA' },
+    { id: 'taasmaafxaa', label: 'TAA + SMAA + FXAA' }
   ],
   AA_SCALE: [
     { v: 1, label: '×1' }, { v: 1.25, label: '×1.25' },

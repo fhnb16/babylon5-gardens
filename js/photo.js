@@ -28,7 +28,7 @@ export const trace = { active: false, sample: 0, total: 0, debug: 0 };
 /* 0 — обычный кадр, 1 — затенение, 2 — переотражённый свет,
    3 — отражения, 4 — шероховатость из альфы кадра */
 export const DEBUG_NAMES = ['кадр', 'затенение', 'переотражения', 'отражения',
-  'шероховатость', 'куда попал луч'];
+  'прямой свет', 'шероховатость', 'куда попал луч'];
 export function setTraceDebug(v) {
   trace.debug = v;
   if (aoMat) { aoMat.uniforms.uDebug.value = v; trace.sample = 0; }
@@ -59,6 +59,8 @@ const AO_FRAG = `
   uniform vec2 uRes;
   uniform float uRadius, uIntensity, uSeed, uBlend, uBias, uFogD, uBounce, uReflect, uRefStep;
   uniform float uAoNear, uAoFar, uDebug;
+  uniform vec3 uSunA, uSunB, uSunU, uSunV;   // труба-солнце в видовых координатах
+  uniform float uSunR, uShadow, uAmbient;
 
   vec3 viewPos( vec2 uv, float d ) {
     vec4 c = uProjInv * vec4( uv * 2.0 - 1.0, d * 2.0 - 1.0, 1.0 );
@@ -76,6 +78,7 @@ const AO_FRAG = `
     float ao = 1.0;
     vec3 gi = vec3( 0.0 );
     vec3 refl = vec3( 0.0 );
+    float vis = 1.0;
 
     if ( d < 1.0 ) {
       vec3 P = viewPos( vUv, d );
@@ -128,6 +131,54 @@ const AO_FRAG = `
       }
       ao = 1.0 - clamp( occ / float( RAYS ) * uIntensity, 0.0, 1.0 );
       gi = bounce / float( RAYS ) * uBounce;
+
+      /* ─── ПРЯМОЙ СВЕТ ЛУЧАМИ ───
+         Источник задан аналитически — труба радиусом uSunR на оси станции.
+         Поэтому теневой луч идёт к НАСТОЯЩЕЙ точке на ней, а не к выдуманной:
+         каждая выборка берёт случайную точку по длине и по обхвату трубы.
+         Отсюда и мягкая полутень — она следует из размеров источника, а не
+         подобрана. Растеризатор здесь не помощник: в three точечный источник
+         без карты теней просто светит сквозь всё, и теней от солнца в кадре
+         не было вовсе. */
+      float lit = 0.0, wsum = 0.0;
+      for ( int i = 0; i < RAYS; i ++ ) {
+        vec3 sd3 = vec3( vUv * uRes, uSeed + float( i ) * 2.399 );
+        float along = hash( sd3 );
+        float ang = hash( sd3 + 5.0 ) * 6.28318531;
+        vec3 L = mix( uSunA, uSunB, along )
+               + ( uSunU * cos( ang ) + uSunV * sin( ang ) ) * uSunR;
+
+        vec3 toL = L - P;
+        float dist = length( toL );
+        vec3 dir = toL / dist;
+        float ndl = dot( N, dir );
+        if ( ndl <= 0.0 ) continue;              // источник за поверхностью
+        wsum += ndl;
+
+        /* марш к источнику: шаг растёт, вблизи важна точность, вдали нет */
+        float blocked = 0.0;
+        float st = dist * 0.02;
+        float travel = st * ( 1.0 + hash( sd3 + 11.0 ) );
+        for ( int s = 0; s < SHADOW_STEPS; s ++ ) {
+          vec3 sp = P + dir * travel;
+          vec4 cp = uProj * vec4( sp, 1.0 );
+          vec2 suv = ( cp.xy / cp.w ) * 0.5 + 0.5;
+          if ( suv.x < 0.0 || suv.x > 1.0 || suv.y < 0.0 || suv.y > 1.0 ) break;
+          float sdp = texture2D( tDepth, suv ).x;
+          if ( sdp < 1.0 ) {
+            vec3 hp2 = viewPos( suv, sdp );
+            float gap2 = hp2.z - sp.z;
+            /* преграда between точкой и источником — но не бесконечно
+               толстая: за экраном её толщину знать неоткуда */
+            if ( gap2 > uBias && gap2 < uRadius * 6.0 ) { blocked = 1.0; break; }
+          }
+          travel += st;
+          st *= 1.25;
+          if ( travel > dist ) break;
+        }
+        lit += ndl * ( 1.0 - blocked );
+      }
+      if ( wsum > 0.0 ) vis = lit / wsum;
 
       /* ─── Отражения ───
          Гладкие поверхности (вода, стекло, металл) отражают. Направление
@@ -192,7 +243,11 @@ const AO_FRAG = `
 
     /* Отражённый свет красится в цвет самой поверхности — так и работает
        диффузное переотражение. Зеркальная составляющая добавляется поверх. */
-    vec3 cur = col * ao + col * gi + refl;
+    /* В тени остаётся только рассеянный свет полусферы — его доля uAmbient.
+       Так теневой луч и превращается в освещение: не в тёмное пятно поверх
+       картинки, а в отсутствие прямого света. */
+    float shade = mix( 1.0, mix( uAmbient, 1.0, vis ), uShadow );
+    vec3 cur = col * ao * shade + col * gi + refl;
 
     /* Отладка: показать ТОЛЬКО вклад лучей, без исходной картинки. Накопление
        идёт как обычно, поэтому видно и схождение, и что именно посчитано. */
@@ -200,7 +255,8 @@ const AO_FRAG = `
       if ( uDebug < 1.5 )      cur = vec3( ao );
       else if ( uDebug < 2.5 ) cur = gi * 4.0;
       else if ( uDebug < 3.5 ) cur = refl * 4.0;
-      else if ( uDebug < 4.5 ) cur = vec3( d < 1.0 ? 1.0 : 0.0 ) * vec3( 1.0 - rough );
+      else if ( uDebug < 4.5 ) cur = vec3( vis );
+      else if ( uDebug < 5.5 ) cur = vec3( d < 1.0 ? 1.0 : 0.0 ) * vec3( 1.0 - rough );
       else {
         /* куда попал отражённый луч: зелёный — нашёл цель, красный — ушёл
            за экран, чёрный — поверхность не отражает */
@@ -309,7 +365,7 @@ export function startTrace(renderer, scene, camera, windUniform) {
   qCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
   qScene = new THREE.Scene();
   aoMat = new THREE.ShaderMaterial({
-    defines: { RAYS: P.rays, REF_STEPS: P.refSteps },
+    defines: { RAYS: P.rays, REF_STEPS: P.refSteps, SHADOW_STEPS: P.shadowSteps },
     vertexShader: VERT, fragmentShader: AO_FRAG,
     uniforms: {
       tBeauty: { value: rtBeauty.texture }, tNormal: { value: rtNormal.texture },
@@ -321,7 +377,11 @@ export function startTrace(renderer, scene, camera, windUniform) {
       uFogD: { value: 0 }, uBounce: { value: P.bounce },
       uReflect: { value: P.reflect }, uRefStep: { value: P.refStep },
       uAoNear: { value: P.aoNear }, uAoFar: { value: P.aoFar },
-      uDebug: { value: 0 }
+      uDebug: { value: 0 },
+      uSunA: { value: new THREE.Vector3() }, uSunB: { value: new THREE.Vector3() },
+      uSunU: { value: new THREE.Vector3() }, uSunV: { value: new THREE.Vector3() },
+      uSunR: { value: CONFIG.SUN.r }, uShadow: { value: P.shadow },
+      uAmbient: { value: 0.22 }
     }
   });
   showMat = new THREE.ShaderMaterial({
@@ -373,6 +433,23 @@ export function traceStep() {
   /* сам кадр — в линейном пространстве, без тонмаппинга */
   R.setRenderTarget(rtBeauty);
   R.render(S, C);
+
+  /* Труба-солнце в видовых координатах. Ось станции неподвижна относительно
+     вращения мира (вращение идёт вокруг неё же), поэтому достаточно перевести
+     её концы камерой. uSunU и uSunV — перпендикуляры для обхвата трубы. */
+  const S = CONFIG.SUN, HL = CONFIG.L / 2;
+  _sunP.set(0, 0, -S.len / 2).applyMatrix4(C.matrixWorldInverse);
+  aoMat.uniforms.uSunA.value.copy(_sunP);
+  _sunP.set(0, 0, S.len / 2).applyMatrix4(C.matrixWorldInverse);
+  aoMat.uniforms.uSunB.value.copy(_sunP);
+  _sunAxis.subVectors(aoMat.uniforms.uSunB.value, aoMat.uniforms.uSunA.value).normalize();
+  _sunU.set(1, 0, 0).cross(_sunAxis);
+  if (_sunU.lengthSq() < 1e-6) _sunU.set(0, 1, 0).cross(_sunAxis);
+  _sunU.normalize();
+  _sunV.crossVectors(_sunAxis, _sunU).normalize();
+  aoMat.uniforms.uSunU.value.copy(_sunU);
+  aoMat.uniforms.uSunV.value.copy(_sunV);
+  aoMat.uniforms.uAmbient.value = ambientShare;
 
   /* трассировка затенения и накопление */
   const src = accum[n % 2 === 0 ? 1 : 0], dst = accum[n % 2 === 0 ? 0 : 1];
@@ -608,10 +685,11 @@ export function setPost(renderer, { mode = null, glow = false, rays = false } = 
   samples = mode ? mode.samples : 0;
   /* FXAA может идти и сам по себе, и поверх SMAA — фильтр правит то,
      что осталось после сглаживания кромок */
-  const f = mode ? mode.filter : 'none';
-  fxaaFilter = f === 'fxaa' || f === 'smaafxaa';
-  taaOn = f === 'taa';
-  smaaOn = f === 'smaa' || f === 'smaafxaa';
+  /* Части фильтра независимы и складываются: имя режима — просто их набор */
+  const f = mode ? mode.filter : '';
+  fxaaFilter = f.includes('fxaa');
+  taaOn = f.includes('taa');
+  smaaOn = f.includes('smaa');
   setFxaa(renderer, !!mode || glowOn || raysOn, fxaaFilter);
 }
 
@@ -658,7 +736,14 @@ export function setFxaa(renderer, on, filter = true) {
 }
 
 /** Экранное положение оси станции: лучи расходятся от неё, а не от точки */
-const _sunF = new THREE.Vector3(), _sunV = new THREE.Vector3();
+const _sunF = new THREE.Vector3();
+const _sunP = new THREE.Vector3(), _sunAxis = new THREE.Vector3();
+const _sunU = new THREE.Vector3(), _sunV = new THREE.Vector3();
+const _sunScreen = new THREE.Vector3();
+let ambientShare = 0.22;
+
+/** Доля рассеянного света: столько остаётся в тени от осевого источника */
+export function setAmbientShare(v) { ambientShare = v; }
 export function setSunScreen(camera, worldGroup) {
   /* Векторы переиспользуются: функция зовётся каждый кадр, и два новых
      объекта на кадр — это 120 штук в секунду в сборщик мусора. Именно такие
@@ -670,7 +755,7 @@ export function setSunScreen(camera, worldGroup) {
   const denom = 1 - f.z * f.z;
   const zAxis = denom < 1e-4 ? p.z + Math.sign(f.z || 1) * 100
     : p.z + f.z * (-(p.x * f.x + p.y * f.y)) / denom;
-  const v = _sunV.set(0, 0, THREE.MathUtils.clamp(zAxis, -CONFIG.L / 2, CONFIG.L / 2));
+  const v = _sunScreen.set(0, 0, THREE.MathUtils.clamp(zAxis, -CONFIG.L / 2, CONFIG.L / 2));
   v.project(camera);
   sunVisible = v.z < 1 && Math.abs(v.x) < 2.5 && Math.abs(v.y) < 2.5;
   sunUV.set(v.x * 0.5 + 0.5, v.y * 0.5 + 0.5);

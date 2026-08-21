@@ -1309,8 +1309,28 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   /* ─── Свет считается, а не только затеняется ─── */
   ok(/bounce \+= texture2D\( tBeauty, suv \)\.rgb \* w/.test(src),
      'Луч приносит цвет поверхности, в которую упёрся, — это переотражение, а не только загораживание');
-  ok(/vec3 cur = col \* ao \+ col \* gi \+ refl/.test(src),
-     'Итог складывается из затенения, переотражённого света и зеркальной составляющей');
+  ok(/vec3 cur = col \* ao \* shade \+ col \* gi \+ refl/.test(src),
+     'Итог: прямой свет × затенение + переотражения + отражения');
+
+  /* --- прямой свет считается лучами к настоящему источнику --- */
+  ok(/vec3 L = mix\( uSunA, uSunB, along \)/.test(src),
+     'Теневой луч идёт к случайной точке ПО ДЛИНЕ трубы');
+  ok(/uSunU \* cos\( ang \) \+ uSunV \* sin\( ang \)/.test(src),
+     'И по обхвату: полутень следует из размеров источника, а не подобрана');
+  ok(/for \( int s = 0; s < SHADOW_STEPS; s \+\+ \)/.test(src),
+     `Марш к солнцу, ${P.shadowSteps} шагов`);
+  ok(/float shade = mix\( 1\.0, mix\( uAmbient, 1\.0, vis \), uShadow \)/.test(src),
+     'В тени остаётся доля рассеянного света, а не чернота');
+  ok(/ndl <= 0\.0 \) continue/.test(src), 'Источник за поверхностью не учитывается');
+  ok(P.shadow > 0 && P.shadowSteps >= 8, `Сила прямого света ${P.shadow}`);
+
+  const psrc2 = readFileSync(new URL('./js/photo.js', import.meta.url), 'utf8');
+  ok(/_sunP\.set\(0, 0, -S\.len \/ 2\)\.applyMatrix4\(C\.matrixWorldInverse\)/.test(psrc2),
+     'Труба переводится в видовые координаты камерой');
+  ok(/setAmbientShare/.test(psrc2), 'Доля рассеянного света берётся из текущей палитры');
+  const msrc2 = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+  ok(/setAmbientShare\(hemi\.intensity \/ \(hemi\.intensity \+ lights\.length/.test(msrc2),
+     'Считается как отношение полусферы к полному свету, а не задана числом');
   ok(P.bounce > 0, `Сила переотражения ${P.bounce}`);
 
   /* отражения */
@@ -1443,7 +1463,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
 
   ok(/fill\(sMsaa, CONFIG\.AA_MSAA/.test(msrc) && /fill\(sFilter, CONFIG\.AA_FILTER/.test(msrc),
      'Списки строятся из данных, а не дублируются в разметке');
-  ok(/if \(mode && mode\.filter === 'taa'\) mode\.samples = 0/.test(msrc),
+  ok(/mode\.filter\.includes\('taa'\)\) mode\.samples = 0/.test(msrc),
      'TAA сбрасывает MSAA: он живёт на своём буфере с глубиной');
   ok(/× пикселей, \$\{post\} прохода поверх/.test(msrc),
      'Показывается цена выбранного сочетания — по ней видно, за что платим');
@@ -1463,7 +1483,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   ok(/clamp\( texture2D\( tHist, hUv \)\.rgb, lo, hi \)/.test(psrc),
      'История отбраковывается по соседям — то, что двигалось иначе, заменяется текущим кадром');
   ok(/uHasHist/.test(psrc), 'Первый кадр берётся целиком, без пустой истории');
-  ok(/filter === 'taa' \? 0 : windBase/.test(msrc),
+  ok(/filter\.includes\('taa'\) \? 0 : windBase/.test(msrc),
      'При TAA ветер приглушается: качающийся лес тянулся бы шлейфом');
   ok(CONFIG.TAA.blend > 0.5 && CONFIG.TAA.blend < 1, `Доля истории ${CONFIG.TAA.blend}`);
 
@@ -1969,6 +1989,57 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
     ok(allocs.length === 0,
        `${sig.replace('export ', '')}: без выделений памяти${allocs.length ? ' (' + allocs.join(' ') + ')' : ''}`);
   }
+}
+
+/* ══ 3h17. Каждый путь вывода доходит до канваса ═══════════════════════ */
+{
+  const psrc = readFileSync(new URL('./js/photo.js', import.meta.url), 'utf8');
+
+  /* Разбираем composite: у каждой ветки последний render должен идти в null.
+     Проход, чей результат остался в буфере, пропадает впустую. */
+  const i0 = psrc.indexOf('export function composite');
+  let d = 0, st = false, i1 = i0;
+  for (let k = i0; k < psrc.length; k++) {
+    if (psrc[k] === '{') { d++; st = true; }
+    else if (psrc[k] === '}') { d--; if (st && d === 0) { i1 = k; break; } }
+  }
+  const body = psrc.slice(i0, i1);
+
+  /* ветка SMAA */
+  const smaaBranch = body.slice(body.indexOf('if (smaaOn'), body.indexOf('return true;', body.indexOf('if (smaaOn')));
+  ok(/pass\(smaaMat\[2\], null\)/.test(smaaBranch), 'Ветка SMAA заканчивается выводом в канвас');
+  ok(smaaBranch.lastIndexOf('null') > smaaBranch.lastIndexOf('smaaRT['),
+     'После последнего буфера SMAA идёт именно канвас');
+
+  /* обычная ветка */
+  ok(/pass\(fxMat, null\);\s*\n\s*return true;/.test(body),
+     'Обычная ветка заканчивается выводом в канвас');
+
+  /* TAA пишет в свой буфер и отдаёт его дальше, а не наружу */
+  const taaBody = psrc.slice(psrc.indexOf('function runTaa'));
+  ok(/renderer\.setRenderTarget\(cur\)/.test(taaBody) && /return cur\.texture/.test(taaBody),
+     'TAA отдаёт накопленный буфер дальше по цепочке, а не выводит его сам');
+  ok(/composite\(renderer, src,/.test(psrc), 'Результат TAA уходит в композит');
+
+  /* трассировка тоже через общий композит */
+  ok(/function showAccum/.test(psrc) && /composite\(R, rt\.texture/.test(psrc),
+     'Накопленный кадр трассировки выводится тем же композитом');
+
+  /* сочетания */
+  const F = CONFIG.AA_FILTER;
+  ok(F.length >= 8, `Фильтров и их сочетаний: ${F.length}`);
+  for (const want of ['fxaa', 'smaa', 'taa', 'smaafxaa', 'taafxaa', 'taasmaa'])
+    ok(F.some(x => x.id === want), `Есть сочетание ${want}`);
+  const total = CONFIG.AA_MSAA.length * F.length * CONFIG.AA_SCALE.length;
+  ok(total >= 120, `Всего сочетаний сглаживания: ${total}`);
+  ok(/fxaaFilter = f\.includes\('fxaa'\)/.test(psrc)
+     && /taaOn = f\.includes\('taa'\)/.test(psrc)
+     && /smaaOn = f\.includes\('smaa'\)/.test(psrc),
+     'Части фильтра независимы и складываются, а не перечислены по одной');
+
+  const msrc = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+  ok(/mode\.filter\.includes\('taa'\)\) mode\.samples = 0/.test(msrc),
+     'TAA сбрасывает MSAA в любом сочетании');
 }
 
 /* ══ 3i. Звук реагирует на то, где находится камера ════════════════════ */
