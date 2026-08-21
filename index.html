@@ -126,8 +126,16 @@
     <div class="sw" id="sAAon"></div>
   </div>
   <div class="row" id="sAArow">
-    <label>Способ<small id="sAAcost">—</small></label>
-    <select id="sAA"></select>
+    <label>Выборок покрытия<small>MSAA — края геометрии</small></label>
+    <select id="sMsaa"></select>
+  </div>
+  <div class="row" id="sAArow2">
+    <label>Фильтр<small>Постобработка кромок</small></label>
+    <select id="sFilter"></select>
+  </div>
+  <div class="row" id="sAArow3">
+    <label>Масштаб рендера<small id="sAAcost">—</small></label>
+    <select id="sScale"></select>
   </div>
   <div class="row">
     <label>Свечение огней<small>Ореол вокруг окон и солнца</small></label>
@@ -208,7 +216,8 @@
       <p>📷 Фото-режим — HUD прячется, затвор сохраняет PNG</p>
       <p>Снимок рендерится вчетверо крупнее и ужимается</p>
       <p>В фото-режиме ✳ — трассировка света, затем затвор</p>
-      <p>◉ рядом — показать только вклад лучей</p>
+      <p>◉ рядом — вклад лучей: затенение, переотражения,</p>
+      <p>отражения, шероховатость, карта попаданий</p>
       <p>Свечение, лучи от оси и трафик — в настройках</p>
       <p>Сезон, качество и громкость — там же</p>
       <p>Все настройки и зерно сохраняются</p>

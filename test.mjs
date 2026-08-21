@@ -1421,26 +1421,38 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
      && /if \(!fxOn\) \{ disposeFxaa\(\); return; \}/.test(psrc),
      'Без режима и без эффектов буфер вообще не создаётся — прямой рендер в канвас');
 
-  /* режимы описаны данными, а не разбросаны по коду */
-  const M = CONFIG.AA_MODES;
-  ok(M.length >= 6, `Режимов сглаживания: ${M.length}`);
-  ok(M.every(mo => mo.id && mo.label && 'samples' in mo && 'ssaa' in mo && mo.filter),
-     'У каждого режима есть все поля');
-  ok(new Set(M.map(mo => mo.id)).size === M.length, 'Идентификаторы режимов не дублируются');
-  ok(/for \(const mo of CONFIG\.AA_MODES\)/.test(msrc),
-     'Список в интерфейсе строится из данных, а не дублирует их в разметке');
-  ok(!/<option value="fxaa"/.test(html), 'В разметке режимы не захардкожены');
+  /* Сглаживание собирается из трёх независимых частей: так видно, что даёт
+     эффект, а что нет. Плоский список готовых режимов этого не показывал. */
+  const parts = [
+    ['выборки покрытия', CONFIG.AA_MSAA, 'v'],
+    ['фильтр', CONFIG.AA_FILTER, 'id'],
+    ['масштаб рендера', CONFIG.AA_SCALE, 'v']
+  ];
+  for (const [what, list, key] of parts) {
+    ok(Array.isArray(list) && list.length >= 3, `Ступеней «${what}»: ${list.length}`);
+    ok(list.every(it => it[key] !== undefined && it.label), `У «${what}» заполнены все поля`);
+    ok(new Set(list.map(it => it[key])).size === list.length, `«${what}»: значения не дублируются`);
+  }
+  const combos = CONFIG.AA_MSAA.length * CONFIG.AA_FILTER.length * CONFIG.AA_SCALE.length;
+  ok(combos >= 60, `Сочетаний доступно: ${combos}`);
 
-  /* набор способов */
-  const ids = M.map(mo => mo.id).join(' ');
-  for (const [what, re] of [['MSAA', /msaa/], ['FXAA', /fxaa/], ['TAA', /taa/], ['SSAA', /ssaa/]])
-    ok(re.test(ids), `Есть ${what}`);
-  const msaa = M.filter(mo => mo.samples > 0 && mo.filter === 'none' && mo.ssaa === 1);
-  ok(msaa.length >= 2 && msaa.every((mo, i, a) => i === 0 || mo.samples >= a[i - 1].samples),
-     `Ступени MSAA: ${msaa.map(mo => '×' + mo.samples).join(', ')}`);
-  const ss = M.filter(mo => mo.ssaa > 1);
-  ok(ss.length >= 3, `Ступени суперсэмплинга: ${ss.map(mo => mo.ssaa).join(', ')}`);
-  ok(ss.every(mo => mo.samples > 0), 'Суперсэмплинг идёт поверх MSAA, а не вместо');
+  ok(CONFIG.AA_MSAA.some(x => x.v === 0), 'MSAA можно отключить отдельно от фильтра');
+  ok(CONFIG.AA_FILTER.some(x => x.id === 'none'), 'Фильтр можно отключить отдельно от MSAA');
+  ok(CONFIG.AA_FILTER.some(x => x.id === 'smaafxaa'), 'SMAA и FXAA сочетаются');
+  ok(CONFIG.AA_SCALE[0].v === 1, 'Масштаб начинается с единицы');
+
+  ok(/fill\(sMsaa, CONFIG\.AA_MSAA/.test(msrc) && /fill\(sFilter, CONFIG\.AA_FILTER/.test(msrc),
+     'Списки строятся из данных, а не дублируются в разметке');
+  ok(/if \(mode && mode\.filter === 'taa'\) mode\.samples = 0/.test(msrc),
+     'TAA сбрасывает MSAA: он живёт на своём буфере с глубиной');
+  ok(/× пикселей, \$\{post\} прохода поверх/.test(msrc),
+     'Показывается цена выбранного сочетания — по ней видно, за что платим');
+
+  const html2 = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
+  for (const id of ['sMsaa', 'sFilter', 'sScale']) {
+    ok(html2.includes(`id="${id}"`), `Регулятор ${id} есть в настройках`);
+  }
+  ok(!/<option value="fxaa"/.test(html2), 'В разметке варианты не захардкожены');
 
   /* TAA */
   ok(/TAA_FRAG/.test(psrc), 'TAA реализован');
@@ -1454,8 +1466,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   ok(/filter === 'taa' \? 0 : windBase/.test(msrc),
      'При TAA ветер приглушается: качающийся лес тянулся бы шлейфом');
   ok(CONFIG.TAA.blend > 0.5 && CONFIG.TAA.blend < 1, `Доля истории ${CONFIG.TAA.blend}`);
-  ok(M.find(mo => mo.filter === 'taa').samples === 0,
-     'TAA и MSAA не совмещаются: перепроецированию нужна глубина буфера');
+
 
   /* --- SMAA --- */
   const lut = readFileSync(new URL('./js/smaa-lut.js', import.meta.url), 'utf8');
@@ -1472,13 +1483,13 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   ok(/pass\(fxMat, smaaRT\[0\]\)/.test(psrc),
      'SMAA получает уже тонмаппенный кадр: по линейному HDR контраст яркости считается неверно');
   ok(/pass\(smaaMat\[2\], null\)/.test(psrc), 'Последний проход SMAA идёт в канвас');
-  ok(CONFIG.AA_MODES.some(mo => mo.filter === 'smaa'), 'SMAA есть в списке способов');
+  ok(CONFIG.AA_FILTER.some(mo => mo.id.includes('smaa')), 'SMAA есть в списке фильтров');
   ok(smaaTexNearest(psrc), 'Таблица поиска берётся без интерполяции — иначе веса плывут');
 
-  ok(/prefs\.set\('aaOn'/.test(msrc) && /prefs\.set\('aaMode'/.test(msrc),
-     'И включатель, и способ сохраняются');
-  ok(html.includes('id="sAAon"') && html.includes('id="sAA"'),
-     'Сглаживание: отдельно включатель, отдельно способ');
+  for (const k of ['aaOn', 'aaMsaa', 'aaFilter', 'aaScale']) {
+    ok(new RegExp(`prefs\\.set\\('${k}'`).test(msrc), `Настройка «${k}» сохраняется`);
+  }
+  ok(html.includes('id="sAAon"'), 'Есть общий выключатель сглаживания');
   ok(/dprIndex--/.test(msrc) && !/ssaa--/.test(msrc),
      'Под нагрузкой снижается ступень плотности, а выбранный режим остаётся');
 }
@@ -1531,9 +1542,8 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   ok(/resizePost\(renderer\)/.test(msrc), 'Буфер FXAA пересоздаётся при изменении размера');
 
   const html = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
-  ok(html.includes('id="sAAon"') && html.includes('id="sAA"'),
-     'Сглаживание: отдельно включатель, отдельно способ');
-  ok(CONFIG.AA_MODES.some(mo => mo.filter === 'fxaa'), 'FXAA есть в списке способов');
+  ok(html.includes('id="sAAon"'), 'Есть общий выключатель сглаживания');
+  ok(CONFIG.AA_FILTER.some(mo => mo.id.includes('fxaa')), 'FXAA есть в списке фильтров');
 }
 
 /* ══ 3h5. Карты нормалей ═══════════════════════════════════════════════ */
@@ -1602,7 +1612,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
 
   /* --- один буфер на всех --- */
   ok(/export function setPost/.test(psrc), 'FXAA, свечение и лучи включают общую цепочку');
-  ok(/setPost\(renderer, \{ mode: mo, glow: glowOn, rays: raysOn \}\)/.test(msrc),
+  ok(/setPost\(renderer, \{ mode, glow: glowOn, rays: raysOn \}\)/.test(msrc),
      'Настройки сходятся в один вызов');
   ok(/uFxaa < 0\.5/.test(psrc), 'Свечение можно включить без FXAA');
 
@@ -1701,7 +1711,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
 
   const controls = [...sheet.matchAll(/id="(\w+)"/g)].map(x => x[1])
     .filter(id => /^s[A-Z]/.test(id) && !/V$/.test(id)
-      && !['sAAcost', 'sAArow', 'sAAv'].includes(id));
+      && !['sAAcost', 'sAArow', 'sAArow2', 'sAArow3', 'sAAv'].includes(id));
   ok(controls.length >= 12, `Элементов управления в настройках: ${controls.length}`);
 
   const dead = controls.filter(id => {
@@ -1772,6 +1782,10 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   ok(/cur = gi \* 4\.0/.test(psrc), 'Переотражённый свет усилен, чтобы его было видно');
   ok(/vec3\( 1\.0 - rough \)/.test(psrc),
      'Есть режим шероховатости — по нему видно, откуда берутся отражения');
+  ok(/vec3\( 0\.1, 0\.9, 0\.2 \)/.test(psrc) && /vec3\( 0\.9, 0\.15, 0\.1 \)/.test(psrc),
+     'Есть карта попаданий луча: зелёный — нашёл цель, красный — ушёл за экран');
+  ok(/length\( ruv - vUv \) \* uRes\.y < 2\.0/.test(psrc),
+     'Луч не отражает соседний пиксель: при касательном взгляде вода отражала саму себя');
 
   ok(/export function setTraceDebug/.test(psrc) && /trace\.sample = 0/.test(psrc),
      'Смена режима сбрасывает накопление: иначе поверх старого кадра ляжет новый');
@@ -1925,6 +1939,36 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
      'Попадание ближе отражающей точки отбрасывается — иначе в воду попадает изнанка чужого объекта');
   ok(/float reach = 1\.0 - float\( i \) \/ float\( REF_STEPS \)/.test(psrc),
      'Дальние попадания гасятся: чем длиннее марш, тем менее надёжен результат');
+}
+
+/* ══ 3h16. Мусор в горячем пути ════════════════════════════════════════ */
+{
+  /* Новый объект на кадр — это 60 объектов в секунду в сборщик мусора, и
+     именно такие мелочи дают рывки при вращении камеры. Проверяем тела
+     функций, которые вызываются каждый кадр. */
+  const hot = [
+    ['js/photo.js', 'export function setSunScreen'],
+    ['js/photo.js', 'export function renderFrame'],
+    ['js/photo.js', 'export function composite'],
+    ['js/photo.js', 'function runTaa'],
+    ['js/world.js', 'export function updateTraffic'],
+    ['js/controls.js', 'export function updateControls'],
+    ['js/audio.js', 'export function updateAudio']
+  ];
+  for (const [file, sig] of hot) {
+    const src = readFileSync(new URL('./' + file, import.meta.url), 'utf8');
+    const i = src.indexOf(sig);
+    if (i < 0) continue;
+    let depth = 0, started = false, end = i;
+    for (let k = i; k < src.length; k++) {
+      if (src[k] === '{') { depth++; started = true; }
+      else if (src[k] === '}') { depth--; if (started && depth === 0) { end = k; break; } }
+    }
+    const body = src.slice(i, end);
+    const allocs = body.match(/new (THREE\.\w+|Float32Array|Array)\(/g) || [];
+    ok(allocs.length === 0,
+       `${sig.replace('export ', '')}: без выделений памяти${allocs.length ? ' (' + allocs.join(' ') + ')' : ''}`);
+  }
 }
 
 /* ══ 3i. Звук реагирует на то, где находится камера ════════════════════ */

@@ -27,7 +27,8 @@ import {
 export const trace = { active: false, sample: 0, total: 0, debug: 0 };
 /* 0 — обычный кадр, 1 — затенение, 2 — переотражённый свет,
    3 — отражения, 4 — шероховатость из альфы кадра */
-export const DEBUG_NAMES = ['кадр', 'затенение', 'переотражения', 'отражения', 'шероховатость'];
+export const DEBUG_NAMES = ['кадр', 'затенение', 'переотражения', 'отражения',
+  'шероховатость', 'куда попал луч'];
 export function setTraceDebug(v) {
   trace.debug = v;
   if (aoMat) { aoMat.uniforms.uDebug.value = v; trace.sample = 0; }
@@ -153,6 +154,10 @@ const AO_FRAG = `
                  точки: иначе луч упёрся в то, что стоит перед ней, и в воду
                  попадает изнанка чужого объекта — чёрное пятно. */
               if ( hp.z > P.z ) break;
+              /* Луч не должен «отражать» соседний пиксель: при почти
+                 касательном взгляде цель оказывается в полупикселе от
+                 источника, и вода начинает отражать саму себя. */
+              if ( length( ruv - vUv ) * uRes.y < 2.0 ) break;
               float fres = pow( 1.0 - max( 0.0, dot( -V, N ) ), 4.0 );
               /* к краю экрана отражение обрывается — гасим, чтобы не резало */
               vec2 e = abs( ruv - 0.5 ) * 2.0;
@@ -195,7 +200,15 @@ const AO_FRAG = `
       if ( uDebug < 1.5 )      cur = vec3( ao );
       else if ( uDebug < 2.5 ) cur = gi * 4.0;
       else if ( uDebug < 3.5 ) cur = refl * 4.0;
-      else                     cur = vec3( d < 1.0 ? 1.0 : 0.0 ) * vec3( 1.0 - rough );
+      else if ( uDebug < 4.5 ) cur = vec3( d < 1.0 ? 1.0 : 0.0 ) * vec3( 1.0 - rough );
+      else {
+        /* куда попал отражённый луч: зелёный — нашёл цель, красный — ушёл
+           за экран, чёрный — поверхность не отражает */
+        float sm = 1.0 - rough;
+        cur = sm > 0.25
+          ? ( length( refl ) > 0.0001 ? vec3( 0.1, 0.9, 0.2 ) : vec3( 0.9, 0.15, 0.1 ) )
+          : vec3( 0.0 );
+      }
     }
     gl_FragColor = vec4( mix( texture2D( tPrev, vUv ).rgb, cur, uBlend ), 1.0 );
   }
@@ -595,9 +608,10 @@ export function setPost(renderer, { mode = null, glow = false, rays = false } = 
   samples = mode ? mode.samples : 0;
   /* FXAA может идти и сам по себе, и поверх SMAA — фильтр правит то,
      что осталось после сглаживания кромок */
-  fxaaFilter = !!mode && (mode.filter === 'fxaa' || mode.fxaa === true);
-  taaOn = !!mode && mode.filter === 'taa';
-  smaaOn = !!mode && mode.filter === 'smaa';
+  const f = mode ? mode.filter : 'none';
+  fxaaFilter = f === 'fxaa' || f === 'smaafxaa';
+  taaOn = f === 'taa';
+  smaaOn = f === 'smaa' || f === 'smaafxaa';
   setFxaa(renderer, !!mode || glowOn || raysOn, fxaaFilter);
 }
 
@@ -644,16 +658,19 @@ export function setFxaa(renderer, on, filter = true) {
 }
 
 /** Экранное положение оси станции: лучи расходятся от неё, а не от точки */
+const _sunF = new THREE.Vector3(), _sunV = new THREE.Vector3();
 export function setSunScreen(camera, worldGroup) {
-  /* Берём точку на оси, ближайшую к направлению взгляда */
-  const f = new THREE.Vector3();
+  /* Векторы переиспользуются: функция зовётся каждый кадр, и два новых
+     объекта на кадр — это 120 штук в секунду в сборщик мусора. Именно такие
+     мелочи и дают рывки при вращении камеры. */
+  const f = _sunF;
   camera.getWorldDirection(f);
   const p = camera.position;
   /* ось — прямая x=y=0; ближайшая к лучу взгляда точка по z */
   const denom = 1 - f.z * f.z;
   const zAxis = denom < 1e-4 ? p.z + Math.sign(f.z || 1) * 100
     : p.z + f.z * (-(p.x * f.x + p.y * f.y)) / denom;
-  const v = new THREE.Vector3(0, 0, THREE.MathUtils.clamp(zAxis, -CONFIG.L / 2, CONFIG.L / 2));
+  const v = _sunV.set(0, 0, THREE.MathUtils.clamp(zAxis, -CONFIG.L / 2, CONFIG.L / 2));
   v.project(camera);
   sunVisible = v.z < 1 && Math.abs(v.x) < 2.5 && Math.abs(v.y) < 2.5;
   sunUV.set(v.x * 0.5 + 0.5, v.y * 0.5 + 0.5);

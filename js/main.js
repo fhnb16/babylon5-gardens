@@ -526,40 +526,59 @@ function initUI() {
   /* Сглаживание: включатель отдельно от способа. MSAA работает всегда —
      он сглаживает края треугольников и стоит почти ничего. Сверху либо FXAA
      (дёшево, мылит мелкое), либо суперсэмплинг (честно, стоит квадрат). */
-  /* Сглаживание: выключатель отдельно от способа. «Выкл» гасит всё, включая
-     MSAA, — потому канвас и создаётся без antialias. Способы описаны данными
-     в CONFIG.AA_MODES, список строится из них. */
-  const sAAon = $('sAAon'), sAA = $('sAA'), sAAv = $('sAAv'), sAAcost = $('sAAcost');
-  for (const mo of CONFIG.AA_MODES) {
-    const op = document.createElement('option');
-    op.value = mo.id; op.textContent = mo.label.toUpperCase();
-    sAA.appendChild(op);
-  }
-  let aaOn = prefs.get('aaOn', true);
-  sAA.value = prefs.get('aaMode', 'msaa4');
-  if (!CONFIG.AA_MODES.some(mo => mo.id === sAA.value)) sAA.value = 'msaa4';
-
-  const COST = {
-    none: s => `${(s.samples || 1)}× сэмплов, ${(s.ssaa * s.ssaa).toFixed(2)}× фрагментов`,
-    fxaa: s => s.samples ? 'фильтр поверх MSAA' : 'один проход поверх кадра',
-    taa: () => 'накопление по кадрам, ветер приглушён',
-    smaa: s => s.samples ? 'три прохода поверх MSAA' : 'три прохода по таблицам'
+  /* Сглаживание собирается из трёх независимых частей: выборки покрытия,
+     фильтр и масштаб рендера. Так видно, что именно даёт эффект — плоский
+     список готовых режимов этого не показывал. «Выкл» гасит всё сразу,
+     включая MSAA, поэтому канвас и создаётся без antialias. */
+  const sAAon = $('sAAon'), sAAv = $('sAAv'), sAAcost = $('sAAcost');
+  const sMsaa = $('sMsaa'), sFilter = $('sFilter'), sScale = $('sScale');
+  const fill = (el, list, key) => {
+    for (const it of list) {
+      const op = document.createElement('option');
+      op.value = String(it[key]); op.textContent = it.label.toUpperCase();
+      el.appendChild(op);
+    }
   };
+  fill(sMsaa, CONFIG.AA_MSAA, 'v');
+  fill(sFilter, CONFIG.AA_FILTER, 'id');
+  fill(sScale, CONFIG.AA_SCALE, 'v');
+
+  let aaOn = prefs.get('aaOn', true);
+  sMsaa.value = String(prefs.get('aaMsaa', 4));
+  sFilter.value = prefs.get('aaFilter', 'smaafxaa');
+  sScale.value = String(prefs.get('aaScale', 1));
+
   const applyAA = () => {
-    const mo = aaOn ? CONFIG.AA_MODES.find(x => x.id === sAA.value) : null;
-    ssaa = mo ? mo.ssaa : 1;
-    setPost(renderer, { mode: mo, glow: glowOn, rays: raysOn });
-    /* TAA размазывает всё, что двигается само: ветер на время приглушаем */
-    windU.uWind.value = mo && mo.filter === 'taa' ? 0 : windBase;
+    const mode = aaOn ? {
+      samples: +sMsaa.value,
+      filter: sFilter.value,
+      ssaa: parseFloat(sScale.value)
+    } : null;
+    /* TAA живёт на своём буфере с глубиной и с MSAA не сочетается */
+    if (mode && mode.filter === 'taa') mode.samples = 0;
+    ssaa = mode ? mode.ssaa : 1;
+    setPost(renderer, { mode, glow: glowOn, rays: raysOn });
+    windU.uWind.value = mode && mode.filter === 'taa' ? 0 : windBase;
+
     sAAon.classList.toggle('on', aaOn);
-    $('sAArow').classList.toggle('off', !aaOn);
-    aaLabel = mo ? mo.label : 'без сглаживания';
-    sAAv.textContent = mo ? mo.label : 'выключено';
-    sAAcost.textContent = mo ? COST[mo.filter](mo) : '—';
+    for (const id of ['sAArow', 'sAArow2', 'sAArow3']) $(id).classList.toggle('off', !aaOn);
+    sMsaa.value = String(mode ? mode.samples : 0);
+
+    const fl = CONFIG.AA_FILTER.find(x => x.id === sFilter.value).label;
+    aaLabel = mode ? `MSAA${mode.samples || '—'} ${fl} ×${mode.ssaa}` : 'без сглаживания';
+    sAAv.textContent = mode ? aaLabel : 'выключено';
+    /* цена в полноэкранных проходах — по ней и видно, за что платим */
+    const px = mode ? mode.ssaa * mode.ssaa : 1;
+    const post = !mode || mode.filter === 'none' ? (mode ? 1 : 0) : mode.filter === 'taa' ? 2 : 2;
+    sAAcost.textContent = mode
+      ? `${px.toFixed(2)}× пикселей, ${post} прохода поверх`
+      : 'прямой рендер в канвас';
     resize();
   };
   sAAon.onclick = () => { aaOn = !aaOn; prefs.set('aaOn', aaOn); applyAA(); };
-  sAA.onchange = () => { prefs.set('aaMode', sAA.value); applyAA(); };
+  sMsaa.onchange = () => { prefs.set('aaMsaa', +sMsaa.value); applyAA(); };
+  sFilter.onchange = () => { prefs.set('aaFilter', sFilter.value); applyAA(); };
+  sScale.onchange = () => { prefs.set('aaScale', parseFloat(sScale.value)); applyAA(); };
   applyAA();
 
   /* Свечение и лучи делят одну цепочку постобработки с FXAA: включён любой —
