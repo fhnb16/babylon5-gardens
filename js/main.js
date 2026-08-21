@@ -156,6 +156,9 @@ function buildLights() {
 function rebuild() {
   const q = currentQuality();
   buildLights();
+  /* Отражения в воде считаются прямо в шейдере корпуса и включаются на
+     ультре: они стоят два десятка операций, но только на пикселях воды. */
+  mirrorOn = (CONFIG.QUALITY[q] || CONFIG.QUALITY.HIGH).mirror || 0;
   /* §14: в пресете LOW облака выключаются */
   if (clouds) clouds.visible = q !== 'LOW';
   const res = buildWorld(worldGroup, renderer, q);
@@ -251,6 +254,7 @@ const _qA = new THREE.Quaternion(), _qB = new THREE.Quaternion();
 const _upA = new THREE.Vector3();
 const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _Z = new THREE.Vector3(0, 0, 1);
 const _vAudio = new THREE.Vector3(), _v3 = new THREE.Vector3();
+const _vMirror = new THREE.Vector3();
 
 function goTo(i, instant = false) {
   const tp = CONFIG.TP[i];
@@ -812,7 +816,7 @@ let dprIndex = 0, dprCap = 0, paused = false, frames = 0, winT = 0, upT = 0, wor
 const capForQuality = () => Math.min(CONFIG.QUALITY[currentQuality()].dpr, isMobile ? 3 : 4);
 const startDpr = () => quality === 'AUTO' && isMobile ? Math.min(2, capForQuality()) : capForQuality();
 let ssaa = 1, shotBoost = 1, aaLabel = 'MSAA', windBase = 1;
-let hullAlbedoTex = null;
+let hullAlbedoTex = null, mirrorOn = 0;
 let glowOn = false, raysOn = false, trafficOn = true;
 /* Множитель суперсэмплинга применяется ПОВЕРХ плотности экрана. Раньше здесь
    стоял min(devicePixelRatio, шаг) — на обычном мониторе 1× он намертво
@@ -871,6 +875,9 @@ function loop() {
   updateStructures(dt);
   if (trafficOn) updateTraffic(dt);
   setSunScreen(camera, worldGroup);
+  /* камера в системе станции — по ней вода считает отражение */
+  hullU.uCamObj.value.copy(worldGroup.worldToLocal(_vMirror.copy(camera.position)));
+  hullU.uMirror.value = mirrorOn;
   /* отражениям нужно альбедо корпуса и текущий угол поворота мира */
   setHullRef(hullAlbedoTex, worldGroup.rotation.z);
 

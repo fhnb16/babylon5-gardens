@@ -275,13 +275,13 @@ export const CONFIG = {
   PRINT: { across: 1.19, along: 1.9, dark: 0.72 },
 
   QUALITY: {
-    LOW:    { count: 1, foliage: 0, trees: 1.0,  hullTex: 1024, mask: 512,  aniso: 4,  dpr: 0, footprint: false, normals: 0,    lights: 3 },
-    HIGH:   { count: 0, foliage: 1, trees: 1.0,  hullTex: 2048, mask: 1024, aniso: 8,  dpr: 4, footprint: true,  normals: 1024, lights: 5 },
+    LOW:    { count: 1, foliage: 0, trees: 1.0,  hullTex: 1024, mask: 512,  aniso: 4,  dpr: 0, footprint: false, normals: 0,    lights: 3, mirror: 0 },
+    HIGH:   { count: 0, foliage: 1, trees: 1.0,  hullTex: 2048, mask: 1024, aniso: 8,  dpr: 4, footprint: true,  normals: 1024, lights: 5, mirror: 0 },
     /* Ультра для телефона: все возможности те же — нормали, следы домов,
        подробная маска фонарей, — режется только листва. Она и есть 78%
        геометрии, всё остальное вместе весит вчетверо меньше. */
-    ULTRAM: { count: 0, foliage: 1, trees: 0.85, hullTex: 2048, mask: 2048, aniso: 8,  dpr: 3, footprint: true,  normals: 1024, lights: 3 },
-    ULTRA:  { count: 0, foliage: 2, trees: 1.3,  hullTex: 2048, mask: 2048, aniso: 16, dpr: 4, footprint: true,  normals: 2048, lights: 5 }
+    ULTRAM: { count: 0, foliage: 1, trees: 0.85, hullTex: 2048, mask: 2048, aniso: 8,  dpr: 3, footprint: true,  normals: 1024, lights: 3, mirror: 1 },
+    ULTRA:  { count: 0, foliage: 2, trees: 1.3,  hullTex: 2048, mask: 2048, aniso: 16, dpr: 4, footprint: true,  normals: 2048, lights: 5, mirror: 1 }
   },
 
   /* Трассировка в фото-режиме. rays — лучей на пиксель за кадр,

@@ -91,16 +91,74 @@
   <div class="btn close" id="setClose"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></div>
   <h2>Настройки</h2>
   <div class="tabs">
-    <button class="tabbtn on" data-tab="0">МИР</button>
-    <button class="tabbtn" data-tab="1">КАРТИНКА</button>
-    <button class="tabbtn" data-tab="2">ДВИЖЕНИЕ</button>
-    <button class="tabbtn" data-tab="3">ПРОЧЕЕ</button>
+    <button class="tabbtn on" data-tab="0">ГРАФИКА</button>
+    <button class="tabbtn" data-tab="1">ЭФФЕКТЫ</button>
+    <button class="tabbtn" data-tab="2">МИР</button>
+    <button class="tabbtn" data-tab="3">ДВИЖЕНИЕ</button>
+    <button class="tabbtn" data-tab="4">ПРОЧЕЕ</button>
   </div>
   <div class="tab on" data-tab="0">
   <div class="row">
     <label>Качество<small>Плотность мира, детализация крон, следы домов</small></label>
     <select id="sQual"><option value="AUTO">АВТО</option><option value="LOW">НИЗКОЕ</option><option value="HIGH">ВЫСОКОЕ</option><option value="ULTRAM">УЛЬТРА (ТЕЛЕФОН)</option><option value="ULTRA">УЛЬТРА (ПК)</option></select>
   </div>
+  <div class="row">
+    <label>Плотность зелени<small id="sGreenV">100%</small></label>
+    <select id="sGreen">
+      <option value="0">100% — ПОЛНАЯ</option>
+      <option value="1">75%</option>
+      <option value="2">50%</option>
+      <option value="3">30% — САМАЯ ЛЁГКАЯ</option>
+    </select>
+  </div>
+  <div class="row">
+    <label>Дальность прорисовки<small id="sFarV">5.2 км</small></label>
+    <select id="sFar">
+      <option value="0">5.2 КМ — ВСЯ СТАНЦИЯ</option>
+      <option value="1">3.8 КМ</option>
+      <option value="2">2.6 КМ — САМАЯ ЛЁГКАЯ</option>
+    </select>
+  </div>
+  <div class="row">
+    <label>Сглаживание<small id="sAAv">только MSAA</small></label>
+    <div class="sw" id="sAAon"></div>
+  </div>
+  <div class="row" id="sAArow">
+    <label>Выборок покрытия<small>MSAA — края геометрии</small></label>
+    <select id="sMsaa"></select>
+  </div>
+  <div class="row" id="sAArow2">
+    <label>Фильтр<small>Постобработка кромок</small></label>
+    <select id="sFilter"></select>
+  </div>
+  <div class="row" id="sAArow3">
+    <label>Масштаб рендера<small id="sAAcost">—</small></label>
+    <select id="sScale"></select>
+  </div>
+  </div>
+  <div class="tab" data-tab="1">
+  <div class="row">
+    <label>Свечение огней<small>Ореол вокруг окон и солнца</small></label>
+    <div class="sw" id="sGlow"></div>
+  </div>
+  <div class="row">
+    <label>Лучи от оси<small>Свет сквозь фермы и кроны</small></label>
+    <div class="sw" id="sRays"></div>
+  </div>
+  <div class="row">
+    <label>Трафик на магистралях<small>Огни машин на улицах</small></label>
+    <div class="sw" id="sTraffic"></div>
+  </div>
+  <div class="row">
+    <label>Ветер в кронах<small id="sWindV">100%</small></label>
+    <input type="range" id="sWind" min="0" max="200" value="100">
+  </div>
+  <div class="row">
+    <label>Авто-цикл освещения<small>День → закат → ночь по кругу</small></label>
+    <div class="sw" id="sCycle"></div>
+  </div>
+  </div>
+  <div class="tab" data-tab="2">
   <div class="row">
     <label>Зерно генерации<small id="sSeedV">заводское</small></label>
     <div class="seed">
@@ -123,58 +181,11 @@
     </select>
   </div>
   <div class="row">
-    <label>Плотность зелени<small id="sGreenV">100%</small></label>
-    <select id="sGreen">
-      <option value="0">100% — ПОЛНАЯ</option>
-      <option value="1">75%</option>
-      <option value="2">50%</option>
-      <option value="3">30% — САМАЯ ЛЁГКАЯ</option>
-    </select>
-  </div>
-  <div class="row">
-    <label>Дальность прорисовки<small id="sFarV">5.2 км</small></label>
-    <select id="sFar">
-      <option value="0">5.2 КМ — ВСЯ СТАНЦИЯ</option>
-      <option value="1">3.8 КМ</option>
-      <option value="2">2.6 КМ — САМАЯ ЛЁГКАЯ</option>
-    </select>
-  </div>
-  <div class="row">
     <label>Насыщенность зелени<small id="sSatV">62%</small></label>
     <input type="range" id="sSat" min="20" max="120" value="62">
   </div>
   </div>
-  <div class="tab" data-tab="1">
-  <div class="row">
-    <label>Сглаживание<small id="sAAv">только MSAA</small></label>
-    <div class="sw" id="sAAon"></div>
-  </div>
-  <div class="row" id="sAArow">
-    <label>Выборок покрытия<small>MSAA — края геометрии</small></label>
-    <select id="sMsaa"></select>
-  </div>
-  <div class="row" id="sAArow2">
-    <label>Фильтр<small>Постобработка кромок</small></label>
-    <select id="sFilter"></select>
-  </div>
-  <div class="row" id="sAArow3">
-    <label>Масштаб рендера<small id="sAAcost">—</small></label>
-    <select id="sScale"></select>
-  </div>
-  <div class="row">
-    <label>Свечение огней<small>Ореол вокруг окон и солнца</small></label>
-    <div class="sw" id="sGlow"></div>
-  </div>
-  <div class="row">
-    <label>Лучи от оси<small>Свет сквозь фермы и кроны</small></label>
-    <div class="sw" id="sRays"></div>
-  </div>
-  <div class="row">
-    <label>Трафик на магистралях<small>Огни машин на улицах</small></label>
-    <div class="sw" id="sTraffic"></div>
-  </div>
-  </div>
-  <div class="tab" data-tab="2">
+  <div class="tab" data-tab="3">
   <div class="row">
     <label>Режим полёта<small id="sFlyV">Горизонт по цилиндру</small></label>
     <div class="sw" id="sFly"></div>
@@ -187,16 +198,8 @@
     <label>Скорость вращения<small id="sRotV">оборот за 240 с</small></label>
     <input type="range" id="sRot" min="0" max="100" value="19">
   </div>
-  <div class="row">
-    <label>Ветер в кронах<small id="sWindV">100%</small></label>
-    <input type="range" id="sWind" min="0" max="200" value="100">
   </div>
-  <div class="row">
-    <label>Авто-цикл освещения<small>День → закат → ночь по кругу</small></label>
-    <div class="sw" id="sCycle"></div>
-  </div>
-  </div>
-  <div class="tab" data-tab="3">
+  <div class="tab" data-tab="4">
   <div class="row">
     <label>Громкость<small id="sVolV">55%</small></label>
     <input type="range" id="sVol" min="0" max="100" value="55">

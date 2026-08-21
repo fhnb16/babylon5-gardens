@@ -2236,6 +2236,56 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   ok(/len \/ F\.speed/.test(msrc), 'Длительность считается по длине пути, а не по хорде');
 }
 
+/* ══ 3h22. Отражения в обычном режиме ══════════════════════════════════ */
+{
+  const wsrc = readFileSync(new URL('./js/world.js', import.meta.url), 'utf8');
+  const msrc = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+
+  /* Экранные отражения требуют буфера глубины, буфера нормалей и отдельного
+     прохода — и всё равно чернеют по краям кадра. Фрагменту воды всё нужное
+     известно и так: своя точка, своя нормаль, а отражатели аналитические. */
+  ok(/if \( uMirror > 0\.001 \)/.test(wsrc), 'Отражение считается в шейдере корпуса');
+  ok(/vec3 Pw = vec3\( sT \* uHullR, cT \* uHullR, vZo \)/.test(wsrc),
+     'Точка на корпусе берётся из угла и z — она известна точно');
+  ok(/vec3 Vw = normalize\( Pw - uCamObj \)/.test(wsrc),
+     'Направление взгляда — от камеры в системе станции');
+  ok(/ds > 0\.0/.test(wsrc) && /dh > 0\.0/.test(wsrc),
+     'Пересечение и с трубой, и с бортом решается формулой');
+  ok(/texture2D\( map, huv \)/.test(wsrc), 'Цвет борта берётся из альбедо того же материала');
+  ok(!/tDepth/.test(wsrc), 'Буфер глубины шейдеру корпуса не нужен');
+
+  /* включается пресетом */
+  for (const [q, want] of [['LOW', 0], ['HIGH', 0], ['ULTRAM', 1], ['ULTRA', 1]]) {
+    ok((CONFIG.QUALITY[q].mirror || 0) === want,
+       `${q}: отражения в воде ${want ? 'включены' : 'выключены'}`);
+  }
+  ok(/mirrorOn = \(CONFIG\.QUALITY\[q\] \|\| CONFIG\.QUALITY\.HIGH\)\.mirror/.test(msrc),
+     'Состояние берётся из пресета при пересборке');
+  ok(/hullU\.uCamObj\.value\.copy\(worldGroup\.worldToLocal/.test(msrc),
+     'Камера переводится в систему станции каждый кадр');
+}
+
+/* ══ 3h23. Порядок вкладок настроек ════════════════════════════════════ */
+{
+  const html = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
+  const names = [...html.matchAll(/class="tabbtn[^"]*" data-tab="\d+">([^<]+)</g)].map(m => m[1]);
+  ok(names.length >= 4, `Вкладок: ${names.join(', ')}`);
+  ok(/ГРАФИКА/i.test(names[0]), 'Графика — первая вкладка');
+
+  /* пресет качества должен быть в ней же, а не в другой */
+  const first = html.slice(html.indexOf('data-tab="0">', html.indexOf('class="tab ')), html.length);
+  const firstPane = first.slice(0, first.indexOf('<div class="tab '));
+  ok(firstPane.includes('id="sQual"'), 'Пресет качества на первой вкладке');
+  ok(firstPane.includes('id="sAAon"'), 'Сглаживание там же');
+
+  /* ни одна настройка не потерялась */
+  const setSheet = html.slice(html.indexOf('id="set"'), html.indexOf('id="help"'));
+  const ids = [...setSheet.matchAll(/id="(s[A-Z]\w*)"/g)].map(m => m[1])
+    .filter(id => !/V$/.test(id) && !['sAAcost', 'sAArow', 'sAArow2', 'sAArow3', 'sAAv'].includes(id));
+  ok(ids.length >= 18, `Настроек всего: ${ids.length}`);
+  ok(new Set(ids).size === ids.length, 'Дублей при перекладке нет');
+}
+
 /* ══ 3i. Звук реагирует на то, где находится камера ════════════════════ */
 {
   /* Решения о громкости вынесены в чистые функции — их можно проверить

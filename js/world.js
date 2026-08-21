@@ -24,6 +24,10 @@ export const hullU = {
   uSparZ: { value: [] }, uSparZW: { value: 30.0 },
   uSparShade: { value: CONFIG.DAY.sparShade },
   uFlow: { value: 0 },
+  uMirror: { value: 0 },
+  uSunR: { value: CONFIG.SUN.r }, uHullR: { value: CONFIG.R },
+  uHullL: { value: CONFIG.L }, uSunGlow: { value: 3.2 },
+  uCamObj: { value: new THREE.Vector3() },
   uCityGlow: { value: CONFIG.DAY.cityGlow },
   uWaterTint: { value: new THREE.Color(CONFIG.DAY.waterTint) }
 };
@@ -57,6 +61,8 @@ function patchHullMaterial(mat, nArm, nSpar) {
         uniform sampler2D uMask;
         uniform sampler2D uDetail;
         uniform float uTime, uDetailRep, uArmW, uSparZW, uSparShade, uCityGlow, uFlow;
+        uniform float uMirror, uSunR, uHullR, uHullL, uSunGlow;
+        uniform vec3 uCamObj;   // камера в системе станции
         uniform float uArm[${nArm}];
         uniform float uSparZ[${nSpar}];
         uniform vec3 uWaterTint;
@@ -144,6 +150,57 @@ function patchHullMaterial(mat, nArm, nSpar) {
              иначе рельеф травы и швов плит просвечивал бы сквозь воду. */
           vec3 wn = normalize( nonPerturbedNormal + ( vTanU * rip.x + vTanV * rip.y ) * amp );
           normal = normalize( mix( normal, wn, hullMask.r ) );
+
+          /* ─── Отражение в воде без единого буфера ───
+             Фрагменту всё известно: своя точка на корпусе, своя нормаль с
+             рябью, и оба отражателя — труба-солнце и борт станции — цилиндры
+             вдоль оси. Пересечение решается формулой прямо здесь. Экранный
+             марш потребовал бы буфера глубины, буфера нормалей и отдельного
+             прохода, а на краях кадра всё равно оставлял бы чёрные пятна. */
+          if ( uMirror > 0.001 ) {
+            float sT = sin( vTh ), cT = cos( vTh );
+            vec3 Pw = vec3( sT * uHullR, cT * uHullR, vZo );
+            vec3 up = vec3( -sT, -cT, 0.0 );
+            vec3 tu = vec3( cT, -sT, 0.0 );
+            vec3 tv = vec3( 0.0, 0.0, 1.0 );
+            vec3 Nw = normalize( up + ( tu * rip.x + tv * rip.y ) * amp );
+            vec3 Vw = normalize( Pw - uCamObj );
+            vec3 Rw = reflect( Vw, Nw );
+
+            vec3 got = vec3( 0.0 );
+            float found = 0.0;
+            float qa = dot( Rw.xy, Rw.xy );
+            if ( qa > 1e-6 ) {
+              float qb = 2.0 * dot( Pw.xy, Rw.xy );
+              /* труба: ближний корень */
+              float ds = qb * qb - 4.0 * qa * ( dot( Pw.xy, Pw.xy ) - uSunR * uSunR );
+              if ( ds > 0.0 ) {
+                float ts = ( -qb - sqrt( ds ) ) / ( 2.0 * qa );
+                if ( ts > 0.05 && abs( Pw.z + Rw.z * ts ) < uHullL * 0.5 ) {
+                  got = vec3( 1.0, 0.94, 0.78 ) * uSunGlow;
+                  found = 1.0;
+                }
+              }
+              /* борт: дальний корень, мы внутри цилиндра */
+              if ( found < 0.5 ) {
+                float dh = qb * qb - 4.0 * qa * ( dot( Pw.xy, Pw.xy ) - uHullR * uHullR );
+                if ( dh > 0.0 ) {
+                  float th2 = ( -qb + sqrt( dh ) ) / ( 2.0 * qa );
+                  vec3 hw = Pw + Rw * th2;
+                  if ( th2 > 0.05 && abs( hw.z ) < uHullL * 0.5 ) {
+                    vec2 huv = vec2( fract( 0.5 - atan( hw.x, hw.y ) / 6.28318531 ),
+                                     hw.z / uHullL + 0.5 );
+                    got = texture2D( map, huv ).rgb;
+                    found = 1.0;
+                  }
+                }
+              }
+            }
+            /* Френель: под острым углом отражает почти всё */
+            float fr = pow( 1.0 - max( 0.0, dot( -Vw, Nw ) ), 4.0 );
+            totalEmissiveRadiance += got * found * hullMask.r * uMirror
+              * ( 0.04 + 0.96 * fr );
+          }
         }`);
   };
   mat.customProgramCacheKey = () => 'b5-hull';
