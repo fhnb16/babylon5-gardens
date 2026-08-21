@@ -58,6 +58,10 @@ function boot() {
   /* updateStyle = false обязателен: иначе three прописывает канвасу инлайновые
      style.width/height в пикселях стартового окна, и они навсегда перебивают
      CSS width:100%. Именно поэтому в полном экране оставались чёрные поля. */
+  /* Считать статистику сами: three обнуляет её на каждом render(), и с
+     постобработкой в счётчик попадал последний проход — полноэкранный квад.
+     Отсюда «draw 1, tri 0k» и полное безразличие цифр к пресету. */
+  renderer.info.autoReset = false;
   renderer.setSize(innerWidth, innerHeight, false);
   stage.appendChild(renderer.domElement);
 
@@ -137,7 +141,8 @@ function buildAmbient() {
 function buildLights() {
   for (const l of lights) scene.remove(l);
   lights = [];
-  const zs = currentQuality() === 'LOW' ? CONFIG.LIGHT_Z_LOW : CONFIG.LIGHT_Z;
+  const want = (CONFIG.QUALITY[currentQuality()] || CONFIG.QUALITY.HIGH).lights;
+  const zs = want <= 3 ? CONFIG.LIGHT_Z_3 : CONFIG.LIGHT_Z;
   /* суммарная отдача не должна зависеть от числа ламп */
   const k = CONFIG.LIGHT_Z.length / zs.length;
   for (const z of zs) {
@@ -578,6 +583,30 @@ function initUI() {
      они всё это время были включены и только теперь отрисовались. */
   syncPost();
 
+  /* Два рычага против самого дорогого. Листва — от 62 до 78% геометрии,
+     дальность отсекает секторы целиком: за ней объекты не доходят ни до
+     вершинного шейдера, ни до фрагментного. */
+  const sGreen = $('sGreen'), sFar = $('sFar');
+  sGreen.value = String(prefs.get('green', 0));
+  sGreen.onchange = () => {
+    prefs.set('green', +sGreen.value);
+    CONFIG.GREEN_K = CONFIG.GREEN[+sGreen.value];
+    $('sGreenV').textContent = (CONFIG.GREEN_K * 100) + '%';
+    rebuild();
+    applyPalette(phase);
+  };
+  CONFIG.GREEN_K = CONFIG.GREEN[+sGreen.value];
+  $('sGreenV').textContent = (CONFIG.GREEN_K * 100) + '%';
+
+  sFar.value = String(prefs.get('far', 0));
+  const applyFar = () => {
+    camera.far = CONFIG.DRAW_FAR[+sFar.value];
+    camera.updateProjectionMatrix();
+    $('sFarV').textContent = (camera.far / 100).toFixed(1) + ' км';
+  };
+  sFar.onchange = () => { prefs.set('far', +sFar.value); applyFar(); };
+  applyFar();
+
   const sSat = $('sSat');
   sSat.value = Math.round(CONFIG.SATURATION * 100);
   $('sSatV').textContent = sSat.value + '%';
@@ -718,6 +747,7 @@ function loop() {
   requestAnimationFrame(loop);
   if (paused) return;
   const dt = Math.min(0.05, clock.getDelta());
+  renderer.info.reset();          // за кадр целиком, а не за последний проход
 
   if (trace.active) {
     const done = traceStep();

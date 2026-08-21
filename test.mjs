@@ -1346,12 +1346,12 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
 
   /* Затенение обязано быть местным: модель «радиус / дальность» давала вклад
      даже от объектов за сотню метров, и по кадру это складывалось в дымку. */
-  ok(/dz < uRadius \* 2\.0/.test(src),
-     'Учитываются только загораживатели ближе двух радиусов');
+  ok(/dz > uBias && dz < uRadius \)/.test(src),
+     'Окно приёма не шире радиуса: шире оно давало чёрные ореолы вокруг силуэтов на дальнем фоне');
   ok(!/occ \+= clamp\( uRadius \/ max/.test(src),
      'Старой модели с бесконечным хвостом не осталось');
-  ok(/1\.0 - smoothstep\( uRadius, uRadius \* 2\.0, dz \)/.test(src),
-     'Вклад плавно сходит к нулю на границе радиуса');
+  ok(/1\.0 - smoothstep\( uRadius \* 0\.5, uRadius, dz \)/.test(src),
+     'Вклад гаснет уже с половины радиуса');
   ok(!/S\.fog = null/.test(src),
      'Туман сцены не переключается ради буфера нормалей — это плодило по два варианта программы на материал');
 
@@ -1845,6 +1845,86 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   const wsrc = readFileSync(new URL('./js/world.js', import.meta.url), 'utf8');
   ok(!/shadows\.push\(\[t, z, \{ r: s \* 1\.3/.test(wsrc),
      'Под кустами декалей нет: полторы тысячи прозрачных квадов ради теней от кустиков не окупались');
+}
+
+/* ══ 3h14. Мобильная ультра и рычаги производительности ════════════════ */
+{
+  const Q = CONFIG.QUALITY;
+  ok(!!Q.ULTRAM, 'Есть отдельный ультра-пресет для телефона');
+
+  /* Разница только в листве: остальные возможности те же */
+  for (const k of ['footprint', 'mask']) {
+    ok(Q.ULTRAM[k] === Q.ULTRA[k], `ULTRAM сохраняет «${k}» на уровне ULTRA`);
+  }
+  ok(Q.ULTRAM.normals > 0, 'Нормали на мобильной ультре остаются');
+  ok(Q.ULTRAM.foliage < Q.ULTRA.foliage && Q.ULTRAM.trees < Q.ULTRA.trees,
+     `Режется только листва: крона ${Q.ULTRA.foliage}→${Q.ULTRAM.foliage}, деревьев ×${Q.ULTRA.trees}→×${Q.ULTRAM.trees}`);
+
+  const weigh = q => {
+    const g = new THREE.Group();
+    const res = buildWorld(g, fakeRenderer, q);
+    buildStructures(g, fakeRenderer, q, res.panel, res.panelNormal);
+    let n = 0;
+    g.traverse(o => {
+      if (!o.isMesh && !o.isPoints) return;
+      const ix = o.geometry.index ? o.geometry.index.count : o.geometry.attributes.position.count;
+      n += (ix / 3) * (o.isInstancedMesh ? o.count : 1);
+    });
+    return n;
+  };
+  const um = weigh('ULTRAM'), u = weigh('ULTRA');
+  ok(um < u * 0.55,
+     `Мобильная ультра ${(um / 1000) | 0}k против ${(u / 1000) | 0}k — вдвое легче при тех же возможностях`);
+
+  /* рычаги */
+  ok(CONFIG.GREEN.length >= 3 && CONFIG.GREEN[0] === 1,
+     `Плотность зелени: ${CONFIG.GREEN.map(v => (v * 100) + '%').join(', ')}`);
+  ok(CONFIG.DRAW_FAR.every((v, i, a) => i === 0 || v < a[i - 1]),
+     `Дальность прорисовки: ${CONFIG.DRAW_FAR.map(v => (v / 100).toFixed(1) + ' км').join(', ')}`);
+  const wsrc = readFileSync(new URL('./js/world.js', import.meta.url), 'utf8');
+  ok(/CONFIG\.GREEN_K/.test(wsrc), 'Множитель плотности применяется к деревьям и кустам');
+  const msrc = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+  ok(/camera\.far = CONFIG\.DRAW_FAR/.test(msrc), 'Дальность меняет дальнюю плоскость камеры');
+  ok(/prefs\.set\('green'/.test(msrc) && /prefs\.set\('far'/.test(msrc), 'Оба рычага сохраняются');
+
+  /* реальный эффект плотности */
+  const before = CONFIG.GREEN_K;
+  CONFIG.GREEN_K = 0.3;
+  const light = weigh('HIGH');
+  CONFIG.GREEN_K = before;
+  const full = weigh('HIGH');
+  ok(light < full * 0.75,
+     `Плотность 30% снимает ${(100 - (light / full) * 100) | 0}% геометрии: ${(full / 1000) | 0}k → ${(light / 1000) | 0}k`);
+}
+
+/* ══ 3h15. Измеряем то, что надо ═══════════════════════════════════════ */
+{
+  const msrc = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+  const psrc = readFileSync(new URL('./js/photo.js', import.meta.url), 'utf8');
+
+  /* three обнуляет статистику на каждом render(). С постобработкой в счётчик
+     попадал последний проход — полноэкранный квад: «draw 1, tri 0k», и цифры
+     не реагировали ни на один пресет. */
+  ok(/renderer\.info\.autoReset = false/.test(msrc),
+     'Статистика не обнуляется на каждом проходе');
+  ok(/renderer\.info\.reset\(\)/.test(msrc), 'Сбрасывается вручную, раз в кадр');
+  ok(msrc.indexOf('renderer.info.reset()') < msrc.lastIndexOf('renderFrame(renderer, scene, camera'),
+     'Сброс идёт до отрисовки, иначе счётчик снова покажет один проход');
+
+  /* число источников — из пресета: это самая дорогая часть кадра */
+  for (const [q, n] of [['LOW', 3], ['HIGH', 5], ['ULTRAM', 3], ['ULTRA', 5]]) {
+    ok(CONFIG.QUALITY[q].lights === n, `${q}: осевых источников ${n}`);
+  }
+  ok(CONFIG.QUALITY.ULTRAM.lights < CONFIG.QUALITY.ULTRA.lights,
+     'На мобильной ультре источников меньше: корпус занимает почти весь экран, и каждый источник считается на каждом пикселе');
+  ok(/\(CONFIG\.QUALITY\[currentQuality\(\)\] \|\| CONFIG\.QUALITY\.HIGH\)\.lights/.test(msrc),
+     'Число берётся из пресета, а не из проверки на LOW');
+
+  /* отражения не должны давать чёрных пятен */
+  ok(/if \( hp\.z > P\.z \) break/.test(psrc),
+     'Попадание ближе отражающей точки отбрасывается — иначе в воду попадает изнанка чужого объекта');
+  ok(/float reach = 1\.0 - float\( i \) \/ float\( REF_STEPS \)/.test(psrc),
+     'Дальние попадания гасятся: чем длиннее марш, тем менее надёжен результат');
 }
 
 /* ══ 3i. Звук реагирует на то, где находится камера ════════════════════ */

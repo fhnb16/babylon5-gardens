@@ -113,8 +113,11 @@ const AO_FRAG = `
            давала 10% затемнения даже от объекта в полутора сотнях метров —
            по всему кадру это складывалось в равномерную дымку, а не в тени.
            Считаем только тех, кто ближе двух радиусов. */
-        if ( dz > uBias && dz < uRadius * 2.0 ) {
-          float w = 1.0 - smoothstep( uRadius, uRadius * 2.0, dz );
+        /* Окно приёма шире радиуса давало чёрные ореолы: дом в 15–28 м перед
+           дальним фоном попадал в него и затемнял фон вокруг своего силуэта.
+           Принимаем только то, что ближе радиуса, и гасим уже с половины. */
+        if ( dz > uBias && dz < uRadius ) {
+          float w = 1.0 - smoothstep( uRadius * 0.5, uRadius, dz );
           occ += w;
           /* Луч не просто «загорожен» — он принёс свет с той поверхности.
              Это и есть переотражение: трава подкрашивает стену зелёным,
@@ -146,12 +149,19 @@ const AO_FRAG = `
             vec3 hp = viewPos( ruv, rd );
             float gap = hp.z - pos.z;
             if ( gap > 0.0 && gap < st * 2.0 ) {
+              /* Попадание засчитываем, только если оно ДАЛЬШЕ отражающей
+                 точки: иначе луч упёрся в то, что стоит перед ней, и в воду
+                 попадает изнанка чужого объекта — чёрное пятно. */
+              if ( hp.z > P.z ) break;
               float fres = pow( 1.0 - max( 0.0, dot( -V, N ) ), 4.0 );
               /* к краю экрана отражение обрывается — гасим, чтобы не резало */
               vec2 e = abs( ruv - 0.5 ) * 2.0;
               float edge = 1.0 - max( e.x, e.y );
+              /* и гасим по пройденному пути: дальние попадания ненадёжны */
+              float reach = 1.0 - float( i ) / float( REF_STEPS );
               refl = texture2D( tBeauty, ruv ).rgb * smoothness
-                   * ( 0.05 + 0.95 * fres ) * uReflect * smoothstep( 0.0, 0.2, edge );
+                   * ( 0.05 + 0.95 * fres ) * uReflect
+                   * smoothstep( 0.0, 0.2, edge ) * reach;
               break;
             }
           }
@@ -569,7 +579,7 @@ function loadLut(src, format) {
 let fxOn = false, fxRT = null, fxMat = null, fxQuad = null, fxScene = null, fxCam = null;
 let taaMat = null, taaRT = [], taaIdx = 0, taaHas = 0;
 const prevVP = new THREE.Matrix4(), curVP = new THREE.Matrix4();
-const deltaRot = new THREE.Matrix4();
+const deltaRot = new THREE.Matrix4(), cleanVP = new THREE.Matrix4();
 let prevRot = 0, taaFrame = 0;
 let glowOn = false, raysOn = false;
 let brRT = null, blRT = null, rayRT = null;
@@ -583,7 +593,9 @@ export function setPost(renderer, { mode = null, glow = false, rays = false } = 
   glowOn = !!glow; raysOn = !!rays;
   aaMode = mode;
   samples = mode ? mode.samples : 0;
-  fxaaFilter = !!mode && mode.filter === 'fxaa';
+  /* FXAA может идти и сам по себе, и поверх SMAA — фильтр правит то,
+     что осталось после сглаживания кромок */
+  fxaaFilter = !!mode && (mode.filter === 'fxaa' || mode.fxaa === true);
   taaOn = !!mode && mode.filter === 'taa';
   smaaOn = !!mode && mode.filter === 'smaa';
   setFxaa(renderer, !!mode || glowOn || raysOn, fxaaFilter);
@@ -758,8 +770,14 @@ export function renderFrame(renderer, scene, camera, worldRotZ = 0) {
   }
   /* TAA берёт сглаживание ИЗ ДРОЖАНИЯ: без субпиксельного смещения он
      усредняет одинаковые кадры, лесенка стоит в тех же пикселях, и
-     усреднять нечего. Смещение по Гальтону — не украшение, а весь смысл. */
+     усреднять нечего. Смещение по Гальтону — не украшение, а весь смысл.
+
+     Матрицу для перепроецирования снимаем ДО дрожания: искать историю по
+     дрожащей матрице значит каждый кадр промахиваться на долю пикселя.
+     Отбраковка по соседям такую историю отвергает, остаются сырые
+     смещённые кадры — и картинка мелко трясётся. */
   if (taaOn && taaRT.length) {
+    cleanVP.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
     const w = renderer.domElement.width, h = renderer.domElement.height;
     taaFrame = (taaFrame + 1) % 8;
     camera.setViewOffset(w, h,
@@ -782,7 +800,7 @@ export function renderFrame(renderer, scene, camera, worldRotZ = 0) {
     им отменяется вращение станции, иначе история уезжает вместе с ней. */
 function runTaa(renderer, camera, worldRot) {
   const cur = taaRT[taaIdx], hist = taaRT[1 - taaIdx];
-  curVP.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+  curVP.copy(cleanVP);                    // без дрожания
 
   taaMat.uniforms.tCur.value = fxRT.texture;
   taaMat.uniforms.tHist.value = hist.texture;

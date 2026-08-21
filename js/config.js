@@ -147,10 +147,11 @@ export const CONFIG = {
 
   /* --- солнце на оси --- */
   SUN: { r: 2.2, len: 284 },
-  /* Точечные источники вдоль оси. Каждый считается на КАЖДОМ фрагменте, и на
-     мобильном это самая дорогая часть освещения — на низком пресете их три. */
+  /* Точечные источники вдоль оси. Каждый считается на КАЖДОМ фрагменте, а
+     корпус занимает почти весь экран — это самая дорогая часть кадра, дороже
+     всей геометрии вместе взятой. Число берётся из пресета (поле lights). */
   LIGHT_Z: [-120, -60, 0, 60, 120],
-  LIGHT_Z_LOW: [-100, 0, 100],
+  LIGHT_Z_3: [-100, 0, 100],
 
   /* ─── палитры (лерп всех полей за FADE секунд) ─────────────────────────── */
   /* Три фазы освещения по кругу: день → золотой закат → лунная ночь.
@@ -264,9 +265,13 @@ export const CONFIG = {
   PRINT: { across: 1.19, along: 1.9, dark: 0.72 },
 
   QUALITY: {
-    LOW:   { count: 1, foliage: 0, trees: 1.0, hullTex: 1024, mask: 512,  aniso: 4,  dpr: 0, footprint: false, normals: 0 },
-    HIGH:  { count: 0, foliage: 1, trees: 1.0, hullTex: 2048, mask: 1024, aniso: 8,  dpr: 4, footprint: true,  normals: 1024 },
-    ULTRA: { count: 0, foliage: 2, trees: 1.3, hullTex: 2048, mask: 2048, aniso: 16, dpr: 4, footprint: true,  normals: 2048 }
+    LOW:    { count: 1, foliage: 0, trees: 1.0,  hullTex: 1024, mask: 512,  aniso: 4,  dpr: 0, footprint: false, normals: 0,    lights: 3 },
+    HIGH:   { count: 0, foliage: 1, trees: 1.0,  hullTex: 2048, mask: 1024, aniso: 8,  dpr: 4, footprint: true,  normals: 1024, lights: 5 },
+    /* Ультра для телефона: все возможности те же — нормали, следы домов,
+       подробная маска фонарей, — режется только листва. Она и есть 78%
+       геометрии, всё остальное вместе весит вчетверо меньше. */
+    ULTRAM: { count: 0, foliage: 1, trees: 0.85, hullTex: 2048, mask: 2048, aniso: 8,  dpr: 3, footprint: true,  normals: 1024, lights: 3 },
+    ULTRA:  { count: 0, foliage: 2, trees: 1.3,  hullTex: 2048, mask: 2048, aniso: 16, dpr: 4, footprint: true,  normals: 2048, lights: 5 }
   },
 
   /* Трассировка в фото-режиме. rays — лучей на пиксель за кадр,
@@ -321,6 +326,13 @@ export const CONFIG = {
      Шестнадцать отсекли бы 75%, но подняли бы вызовы до 159 — на мобильном
      это уже дороже сэкономленного. */
   CHUNKS: 8,
+  /* Два рычага против самой дорогой части кадра. Листва — от 62 до 78%
+     геометрии, поэтому её плотность влияет сильнее всего остального вместе
+     взятого. Дальность режет секторы целиком: то, что за ней, не доходит
+     ни до вершинного шейдера, ни до фрагментного. */
+  GREEN: [1, 0.75, 0.5, 0.3],
+  GREEN_K: 1,          // текущий множитель плотности зелени
+  DRAW_FAR: [520, 380, 260],
   /* Режимы сглаживания. MSAA канваса задаётся при создании рендерера и на
      лету не выключается, поэтому канвас создаётся без него, а MSAA берётся из
      буфера постобработки: там число сэмплов меняется в любой момент.
@@ -333,13 +345,17 @@ export const CONFIG = {
     { id: 'fxaa4',   label: 'FXAA + MSAA ×4', samples: 4, ssaa: 1,    filter: 'fxaa' },
     { id: 'smaa',    label: 'SMAA',           samples: 0, ssaa: 1,    filter: 'smaa' },
     { id: 'smaa4',   label: 'SMAA + MSAA ×4', samples: 4, ssaa: 1,    filter: 'smaa' },
+    { id: 'best',    label: 'SMAA + FXAA + MSAA ×4', samples: 4, ssaa: 1, filter: 'smaa', fxaa: true },
     { id: 'taa',     label: 'TAA',            samples: 0, ssaa: 1,    filter: 'taa' },
     { id: 'ssaa125', label: 'SSAA ×1.25',     samples: 4, ssaa: 1.25, filter: 'none' },
     { id: 'ssaa15',  label: 'SSAA ×1.5',      samples: 4, ssaa: 1.5,  filter: 'none' },
     { id: 'ssaa2',   label: 'SSAA ×2',        samples: 4, ssaa: 2,    filter: 'none' }
   ],
   /* Доля истории в TAA и ширина отбраковки по соседям */
-  TAA: { blend: 0.88, clamp: 1.0 },
+  /* Доля истории и ширина окна отбраковки. clamp = 1.0 брал окно соседей
+     как есть: на дрожащем кадре оно само гуляет, история отвергалась почти
+     всегда, и вместо накопления оставались сырые смещённые кадры. */
+  TAA: { blend: 0.93, clamp: 1.4 },
   MSAA_SAMPLES: 4,
   /* Снимок делается крупнее экрана и ужимается до нативного размера: каждый
      пиксель усредняет scale² отсчётов. ×2 по стороне — это 4K из 1080p. */

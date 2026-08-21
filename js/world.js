@@ -595,7 +595,7 @@ export function buildWorld(group, renderer, quality) {
     const u = Math.pow((rnd() + rnd()) / 2, TR.bias);    // чаще невысокие
     return TR.h[0] + u * (TR.h[1] - TR.h[0]);
   };
-  const treePts = sample(W_TREE, Math.round(CONFIG.COUNT.trees[i] * Q.trees),
+  const treePts = sample(W_TREE, Math.round(CONFIG.COUNT.trees[i] * Q.trees * CONFIG.GREEN_K),
     () => treeH() * TR.crown * TR.spacing, true);
   const SZ = CONFIG.SEASONS[CONFIG.SEASON] || CONFIG.SEASONS.summer;
   /* Данные дерева кладём В САМ элемент списка, а не в параллельный массив по
@@ -695,7 +695,7 @@ export function buildWorld(group, renderer, quality) {
   instance(
     foliageGeo(0, mulberry32(CONFIG.SEED + 6), FOL.wobble * 1.3, FOL.dither),
     bushMat,
-    sample(W_BUSH, Math.round(CONFIG.COUNT.bushes[i] * Q.trees), () => bushS() * BS.spacing, true),
+    sample(W_BUSH, Math.round(CONFIG.COUNT.bushes[i] * Q.trees * CONFIG.GREEN_K), () => bushS() * BS.spacing, true),
     (k, t, z, im, rad) => {
       const s = rad / BS.spacing, up = relief(t, z);
       surfaceQuat(t, q).multiply(qs.setFromAxisAngle(UP, rnd() * TAU));
