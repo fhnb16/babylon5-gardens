@@ -873,8 +873,8 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
 
   /* затенение в трассировке не должно съедать дальний план */
   const psrc = readFileSync(new URL('./js/photo.js', import.meta.url), 'utf8');
-  ok(/ao = mix\( 1\.0, ao, fogAmt \)/.test(psrc),
-     'Затенение гаснет по закону тумана — иначе дальний план сереет и теряет контраст');
+  ok(/ao = mix\( 1\.0, ao, k \)/.test(psrc) && /float k = near \* fogAmt/.test(psrc),
+     'Затенение гаснет и по расстоянию, и по туману');
   ok(/if \( pxR < 2\.0 \) break/.test(psrc),
      'Лучи не пускаются, когда радиус проецируется меньше двух пикселей — там только шум');
 }
@@ -1326,8 +1326,10 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
      'Патч применён и к корпусу с домами, и к металлу с бетоном и стеклом');
 
   /* туман гасит все три составляющие, а не одну */
-  ok(/gi \*= fogAmt/.test(src) && /refl \*= fogAmt/.test(src),
-     'Дальний план не получает ни переотражений, ни бликов — там уже туман');
+  ok(/gi \*= k/.test(src) && /refl \*= k/.test(src),
+     'Дальний план не получает ни переотражений, ни бликов');
+  ok(P.aoFar > P.aoNear && P.aoFar < 150,
+     `Вклад лучей гаснет с ${P.aoNear * 10} до ${P.aoFar * 10} м: контактное затенение — эффект вблизи, вдали от него оставались пятна на корпусе`);
 
   /* Затенение обязано быть местным: модель «радиус / дальность» давала вклад
      даже от объектов за сотню метров, и по кадру это складывалось в дымку. */
@@ -1375,7 +1377,8 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
      'Пока идёт съёмка, мир не вращается и камера не двигается');
   ok(/fly\.on \|\| trace\.active/.test(msrc), 'Ввод во время съёмки её прекращает');
   ok(/addEventListener\('keydown', stopTracing\)/.test(msrc), 'Клавиша тоже прекращает');
-  ok(/else setTrace\(false\)/.test(msrc), 'Выход из фото-режима останавливает трассировку');
+  ok(/setTraceDebug\(0\); \$\('bDebug'\)\.classList\.remove\('on'\); setTrace\(false\)/.test(msrc),
+     'Выход из фото-режима останавливает трассировку и сбрасывает отладку');
 
   /* дойдя до конца, не жжём кадры впустую */
   ok(/if \(n >= trace\.total\)/.test(src), 'Набрав нужное число кадров, только показываем результат');
@@ -1737,6 +1740,38 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   /* лучи от оси не должны бить вспышкой через весь экран */
   ok(CONFIG.POST.rays < 0.5, `Сила лучей ${CONFIG.POST.rays} — свет сквозь фермы, а не вспышка`);
   ok(CONFIG.POST.rayDensity < 0.7, `Длина луча ${CONFIG.POST.rayDensity} экрана`);
+}
+
+/* ══ 3h11. Режим отладки трассировки ═══════════════════════════════════ */
+{
+  const psrc = readFileSync(new URL('./js/photo.js', import.meta.url), 'utf8');
+  const msrc = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+  const html = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
+
+  /* Убедиться, что свет считается лучами, можно только увидев сам вклад
+     лучей отдельно от картинки. Для этого и режим отладки. */
+  ok(/uniform float uAoNear, uAoFar, uDebug/.test(psrc), 'В шейдер заведён переключатель отладки');
+  ok(/if \( uDebug > 0\.5 \)/.test(psrc), 'При отладке выводится только вклад лучей');
+  for (const [n, what] of [[1, 'затенение'], [2, 'переотражения'], [3, 'отражения']]) {
+    ok(new RegExp(`uDebug < ${n}\\.5`).test(psrc), `Режим ${n}: ${what}`);
+  }
+  ok(/cur = vec3\( ao \)/.test(psrc), 'Затенение показывается как есть, без исходного цвета');
+  ok(/cur = gi \* 4\.0/.test(psrc), 'Переотражённый свет усилен, чтобы его было видно');
+  ok(/vec3\( 1\.0 - rough \)/.test(psrc),
+     'Есть режим шероховатости — по нему видно, откуда берутся отражения');
+
+  ok(/export function setTraceDebug/.test(psrc) && /trace\.sample = 0/.test(psrc),
+     'Смена режима сбрасывает накопление: иначе поверх старого кадра ляжет новый');
+  ok(/DEBUG_NAMES/.test(psrc) && /DEBUG_NAMES\[trace\.debug\]/.test(msrc),
+     'Активный режим подписан в индикаторе');
+  ok(html.includes('id="bDebug"'), 'Кнопка отладки есть в фото-режиме');
+  ok(/if \(!trace\.active\) setTrace\(true\)/.test(msrc),
+     'Нажатие отладки само включает трассировку');
+
+  /* свечение и лучи от оси по умолчанию выключены */
+  ok(/prefs\.get\('glow', false\)/.test(msrc) && /prefs\.get\('rays', false\)/.test(msrc),
+     'Свечение и лучи от оси выключены по умолчанию');
+  ok(/let glowOn = false, raysOn = false/.test(msrc), 'И начальные значения им под стать');
 }
 
 /* ══ 3i. Звук реагирует на то, где находится камера ════════════════════ */

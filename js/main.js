@@ -7,7 +7,8 @@ import { buildStructures, structMats, updateStructures } from './structures.js';
 import { ctl, isMobile, initControls, updateControls, syncFromCamera, resetStick, stationUp } from './controls.js';
 import { audio, startAudio, updateAudio, setVolume, setEnabled, suspendAudio } from './audio.js';
 import { trace, startTrace, traceStep, stopTrace,
-  setPost, setSunScreen, resizePost, renderFrame } from './photo.js';
+  setPost, setSunScreen, resizePost, renderFrame,
+  setTraceDebug, DEBUG_NAMES } from './photo.js';
 
 const $ = id => document.getElementById(id);
 const stage = $('stage');
@@ -343,7 +344,8 @@ let cleanView = false, shotPending = false;
 function setClean(on) {
   cleanView = on;
   document.body.classList.toggle('clean', on);
-  if (on) closeSheets(); else setTrace(false);
+  if (on) closeSheets();
+  else { setTraceDebug(0); $('bDebug').classList.remove('on'); setTrace(false); }
 }
 
 /* Трассировка идёт только по неподвижному кадру: любое движение мира или
@@ -436,6 +438,16 @@ function initUI() {
   $('bPhotoExit').onclick = () => setClean(false);
   $('bShot').onclick = () => { shotPending = true; };
   $('bTrace').onclick = () => setTrace(!trace.active);
+
+  /* Наглядный ответ на вопрос «а точно ли это считается лучами»: показываем
+     ТОЛЬКО вклад трассировки, без исходной картинки. Видно и что посчитано,
+     и как оно сходится с каждым кадром. */
+  const bDebug = $('bDebug');
+  bDebug.onclick = () => {
+    if (!trace.active) setTrace(true);
+    setTraceDebug((trace.debug + 1) % DEBUG_NAMES.length);
+    bDebug.classList.toggle('on', trace.debug > 0);
+  };
 
   $('bTp').onclick = () => toggleSheet('tp');
   $('bSet').onclick = () => toggleSheet('set');
@@ -545,8 +557,8 @@ function initUI() {
   /* Свечение и лучи делят одну цепочку постобработки с FXAA: включён любой —
      кадр идёт через буфер, поэтому применяются они вместе. */
   const swGlow = $('sGlow'), swRays = $('sRays'), swTraffic = $('sTraffic');
-  glowOn = prefs.get('glow', true);
-  raysOn = prefs.get('rays', true);
+  glowOn = prefs.get('glow', false);
+  raysOn = prefs.get('rays', false);
   trafficOn = prefs.get('traffic', true);
   const syncPost = () => {
     swGlow.classList.toggle('on', glowOn);
@@ -668,7 +680,7 @@ let dprIndex = 0, dprCap = 0, paused = false, frames = 0, winT = 0, upT = 0;
 const capForQuality = () => Math.min(CONFIG.QUALITY[currentQuality()].dpr, isMobile ? 3 : 4);
 const startDpr = () => quality === 'AUTO' && isMobile ? Math.min(2, capForQuality()) : capForQuality();
 let ssaa = 1, shotBoost = 1, aaLabel = 'MSAA', windBase = 1;
-let glowOn = true, raysOn = true, trafficOn = true;
+let glowOn = false, raysOn = false, trafficOn = true;
 /* Множитель суперсэмплинга применяется ПОВЕРХ плотности экрана. Раньше здесь
    стоял min(devicePixelRatio, шаг) — на обычном мониторе 1× он намертво
    запирал рендер на 1×, и никакого сглаживания сверх MSAA получить было
@@ -709,9 +721,10 @@ function loop() {
     /* Показываем не только проценты, но и оставшийся шум: по нему видно,
        что именно ещё уточняется, а проценты сами по себе ни о чём не говорят. */
     const noise = 100 / Math.sqrt(Math.max(1, trace.sample) * CONFIG.PHOTO.rays);
+    const what = trace.debug ? `только ${DEBUG_NAMES[trace.debug]} · ` : '';
     $('traceInfo').textContent = done >= 1
-      ? `готово · ${trace.total * CONFIG.PHOTO.rays} лучей на пиксель`
-      : `свет · ${(done * 100) | 0}% · шум ${noise.toFixed(0)}%`;
+      ? `${what}готово · ${trace.total * CONFIG.PHOTO.rays} лучей на пиксель`
+      : `${what}${(done * 100) | 0}% · шум ${noise.toFixed(0)}%`;
     if (shotPending) { shotPending = false; grabShot(); }
     return;
   }

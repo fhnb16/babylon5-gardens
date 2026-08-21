@@ -24,7 +24,14 @@ import {
    и так считается аналитически и точно.
    ═══════════════════════════════════════════════════════════════════════════ */
 
-export const trace = { active: false, sample: 0, total: 0 };
+export const trace = { active: false, sample: 0, total: 0, debug: 0 };
+/* 0 — обычный кадр, 1 — затенение, 2 — переотражённый свет,
+   3 — отражения, 4 — шероховатость из альфы кадра */
+export const DEBUG_NAMES = ['кадр', 'затенение', 'переотражения', 'отражения', 'шероховатость'];
+export function setTraceDebug(v) {
+  trace.debug = v;
+  if (aoMat) { aoMat.uniforms.uDebug.value = v; trace.sample = 0; }
+}
 
 let R = null, S = null, C = null;                    // renderer, scene, camera
 let rtNormal, rtBeauty, accum = [], quad, aoMat, showMat, qCam, qScene;
@@ -50,6 +57,7 @@ const AO_FRAG = `
   uniform mat4 uProj, uProjInv;
   uniform vec2 uRes;
   uniform float uRadius, uIntensity, uSeed, uBlend, uBias, uFogD, uBounce, uReflect, uRefStep;
+  uniform float uAoNear, uAoFar, uDebug;
 
   vec3 viewPos( vec2 uv, float d ) {
     vec4 c = uProjInv * vec4( uv * 2.0 - 1.0, d * 2.0 - 1.0, 1.0 );
@@ -154,15 +162,31 @@ const AO_FRAG = `
       /* Затенение — местный эффект. На дальнем плане цвет уже определяется
          туманом, и умножать его на AO нельзя: картинка сереет и теряет
          контраст. Гасим ровно тем же законом, что и туман сцены. */
-      float fogAmt = exp( - ( length( P ) * uFogD ) * ( length( P ) * uFogD ) );
-      ao = mix( 1.0, ao, fogAmt );
-      gi *= fogAmt;
-      refl *= fogAmt;
+      /* Контактное затенение — эффект вблизи. На дальнем плане радиус
+         проецируется в доли пикселя, и остаётся только низкочастотный мусор:
+         на корпусе он читается как пятна. Гасим по расстоянию, а туман
+         добавляет второе затухание — там цвет и так им определяется. */
+      float dist = length( P );
+      float near = 1.0 - smoothstep( uAoNear, uAoFar, dist );
+      float fogAmt = exp( - ( dist * uFogD ) * ( dist * uFogD ) );
+      float k = near * fogAmt;
+      ao = mix( 1.0, ao, k );
+      gi *= k;
+      refl *= k;
     }
 
     /* Отражённый свет красится в цвет самой поверхности — так и работает
        диффузное переотражение. Зеркальная составляющая добавляется поверх. */
     vec3 cur = col * ao + col * gi + refl;
+
+    /* Отладка: показать ТОЛЬКО вклад лучей, без исходной картинки. Накопление
+       идёт как обычно, поэтому видно и схождение, и что именно посчитано. */
+    if ( uDebug > 0.5 ) {
+      if ( uDebug < 1.5 )      cur = vec3( ao );
+      else if ( uDebug < 2.5 ) cur = gi * 4.0;
+      else if ( uDebug < 3.5 ) cur = refl * 4.0;
+      else                     cur = vec3( d < 1.0 ? 1.0 : 0.0 ) * vec3( 1.0 - rough );
+    }
     gl_FragColor = vec4( mix( texture2D( tPrev, vUv ).rgb, cur, uBlend ), 1.0 );
   }
 `;
@@ -272,7 +296,9 @@ export function startTrace(renderer, scene, camera, windUniform) {
       uRadius: { value: P.radius }, uIntensity: { value: P.intensity },
       uBias: { value: P.bias }, uSeed: { value: 0 }, uBlend: { value: 1 },
       uFogD: { value: 0 }, uBounce: { value: P.bounce },
-      uReflect: { value: P.reflect }, uRefStep: { value: P.refStep }
+      uReflect: { value: P.reflect }, uRefStep: { value: P.refStep },
+      uAoNear: { value: P.aoNear }, uAoFar: { value: P.aoFar },
+      uDebug: { value: 0 }
     }
   });
   showMat = new THREE.ShaderMaterial({
@@ -331,6 +357,7 @@ export function traceStep() {
   aoMat.uniforms.uProj.value.copy(C.projectionMatrix);
   aoMat.uniforms.uProjInv.value.copy(C.projectionMatrixInverse);
   aoMat.uniforms.uSeed.value = n * 7.31;
+  aoMat.uniforms.uDebug.value = trace.debug;
   aoMat.uniforms.uFogD.value = S.fog ? S.fog.density : 0;
   aoMat.uniforms.uBlend.value = 1 / (n + 1);
   quad.material = aoMat;
