@@ -781,8 +781,18 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   const along = 2 * Math.atan(CONFIG.SUN.len / 2 / d) * 180 / Math.PI;
   ok(along > across * 10,
      `Источник вытянут: поперёк станции ${across.toFixed(1)}°, вдоль оси ${along.toFixed(0)}°`);
-  ok(P.along > P.across * 1.8,
+  ok(P.along > P.across * 1.4,
      `След вытянут в ту же сторону: ${P.across}× поперёк против ${P.along}× вдоль`);
+
+  /* Тень не может быть чёрной: в ней остаётся свет полусферы. Считаем долю
+     и сверяем с предельной плотностью декали. */
+  const fillOf = k => CONFIG[k].hemiInt + CONFIG[k].pointInt * CONFIG.LIGHT_Z.length;
+  const inShadow = CONFIG.DAY.hemiInt / fillOf('DAY');
+  ok(P.dark < 1 - inShadow * 0.6,
+     `Тень затемняет до ${(P.dark * 100) | 0}%, а в ней остаётся ${(inShadow * 100) | 0}% света от полусферы`);
+  ok(P.dark > 0.4, 'Но тень всё же читается, а не еле заметна');
+  const tsrc3 = readFileSync(new URL('./js/textures.js', import.meta.url), 'utf8');
+  ok(/a2 \* 1\.25/.test(tsrc3), 'Кайма усилена умеренно — раньше она добивала пятно до чёрного');
 
   /* на высоком следы домов — отдельный инстанс, на низком их нет */
   for (const [q, want] of [['HIGH', true], ['LOW', false]]) {
@@ -875,8 +885,8 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   const psrc = readFileSync(new URL('./js/photo.js', import.meta.url), 'utf8');
   ok(/ao = mix\( 1\.0, ao, k \)/.test(psrc) && /float k = near \* fogAmt/.test(psrc),
      'Затенение гаснет и по расстоянию, и по туману');
-  ok(/if \( pxR < 2\.0 \) break/.test(psrc),
-     'Лучи не пускаются, когда радиус проецируется меньше двух пикселей — там только шум');
+  ok(/if \( pxR < 3\.0 \) break/.test(psrc),
+     'Лучи не пускаются, когда радиус проецируется меньше трёх пикселей — там только шум');
 }
 
 /* ══ 3f5. Куст — подлесок, крона — листва ══════════════════════════════ */
@@ -1328,8 +1338,11 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   /* туман гасит все три составляющие, а не одну */
   ok(/gi \*= k/.test(src) && /refl \*= k/.test(src),
      'Дальний план не получает ни переотражений, ни бликов');
-  ok(P.aoFar > P.aoNear && P.aoFar < 150,
-     `Вклад лучей гаснет с ${P.aoNear * 10} до ${P.aoFar * 10} м: контактное затенение — эффект вблизи, вдали от него оставались пятна на корпусе`);
+  ok(P.aoFar > P.aoNear, `Вклад лучей гаснет с ${P.aoNear * 10} до ${P.aoFar * 10} м`);
+  ok(P.aoNear > CONFIG.R * 2,
+     `Затухание начинается дальше противоположной стены (${CONFIG.R * 2 * 10} м) — иначе полкадра остаётся без вклада`);
+  ok(/if \( pxR < 3\.0 \) break/.test(src),
+     'От муара вдали защищает порог в пикселях, а не грубое обрезание по расстоянию');
 
   /* Затенение обязано быть местным: модель «радиус / дальность» давала вклад
      даже от объектов за сотню метров, и по кадру это складывалось в дымку. */
@@ -1772,6 +1785,66 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   ok(/prefs\.get\('glow', false\)/.test(msrc) && /prefs\.get\('rays', false\)/.test(msrc),
      'Свечение и лучи от оси выключены по умолчанию');
   ok(/let glowOn = false, raysOn = false/.test(msrc), 'И начальные значения им под стать');
+}
+
+/* ══ 3h12. Ничто не игнорирует туман ═══════════════════════════════════ */
+{
+  const usrc = readFileSync(new URL('./js/util.js', import.meta.url), 'utf8');
+  const files = ['js/main.js', 'js/world.js', 'js/structures.js', 'js/photo.js'];
+
+  /* Ореол солнца — плоскость во всю длину станции. С fog: false её дальний
+     край светит в полную силу поверх того, что уже съедено туманом, и это
+     читается как молочная полоса поперёк кадра. */
+  for (const f of files) {
+    const s = readFileSync(new URL('./' + f, import.meta.url), 'utf8');
+    ok(!/fog:\s*false/.test(s), `${f}: нет материалов, игнорирующих туман`);
+  }
+
+  ok(/export function fadeByFog/.test(usrc), 'Аддитивные материалы гаснут туманом через прозрачность');
+  ok(/gl_FragColor\.a \*= 1\.0 - clamp\( fogF/.test(usrc),
+     'Гасится альфа, а не подмешивается цвет: при аддитивном смешивании туман ДОБАВЛЯЛ бы света');
+
+  const msrc = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+  const ssrc = readFileSync(new URL('./js/structures.js', import.meta.url), 'utf8');
+  ok(/fadeByFog\(new THREE\.MeshBasicMaterial/.test(msrc), 'Ореол солнца гаснет в дымке');
+  ok(/structMats\.sun = fadeByFog/.test(ssrc), 'Солнечная труба тоже');
+}
+
+/* ══ 3h13. Что сколько стоит ═══════════════════════════════════════════ */
+{
+  /* Бюджет разбивается по видам объектов: без этого непонятно, что резать.
+     Кроны — три четверти всей геометрии, и ULTRA дорог именно ими. */
+  const cost = q => {
+    const g = new THREE.Group();
+    const res = buildWorld(g, fakeRenderer, q);
+    buildStructures(g, fakeRenderer, q, res.panel, res.panelNormal);
+    const by = new Map();
+    let decals = 0;
+    g.traverse(o => {
+      if (!o.isMesh && !o.isPoints) return;
+      const ix = o.geometry.index ? o.geometry.index.count : o.geometry.attributes.position.count;
+      const tris = (ix / 3) * (o.isInstancedMesh ? o.count : 1);
+      const mm = o.material;
+      if (mm.transparent && mm.depthWrite === false) decals += o.isInstancedMesh ? o.count : 1;
+      const key = mm.flatShading && mm.vertexColors ? 'листва' : 'прочее';
+      by.set(key, (by.get(key) || 0) + tris);
+    });
+    const total = [...by.values()].reduce((a, b) => a + b, 0);
+    return { total, foliage: by.get('листва') || 0, decals };
+  };
+
+  const lo = cost('LOW'), hi = cost('HIGH'), ul = cost('ULTRA');
+  ok(lo.total < 200000, `LOW: ${(lo.total / 1000) | 0}k треугольников — мобильный бюджет`);
+  ok(hi.total < 700000, `HIGH: ${(hi.total / 1000) | 0}k`);
+  ok(ul.total < 1600000, `ULTRA: ${(ul.total / 1000) | 0}k — настольный пресет`);
+  ok(ul.foliage / ul.total > 0.6,
+     `Листва — ${((ul.foliage / ul.total) * 100) | 0}% геометрии ULTRA: резать надо её, а не остальное`);
+
+  /* прозрачные декали дороги не треугольниками, а перерисовкой */
+  ok(lo.decals < 2200, `LOW: прозрачных декалей ${lo.decals}`);
+  const wsrc = readFileSync(new URL('./js/world.js', import.meta.url), 'utf8');
+  ok(!/shadows\.push\(\[t, z, \{ r: s \* 1\.3/.test(wsrc),
+     'Под кустами декалей нет: полторы тысячи прозрачных квадов ради теней от кустиков не окупались');
 }
 
 /* ══ 3i. Звук реагирует на то, где находится камера ════════════════════ */

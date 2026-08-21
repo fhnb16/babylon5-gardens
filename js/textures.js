@@ -568,8 +568,8 @@ export function makeSoftSprite(hardness = 0) {
 export function makeBlobTexture() {
   const S = 128, { c, g } = cv(S, S);
   const gr = g.createRadialGradient(S / 2, S / 2, 0, S / 2, S / 2, S / 2);
-  gr.addColorStop(0, 'rgba(0,0,0,.88)');
-  gr.addColorStop(0.42, 'rgba(0,0,0,.55)');
+  gr.addColorStop(0, 'rgba(0,0,0,.78)');
+  gr.addColorStop(0.42, 'rgba(0,0,0,.44)');
   gr.addColorStop(1, 'rgba(0,0,0,0)');
   g.fillStyle = gr; g.fillRect(0, 0, S, S);
   return tex(c);
@@ -597,8 +597,8 @@ export function makeFootprintTexture() {
       let a2 = fx * fy * fy;
       /* контактная кайма: у самой кромки следа темнее */
       const edge = Math.max(dx, dy);
-      if (edge > 0.62 && edge <= 1.04) a2 = Math.min(1, a2 * 1.9);
-      g.fillStyle = `rgba(0,0,0,${(a2 * 0.97).toFixed(3)})`;
+      if (edge > 0.62 && edge <= 1.04) a2 = Math.min(1, a2 * 1.25);
+      g.fillStyle = `rgba(0,0,0,${(a2 * 0.82).toFixed(3)})`;
       g.fillRect(x, y, 1, 1);
     }
   }

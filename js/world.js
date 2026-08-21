@@ -703,7 +703,9 @@ export function buildWorld(group, renderer, quality) {
         sc.set(s, s * BS.flat, s));
       im.setMatrixAt(k, m4);
       im.setColorAt(k, natural(pick(rnd, bushCols), CONFIG.SATURATION, new THREE.Color()));
-      shadows.push([t, z, { r: s * 1.3, up }]);
+      /* Куст в полметра тень почти не даёт, а декаль — прозрачный квад с
+         отключённой записью глубины: на мобильном перерисовка дороже
+         треугольников. Полторы тысячи таких квадов не стоят своей цены. */
     });
 
   /* ─────────── КОНТАКТНЫЕ ТЕНИ ───────────

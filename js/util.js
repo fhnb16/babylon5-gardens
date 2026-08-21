@@ -199,6 +199,26 @@ export function natural(hex, k, out) {
   return out.setHSL(_hsl.h, _hsl.s * k, lerp(0.42, _hsl.l, 0.5 + k * 0.5));
 }
 
+/** Гасить аддитивный материал туманом нельзя обычным способом: стандартный
+    туман подмешивает свой цвет, а при аддитивном смешивании это ДОБАВЛЯЕТ
+    света — дымка становится ярче. Гасим прозрачностью: вдали материал просто
+    исчезает, как и всё остальное. */
+export function fadeByFog(mat) {
+  mat.fog = true;
+  const prev = mat.onBeforeCompile;
+  mat.onBeforeCompile = (s, r) => {
+    prev?.call(mat, s, r);
+    s.fragmentShader = s.fragmentShader.replace('#include <fog_fragment>', `
+      #ifdef USE_FOG
+        float fogF = 1.0 - exp( - fogDensity * fogDensity * vFogDepth * vFogDepth );
+        gl_FragColor.a *= 1.0 - clamp( fogF, 0.0, 1.0 );
+      #endif`);
+  };
+  const key = mat.customProgramCacheKey;
+  mat.customProgramCacheKey = () => (key ? key.call(mat) : '') + '-fogfade';
+  return mat;
+}
+
 /** Рекурсивная очистка поддерева: геометрии, материалы, их текстуры */
 export function deepDispose(obj) {
   obj.traverse?.(n => {

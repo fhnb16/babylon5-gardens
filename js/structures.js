@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { CONFIG } from './config.js';
-import { mulberry32, D2R, TAU, surfaceQuat, surfacePos, mergeGeos, rod, panelUV, deepDispose } from './util.js';
+import { mulberry32, D2R, TAU, surfaceQuat, surfacePos, mergeGeos, rod, panelUV,
+  fadeByFog, deepDispose } from './util.js';
 import { makeEndCapTexture } from './textures.js';
 import { patchRoughnessAlpha } from './world.js';
 
@@ -35,9 +36,11 @@ function buildAxis(group, panel, panelNormal) {
   /* --- светящаяся труба на оси --- */
   const tube = new THREE.CylinderGeometry(CONFIG.SUN.r, CONFIG.SUN.r, CONFIG.SUN.len, 20, 1, true);
   tube.rotateX(Math.PI / 2);
-  structMats.sun = new THREE.MeshBasicMaterial({
-    color: CONFIG.DAY.sunCol, fog: false, side: THREE.DoubleSide, toneMapped: false
-  });
+  /* Труба тоже уходит в дымку: иначе дальний её конец висит поверх тумана */
+  structMats.sun = fadeByFog(new THREE.MeshBasicMaterial({
+    color: CONFIG.DAY.sunCol, transparent: true,
+    side: THREE.DoubleSide, toneMapped: false
+  }));
   add(new THREE.Mesh(tube, structMats.sun));
 
   /* --- спина: рёбра, продольные лонжероны, монорельс лифта --- */

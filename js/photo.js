@@ -90,7 +90,7 @@ const AO_FRAG = `
       float occ = 0.0;
       vec3 bounce = vec3( 0.0 );
       for ( int i = 0; i < RAYS; i ++ ) {
-        if ( pxR < 2.0 ) break;
+        if ( pxR < 3.0 ) break;
         vec3 seed = vec3( vUv * uRes, uSeed + float( i ) * 1.618 );
         float u = hash( seed );
         float phi = hash( seed + 17.0 ) * 6.28318531;
@@ -570,7 +570,7 @@ let fxOn = false, fxRT = null, fxMat = null, fxQuad = null, fxScene = null, fxCa
 let taaMat = null, taaRT = [], taaIdx = 0, taaHas = 0;
 const prevVP = new THREE.Matrix4(), curVP = new THREE.Matrix4();
 const deltaRot = new THREE.Matrix4();
-let prevRot = 0;
+let prevRot = 0, taaFrame = 0;
 let glowOn = false, raysOn = false;
 let brRT = null, blRT = null, rayRT = null;
 let brMat = null, blurMat = null, rayMat = null;
@@ -756,11 +756,25 @@ export function renderFrame(renderer, scene, camera, worldRotZ = 0) {
     renderer.render(scene, camera);
     return;
   }
+  /* TAA берёт сглаживание ИЗ ДРОЖАНИЯ: без субпиксельного смещения он
+     усредняет одинаковые кадры, лесенка стоит в тех же пикселях, и
+     усреднять нечего. Смещение по Гальтону — не украшение, а весь смысл. */
+  if (taaOn && taaRT.length) {
+    const w = renderer.domElement.width, h = renderer.domElement.height;
+    taaFrame = (taaFrame + 1) % 8;
+    camera.setViewOffset(w, h,
+      halton(taaFrame + 1, 2) - 0.5, halton(taaFrame + 1, 3) - 0.5, w, h);
+    camera.updateProjectionMatrix();
+  }
+
   renderer.setRenderTarget(fxRT);
   renderer.render(scene, camera);
 
   let src = fxRT.texture;
-  if (taaOn && taaRT.length) src = runTaa(renderer, camera, worldRotZ);
+  if (taaOn && taaRT.length) {
+    src = runTaa(renderer, camera, worldRotZ);
+    camera.clearViewOffset();
+  }
   composite(renderer, src, renderer.toneMappingExposure);
 }
 

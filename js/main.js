@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { CONFIG } from './config.js';
-import { mulberry32, clamp, lerp, easeInOut, tpVec, aimAt, TAU } from './util.js';
+import { mulberry32, clamp, lerp, easeInOut, tpVec, aimAt, fadeByFog, TAU } from './util.js';
 import { makeSoftSprite, makeGlowTexture } from './textures.js';
 import { buildWorld, worldMats, hullU, windU, updateTraffic, trafficMeshes } from './world.js';
 import { buildStructures, structMats, updateStructures } from './structures.js';
@@ -89,11 +89,14 @@ function buildAmbient() {
      и заодно экономит вызов отрисовки. */
   const pg = new THREE.PlaneGeometry(12, CONFIG.SUN.len);
   pg.rotateX(Math.PI / 2);          // плоскость лежит вдоль Z, нормаль по −Y
-  glow = new THREE.Mesh(pg, new THREE.MeshBasicMaterial({
+  /* Ореол тянется на всю длину станции. Без затухания дальний его край
+     светит в полную силу поверх того, что уже съедено туманом, — и читается
+     как молочная полоса поперёк кадра. */
+  glow = new THREE.Mesh(pg, fadeByFog(new THREE.MeshBasicMaterial({
     map: makeGlowTexture(), color: CONFIG.DAY.sunCol, transparent: true,
     opacity: CONFIG.DAY.glowOp, blending: THREE.AdditiveBlending,
-    depthWrite: false, fog: false, side: THREE.DoubleSide, toneMapped: false
-  }));
+    depthWrite: false, side: THREE.DoubleSide, toneMapped: false
+  })));
   scene.add(glow);
 
   const rnd = mulberry32(CONFIG.SEED ^ 0x5f5);
@@ -211,8 +214,8 @@ function applyPalette(ph) {
     worldMats.nav.size = f('navSize');
   }
   /* контактные тени слабеют вместе с источником */
-  if (worldMats.blob) worldMats.blob.opacity = lerp(0.26, 1.0, daylight);
-  if (worldMats.print) worldMats.print.opacity = lerp(0.3, 1.0, daylight);
+  if (worldMats.blob) worldMats.blob.opacity = lerp(0.22, CONFIG.PRINT.dark * 0.85, daylight);
+  if (worldMats.print) worldMats.print.opacity = lerp(0.24, CONFIG.PRINT.dark, daylight);
 
   moteMat.color.copy(mixC(A.moteCol, B.moteCol, t));
   moteMat.opacity = f('moteOp');
@@ -676,7 +679,7 @@ function initUI() {
 /* ═══════════════════════════════════════════════════════════════════════════
    ПРОИЗВОДИТЕЛЬНОСТЬ
    ═══════════════════════════════════════════════════════════════════════════ */
-let dprIndex = 0, dprCap = 0, paused = false, frames = 0, winT = 0, upT = 0;
+let dprIndex = 0, dprCap = 0, paused = false, frames = 0, winT = 0, upT = 0, worstDt = 0;
 const capForQuality = () => Math.min(CONFIG.QUALITY[currentQuality()].dpr, isMobile ? 3 : 4);
 const startDpr = () => quality === 'AUTO' && isMobile ? Math.min(2, capForQuality()) : capForQuality();
 let ssaa = 1, shotBoost = 1, aaLabel = 'MSAA', windBase = 1;
@@ -768,7 +771,11 @@ function loop() {
   renderFrame(renderer, scene, camera, worldGroup.rotation.z);
   if (shotPending) { shotPending = false; grabShot(); }
 
+  /* Средний FPS за секунду прячет рывки: один кадр по 60 мс среди
+     шестидесяти по 16 даёт «58 fps», а рукой это чувствуется как провал.
+     Поэтому копим и худший кадр окна. */
   frames++; winT += dt;
+  worstDt = Math.max(worstDt, dt);
   if (winT >= CONFIG.ADAPT.window) {
     const fps = frames / winT;
     if (fps < CONFIG.ADAPT.down && dprIndex > 0) { dprIndex--; applyDpr(); upT = 0; }
@@ -778,10 +785,13 @@ function loop() {
     } else upT = 0;
     if (showFps) {
       const r = renderer.info.render;
-      $('fps').textContent = `${fps.toFixed(0)} fps   рендер ×${renderScale().toFixed(2)}   ${aaLabel}\n`
+      const worstFps = 1 / Math.max(1e-3, worstDt);
+      $('fps').textContent =
+        `${fps.toFixed(0)} fps   худший кадр ${(worstDt * 1000).toFixed(0)} мс (${worstFps.toFixed(0)} fps)\n`
+        + `рендер ×${renderScale().toFixed(2)}   ${aaLabel}\n`
         + `draw ${r.calls}   tri ${(r.triangles / 1000).toFixed(0)}k`;
     }
-    frames = 0; winT = 0;
+    frames = 0; winT = 0; worstDt = 0;
   }
 }
 
