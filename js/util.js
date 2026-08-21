@@ -124,8 +124,28 @@ export function panelUV(geo, tile, sy = 1) {
     вдоль −Z: подставив обычный Object3D, легко получить взгляд ровно назад.
     Matrix4.lookAt строит именно камерный базис, поэтому берём его напрямую. */
 const _aimM = new THREE.Matrix4();
+const _aimF = new THREE.Vector3(), _aimU = new THREE.Vector3(), _aimT = new THREE.Vector3();
 export function aimAt(eye, target, up, out) {
-  _aimM.lookAt(eye, target, up);
+  /* «Верх» приводим к перпендикуляру взгляда. Когда взгляд идёт почти вдоль
+     него, базис вырождается и переворачивается — камера рывком крутится на
+     180° за один кадр. Ортогонализация убирает вырождение в корне, а если
+     верх совпал со взглядом полностью, берём любой перпендикуляр. */
+  _aimF.subVectors(target, eye);
+  if (_aimF.lengthSq() < 1e-12) return out;
+  _aimF.normalize();
+  _aimU.copy(up).addScaledVector(_aimF, -up.dot(_aimF));
+  /* Порог намеренно велик. Ортогонализация спасает только пока верх и
+     взгляд заметно расходятся: у dot = 0.999 остаток длиной 0.04, и его
+     направление скачет от кадра к кадру — камеру выворачивает. Ниже порога
+     берём ось станции: она перпендикулярна радиальному верху всегда. */
+  if (_aimU.lengthSq() < 0.02) {
+    _aimT.set(0, 0, 1);
+    if (Math.abs(_aimF.z) > 0.9) _aimT.set(1, 0, 0);
+    _aimU.crossVectors(_aimT, _aimF);
+    if (_aimU.lengthSq() < 1e-8) _aimU.set(1, 0, 0);
+  }
+  _aimU.normalize();
+  _aimM.lookAt(eye, target, _aimU);
   return out.setFromRotationMatrix(_aimM);
 }
 
@@ -188,6 +208,50 @@ export function pickFloors(u, [lo, hi]) {
   let acc = u * sum;
   for (let f = lo; f <= hi; f++) { acc -= W[f - 1]; if (acc < 0) return f; }
   return hi;
+}
+
+/** Поворот одного направления к другому на долю w, с устойчивой осью.
+
+    setFromUnitVectors при почти противоположных направлениях выбирает ось
+    произвольно, и она скачет от кадра к кадру — камера выворачивается на
+    180° за один шаг. Здесь ось задаётся явно: обычно это их векторное
+    произведение, а при развороте точно назад — «верх», то есть камера
+    поворачивается через горизонт, как человек, а не через темя. */
+const _tA = new THREE.Vector3(), _tQ = new THREE.Quaternion();
+export function turnToward(from, to, w, up, out) {
+  const d = clamp(from.dot(to), -1, 1);
+  _tA.crossVectors(from, to);
+  if (_tA.lengthSq() < 1e-8) {
+    if (d > 0) return out.copy(from);          // уже совпали
+    _tA.copy(up);                              // ровно назад — через горизонт
+    _tA.addScaledVector(from, -from.dot(_tA));
+    if (_tA.lengthSq() < 1e-8) _tA.set(0, 0, 1).cross(from);
+  }
+  _tA.normalize();
+  _tQ.setFromAxisAngle(_tA, Math.acos(d) * clamp(w, 0, 1));
+  return out.copy(from).applyQuaternion(_tQ).normalize();
+}
+
+/** Ограничить угол между направлением и «верхом».
+
+    Наивное «убрать лишнюю вертикальную составляющую и нормализовать» не
+    работает: убрав её, вектор укорачивается, и нормализация возвращает долю
+    почти обратно — предел 0.978 оставлял 0.995. Раскладываем на составляющие
+    и собираем заново с нужной долей: результат точно на пределе. */
+const _cpP = new THREE.Vector3(), _cpT = new THREE.Vector3();
+export function clampPitch(dir, up, sinMax) {
+  const d = dir.dot(up);
+  if (Math.abs(d) <= sinMax) return dir;
+  _cpP.copy(dir).addScaledVector(up, -d);
+  if (_cpP.lengthSq() < 1e-10) {
+    _cpT.set(0, 0, 1);
+    if (Math.abs(up.z) > 0.9) _cpT.set(1, 0, 0);
+    _cpP.crossVectors(up, _cpT);
+  }
+  _cpP.normalize();
+  return dir.copy(up).multiplyScalar(Math.sign(d) * sinMax)
+    .addScaledVector(_cpP, Math.sqrt(Math.max(0, 1 - sinMax * sinMax)))
+    .normalize();
 }
 
 /** Приглушение палитры: тянем насыщенность к серому и слегка сводим

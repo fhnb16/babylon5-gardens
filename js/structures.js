@@ -6,7 +6,8 @@ import { makeEndCapTexture, heightToNormal } from './textures.js';
 import { patchRoughnessAlpha } from './world.js';
 
 /* Материалы, которыми управляет палитра день/ночь */
-export const structMats = { sun: null, glass: [], beacon: null, liftGlass: null };
+export const structMats = { sun: null, glass: [], beacon: null,
+  liftGlass: null, liftBody: null, liftLamp: null };
 
 let parts = [];
 let lifts = null, liftCount = 0;
@@ -34,7 +35,8 @@ function buildAxis(group, panel, panelNormal) {
   patchRoughnessAlpha(metal);
 
   /* --- светящаяся труба на оси --- */
-  const tube = new THREE.CylinderGeometry(CONFIG.SUN.r, CONFIG.SUN.r, CONFIG.SUN.len, 20, 1, true);
+  /* Торцы закрыты: открытый цилиндр обрывался в воздухе полым кольцом */
+  const tube = new THREE.CylinderGeometry(CONFIG.SUN.r, CONFIG.SUN.r, CONFIG.SUN.len, 20, 1, false);
   tube.rotateX(Math.PI / 2);
   /* Труба тоже уходит в дымку: иначе дальний её конец висит поверх тумана */
   structMats.sun = fadeByFog(new THREE.MeshBasicMaterial({
@@ -144,6 +146,25 @@ function buildAxis(group, panel, panelNormal) {
       -hh + CR.floor + CR.seat / 2, 0));
   }
   const carBody = panelUV(mergeGeos(carParts), CONFIG.PANEL_TILE);
+  /* Свой материал у кабины: общий metal имеет металличность 0.62, а металлу
+     без карты окружения отражать нечего — он рисуется почти чёрным. Снаружи
+     это незаметно, изнутри салон превращался в угольную коробку. */
+  structMats.liftBody = new THREE.MeshStandardMaterial({
+    map: panel, normalMap: panelNormal || null,
+    color: CONFIG.LIFTCAR.color, roughness: 0.6, metalness: 0.12,
+    side: THREE.DoubleSide
+  });
+
+  /* Лампа по потолку: сплошная полоса, яркость выше единицы — иначе она не
+     осветит салон и не попадёт в яркую выборку свечения. */
+  const lampGeo = mergeGeos([
+    rod(CR.w * 0.3, CR.floor * 0.5, CR.len * 0.9, 0, hh - CR.floor * 1.2, 0)
+  ]);
+  structMats.liftLamp = new THREE.MeshBasicMaterial({
+    color: new THREE.Color(CONFIG.LIFTCAR.lamp, CONFIG.LIFTCAR.lamp * 0.94,
+      CONFIG.LIFTCAR.lamp * 0.82),
+    toneMapped: false
+  });
 
   /* Остекление — тонкие панели в проёмах бортов, а не второй ящик.
      Камера внутри стоит между ними и смотрит наружу сквозь них. */
@@ -165,15 +186,16 @@ function buildAxis(group, panel, panelNormal) {
 
   liftCount = A.railAngles.length;
   lifts = {
-    body: new THREE.InstancedMesh(carBody, metal, liftCount),
+    body: new THREE.InstancedMesh(carBody, structMats.liftBody, liftCount),
+    lamp: new THREE.InstancedMesh(lampGeo, structMats.liftLamp, liftCount),
     glass: new THREE.InstancedMesh(carGlass, structMats.liftGlass, liftCount),
     z: A.railAngles.map((_, k) => k % 2 ? 60 : -40),
     dir: A.railAngles.map((_, k) => k % 2 ? -1 : 1),
     ang: A.railAngles.slice(),
     r: railR + 2.6      // кабина идёт снаружи балки, ниже её по радиусу
   };
-  lifts.body.frustumCulled = lifts.glass.frustumCulled = false;
-  add(lifts.body); add(lifts.glass);
+  lifts.body.frustumCulled = lifts.glass.frustumCulled = lifts.lamp.frustumCulled = false;
+  add(lifts.body); add(lifts.lamp); add(lifts.glass);
   updateStructures(0);
 
   /* --- силовые узлы и ферма --- */
@@ -185,7 +207,10 @@ function buildAxis(group, panel, panelNormal) {
   }
   add(new THREE.Mesh(panelUV(mergeGeos(collar), CONFIG.PANEL_TILE), metal));
 
-  const trussLen = R - 1 - (A.spineR + 2.4);
+  /* Колонна доводится до САМОЙ спины, а не обрывается в полутора юнитах от
+     неё: раньше верх висел в воздухе. Плюс седло — хомут, которым колонна
+     обхватывает спину. */
+  const trussLen = R - 1 - A.spineR;
   const truss = trussGeo(trussLen, A.trussW);
   const arms = new THREE.InstancedMesh(truss, metal, A.spars.length * A.sparArms);
   arms.frustumCulled = false;
@@ -239,6 +264,18 @@ function trussGeo(len, w) {
   g.push(disc(B, B * 1.06, 1.4, -0.7));
   g.push(disc(B * 0.78, B * 0.94, 1.1, 0.7));
   g.push(disc(w * C.bottom * 1.6, B * 0.74, 4.2, 1.8));
+
+  /* седло: хомут, которым колонна садится на спину станции */
+  const sd = CONFIG.AXIS.saddle;
+  const yoke = new THREE.CylinderGeometry(sd.r, sd.r, sd.w, 16, 1, true);
+  yoke.rotateZ(Math.PI / 2);
+  yoke.translate(0, len - sd.r * 0.2, 0);
+  g.push(yoke);
+  for (const sx of [-1, 1]) {
+    const cheek = new THREE.BoxGeometry(sd.w * 0.22, sd.r * 1.7, sd.r * 2.1);
+    cheek.translate(sx * sd.w * 0.42, len - sd.r * 0.9, 0);
+    g.push(cheek);
+  }
 
   /* контрфорсы у основания */
   for (let k = 0; k < 6; k++) {
@@ -425,9 +462,11 @@ export function updateStructures(dt) {
     _m.compose(surfacePos(lifts.ang[k], lifts.r, lifts.z[k], _v),
       surfaceQuat(lifts.ang[k], _q), _one);
     lifts.body.setMatrixAt(k, _m);
+    lifts.lamp.setMatrixAt(k, _m);
     lifts.glass.setMatrixAt(k, _m);
   }
   lifts.body.instanceMatrix.needsUpdate = true;
+  lifts.lamp.instanceMatrix.needsUpdate = true;
   lifts.glass.instanceMatrix.needsUpdate = true;
 }
 

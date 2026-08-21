@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { CONFIG } from './config.js';
-import { clamp } from './util.js';
+import { clamp, clampPitch } from './util.js';
 
 /* ═══════════════════════════════════════════════════════════════════════════
    УПРАВЛЕНИЕ — только Pointer Events. Никаких FlyControls/OrbitControls
@@ -190,10 +190,7 @@ export function levelCamera(camera) {
   stationUp(camera.position, _up);
   camera.getWorldDirection(_fwd);
 
-  const s = _fwd.dot(_up);
-  if (Math.abs(s) > SIN_MAX) {              // не даём взгляду встать вертикально
-    _fwd.addScaledVector(_up, Math.sign(s) * SIN_MAX - s).normalize();
-  }
+  clampPitch(_fwd, _up, SIN_MAX);           // не даём взгляду встать вертикально
   _right.crossVectors(_fwd, _up);
   if (_right.lengthSq() < 1e-8) return;     // вырожденный случай — оставляем как есть
   _right.normalize();

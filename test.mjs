@@ -6,7 +6,8 @@ import { readFileSync } from 'node:fs';
 import * as THREE from 'three';
 import { CONFIG } from './js/config.js';
 import { D2R, TAU, zoneAt, mulberry32, clamp as clampNum, tpVec, aimAt, natural,
-  cityBlock, cityCenter, cellInfo, cellUsable, pickFloors, surfacePos, mergeGeos, rod } from './js/util.js';
+  cityBlock, cityCenter, cellInfo, cellUsable, pickFloors, turnToward, clampPitch,
+  surfacePos, mergeGeos, rod } from './js/util.js';
 import { buildWorld, worldMats, hullU, uvSelfTest } from './js/world.js';
 import { buildStructures, structMats, updateStructures,
   liftSeat, liftCount2, setLiftInside } from './js/structures.js';
@@ -2230,15 +2231,94 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
      || /Math\.sin\(Math\.PI \* clamp\(e, 0, 1\)\)/.test(msrc),
      'Вынос к коридору нулевой на концах и полный в середине');
 
+  /* Плавность проверяется прогоном ВСЕХ перелётов с шагом настоящего кадра.
+     На глаз такое не поймать: рывок случался в одной паре точек из семидесяти
+     двух и длился один кадр. */
+  {
+    const F2 = CONFIG.FLY, dt = 1 / 60, limS = Math.sin(F2.pitchMax * Math.PI / 180);
+    const cl = (v, a, b) => Math.max(a, Math.min(b, v));
+    const lp = (a, b, x) => a + (b - a) * x;
+    const ss2 = (a, b, x) => { const q = cl((x - a) / (b - a), 0, 1); return q * q * (3 - 2 * q); };
+    const P2 = new THREE.Vector3(), Ah = new THREE.Vector3();
+    const dA = new THREE.Vector3(), dB = new THREE.Vector3();
+    const up2 = new THREE.Vector3(), upB = new THREE.Vector3();
+    const aim = new THREE.Vector3(), q2 = new THREE.Quaternion(), qp = new THREE.Quaternion();
+    let worst = 0, worstAt = '';
+    for (let i = 0; i < CONFIG.TP.length; i++) {
+      for (let j = 0; j < CONFIG.TP.length; j++) {
+        if (i === j) continue;
+        const A = tpVec(CONFIG.TP[i].pos), B = tpVec(CONFIG.TP[j].pos);
+        const L = tpVec(CONFIG.TP[j].look);
+        const a0 = Math.atan2(A.x, A.y), a1 = Math.atan2(B.x, B.y);
+        const da = ((a1 - a0 + Math.PI) % TAU + TAU) % TAU - Math.PI;
+        const r0 = Math.hypot(A.x, A.y), r1 = Math.hypot(B.x, B.y);
+        const rMid = cl(Math.min(r0, r1, CONFIG.R * F2.corridor),
+          CONFIG.SUN.r + CONFIG.SUN.clear + 2, CONFIG.R - 8);
+        const pt = (e, o) => {
+          const b = Math.sin(Math.PI * cl(e, 0, 1)), a = a0 + da * e;
+          const rl = lp(r0, r1, e), r = rl + (rMid - rl) * b * F2.pull;
+          return o.set(Math.sin(a) * r, Math.cos(a) * r, lp(A.z, B.z, e));
+        };
+        pt(0, P2); pt(0.02, Ah);
+        const dir = new THREE.Vector3().subVectors(Ah, P2).normalize();
+        const up0 = new THREE.Vector3(); stationUp(P2, up0);
+        const steps = Math.round(F2.min / dt);
+        let first = true;
+        for (let k = 0; k <= steps; k++) {
+          const raw = k / steps, e = raw * raw * (3 - 2 * raw);
+          pt(e, P2); pt(e + F2.lead, Ah);
+          dA.subVectors(Ah, P2);
+          if (dA.lengthSq() < 1e-6) dA.copy(dir); else dA.normalize();
+          dB.subVectors(L, P2).normalize();
+          stationUp(P2, up2);
+          upB.copy(up0).lerp(up2, ss2(0.2, 1, e)).normalize();
+          turnToward(dA, dB, ss2(F2.turnFrom, 1, e), up2, dA);
+          turnToward(dir, dA, 1 - Math.exp(-dt * F2.turn), up2, dir);
+          clampPitch(dir, upB, limS);
+          aim.copy(P2).addScaledVector(dir, 60);
+          aimAt(P2, aim, upB, q2);
+          if (!first) {
+            const d = qp.angleTo(q2) * 180 / Math.PI;
+            if (d > worst) { worst = d; worstAt = `${CONFIG.TP[i].name} → ${CONFIG.TP[j].name}`; }
+          }
+          qp.copy(q2); first = false;
+        }
+      }
+    }
+    const pairs = CONFIG.TP.length * (CONFIG.TP.length - 1);
+    ok(worst < 8,
+       `Все ${pairs} перелётов: худший поворот ${worst.toFixed(1)}° за кадр (${worstAt})`);
+    ok(worst * 60 < 500, `Это ${(worst * 60) | 0}°/с — не быстрее поворота головы`);
+  }
+
+  /* ограничение угла: наивная формула его почти не держала */
+  {
+    const up3 = new THREE.Vector3(0, 1, 0);
+    const d0 = new THREE.Vector3(0.1, 0.995, 0).normalize();
+    const lim = Math.sin(70 * Math.PI / 180);
+    clampPitch(d0, up3, lim);
+    ok(Math.abs(d0.dot(up3) - lim) < 1e-6,
+       `clampPitch ставит угол ровно на предел (${d0.dot(up3).toFixed(4)} против ${lim.toFixed(4)})`);
+    const csrc2 = readFileSync(new URL('./js/controls.js', import.meta.url), 'utf8');
+    ok(/clampPitch\(_fwd, _up, SIN_MAX\)/.test(csrc2),
+       'Управление пользуется той же функцией: там была та же ошибка');
+    ok(!/addScaledVector\(_up, Math\.sign\(s\)/.test(csrc2),
+       'Наивной формулы «убрать вертикаль и нормализовать» не осталось — она возвращала долю обратно');
+  }
+
   /* повороты камеры */
-  ok(/flyPoint\(Math\.min\(1, e \+ CONFIG\.FLY\.lead\), _v3\)/.test(msrc),
+  ok(/flyPoint\(e \+ CONFIG\.FLY\.lead, _v3\)/.test(msrc),
      'Камера смотрит вперёд по курсу, а не в конечную точку с самого старта');
-  ok(/fly\.aim\.lerp\(_v2, 1 - Math\.exp\(-dt \* CONFIG\.FLY\.turn\)\)/.test(msrc),
-     'Цель взгляда догоняется экспоненциально — повороты закладываются дугой, а не рывком');
+  ok(!/flyPoint\(Math\.min\(1, e \+/.test(msrc),
+     'Точка впереди не ограничена единицей: на финише она совпадала с камерой и вектор вырождался');
+  ok(/turnToward\(fly\.dir, _dirA, 1 - Math\.exp\(-dt \* CONFIG\.FLY\.turn\)/.test(msrc),
+     'Цель догоняется экспоненциально — повороты закладываются дугой, а не рывком');
+  ok(/turnToward\(_dirA, _dirB, smoothstep01\(CONFIG\.FLY\.turnFrom/.test(msrc),
+     'Интерполируется НАПРАВЛЕНИЕ: точка взгляда, переезжая от цели впереди к цели позади, проходила сквозь камеру');
   ok(!/slerpQuaternions/.test(msrc),
      'Равномерного slerp между стартом и финишем нет: он вращал камеру независимо от того, куда она летит');
-  ok(/camera\.getWorldDirection\(_v2\);\s*\n\s*fly\.aim\.copy/.test(msrc),
-     'На старте цель взгляда — там, куда камера смотрит сейчас: иначе рывок на первом кадре');
+  ok(/camera\.getWorldDirection\(fly\.dir\)/.test(msrc),
+     'На старте направление — то, куда камера смотрит сейчас: иначе рывок на первом кадре');
   ok(F.lead > 0 && F.turn > 0, `Взгляд вперёд на ${F.lead} пути, догон ${F.turn}/с`);
   ok(/len \/ F\.speed/.test(msrc), 'Длительность считается по длине пути, а не по хорде');
 }
