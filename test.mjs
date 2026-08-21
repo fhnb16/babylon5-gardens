@@ -2121,6 +2121,53 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   }
 }
 
+/* ══ 3h20. Камера, полёт, торец ════════════════════════════════════════ */
+{
+  const csrc = readFileSync(new URL('./js/controls.js', import.meta.url), 'utf8');
+  const msrc = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+
+  /* Предел тангажа. У 89° вектор «вправо» получается длиной 0.017, и
+     нормализация усиливает погрешность в полсотни раз — камеру трясло. */
+  const lim = parseFloat((csrc.match(/Math\.sin\((\d+) \* Math\.PI \/ 180\)/) || [])[1]);
+  ok(lim > 0 && lim <= 86,
+     `Предел тангажа ${lim}°: вектор «вправо» длиной ${Math.cos(lim * Math.PI / 180).toFixed(3)}, базис устойчив`);
+  ok(Math.cos(lim * Math.PI / 180) > 0.06, 'Запас достаточен, чтобы нормализация не усиливала шум');
+  ok(/clamp\(cur \+ dPitch, -lim, lim\) - cur/.test(csrc),
+     'Тангаж ограничивается ДО поворота, а не оттягивается назад каждый кадр');
+  ok(/_right\.lengthSq\(\) > 1e-8/.test(csrc), 'Вырожденный базис не используется');
+
+  /* два режима полёта */
+  ok(/freeFly/.test(csrc), 'Есть свободный режим полёта');
+  ok(/export function frameUp/.test(csrc), 'Опорный «верх» выбирается режимом');
+  ok(/if \(ctl\.freeFly\) return;/.test(csrc),
+     'В свободном режиме крен не выравнивается — он там часть управления');
+  ok(/prefs\.set\('freeFly'/.test(msrc), 'Режим полёта сохраняется');
+  ok(/syncFromCamera\(camera\);\s+\/\/ выровнять/.test(msrc),
+     'Возврат к режиму цилиндра выравнивает горизонт');
+  const html = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
+  ok(html.includes('id="sFly"'), 'Переключатель режима есть в настройках');
+
+  /* труба-солнце — тело, а не декорация */
+  ok(CONFIG.SUN.clear > 0, `Запас до трубы ${CONFIG.SUN.clear} юнита = ${CONFIG.SUN.clear * 10} м`);
+  ok(/const keep = CONFIG\.SUN\.r \+ CONFIG\.SUN\.clear/.test(csrc), 'Внутрь солнца камеру не пускают');
+  ok(/if \(rr < 1e-4\)/.test(csrc), 'Случай «ровно на оси» обработан отдельно');
+
+  /* торец объёмный, а не нарисованный */
+  const g = new THREE.Group();
+  const res = buildWorld(g, fakeRenderer, 'HIGH');
+  buildStructures(g, fakeRenderer, 'HIGH', res.panel, res.panelNormal);
+  const caps = g.children.filter(o => o.isMesh && o.material?.side === THREE.DoubleSide
+    && o.material.emissiveMap);
+  ok(caps.length === 2, `Торцов: ${caps.length}`);
+  for (const c of caps) {
+    c.geometry.computeBoundingBox();
+    const d = c.geometry.boundingBox.max.z - c.geometry.boundingBox.min.z;
+    ok(d > 5, `Торец уходит вглубь на ${(d * 10) | 0} м, а не нарисован на плоскости`);
+    ok(!!c.material.normalMap, 'У торца есть карта рельефа');
+  }
+  ok(CONFIG.ENDCAP.rings >= 4, `Кольцевых уступов: ${CONFIG.ENDCAP.rings}`);
+}
+
 /* ══ 3i. Звук реагирует на то, где находится камера ════════════════════ */
 {
   /* Решения о громкости вынесены в чистые функции — их можно проверить

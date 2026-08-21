@@ -7,6 +7,7 @@ import { clamp } from './util.js';
    и никаких внешних джойстиков.
    ═══════════════════════════════════════════════════════════════════════════ */
 export const ctl = {
+  freeFly: false,       // false — горизонт следует цилиндру, true — обычный полёт
   speed: CONFIG.SPEED_BASE,
   boost: false,
   keys: Object.create(null),
@@ -21,7 +22,10 @@ export const ctl = {
 export const isMobile = matchMedia('(pointer: coarse)').matches
   || /iPhone|iPad|iPod|Android/i.test(navigator.userAgent);
 
-const SIN_MAX = Math.sin(89 * Math.PI / 180);
+/* Предел тангажа. При 89° вектор «вправо» получается длиной 0.017, и
+   нормализация усиливает погрешность в полсотни раз — камеру трясёт у
+   зенита. 84° дают запас в 0.1: базис остаётся устойчивым. */
+const SIN_MAX = Math.sin(84 * Math.PI / 180);
 let base, knob;
 let dYaw = 0, dPitch = 0;      // накопленный ввод обзора за кадр
 
@@ -31,6 +35,14 @@ let dYaw = 0, dPitch = 0;      // накопленный ввод обзора �
 export function stationUp(pos, out) {
   out.set(-pos.x, -pos.y, 0);
   return out.lengthSq() < 1e-4 ? out.set(0, 1, 0) : out.normalize();
+}
+
+/** Опорный «верх» кадра. В режиме станции он идёт к оси и горизонт следует
+    изгибу цилиндра; в свободном — берётся собственный верх камеры, и полёт
+    ведёт себя как в обычной игре от первого лица: лево это лево. */
+export function frameUp(camera, out) {
+  if (!ctl.freeFly) return stationUp(camera.position, out);
+  return out.set(0, 1, 0).applyQuaternion(camera.quaternion).normalize();
 }
 
 /** §12: радиус джойстика зависит от ориентации экрана */
@@ -173,6 +185,8 @@ const _m4 = new THREE.Matrix4(), _q = new THREE.Quaternion();
     Ориентация хранится прямо в кватернионе камеры — углы Эйлера от мирового
     +Y тут не годятся, они защёлкивали бы крен обратно после каждой посадки. */
 export function levelCamera(camera) {
+  /* В свободном полёте выравнивать нечего: крен там — часть управления */
+  if (ctl.freeFly) return;
   stationUp(camera.position, _up);
   camera.getWorldDirection(_fwd);
 
@@ -192,11 +206,19 @@ export function updateControls(dt, camera) {
   if (!ctl.enabled) return;
 
   if (dYaw || dPitch) {
-    stationUp(camera.position, _up);
+    frameUp(camera, _up);
     camera.quaternion.premultiply(_q.setFromAxisAngle(_up, dYaw));
     camera.getWorldDirection(_fwd);
-    _right.crossVectors(_fwd, _up).normalize();
-    camera.quaternion.premultiply(_q.setFromAxisAngle(_right, dPitch));
+    _right.crossVectors(_fwd, _up);
+    if (_right.lengthSq() > 1e-8) {
+      _right.normalize();
+      /* Тангаж ограничиваем ДО поворота: докручивать вплотную к зениту,
+         а потом оттягивать назад — значит каждый кадр дёргать базис. */
+      const cur = Math.asin(clamp(_fwd.dot(_up), -1, 1));
+      const lim = Math.asin(SIN_MAX);
+      camera.quaternion.premultiply(
+        _q.setFromAxisAngle(_right, clamp(cur + dPitch, -lim, lim) - cur));
+    }
     dYaw = dPitch = 0;
   }
   levelCamera(camera);
@@ -222,11 +244,24 @@ export function updateControls(dt, camera) {
 
   const spd = ctl.speed * (ctl.boost ? CONFIG.SPEED_BOOST : 1) * dt;
   camera.getWorldDirection(_fwd);
-  stationUp(camera.position, _up);
+  frameUp(camera, _up);
   _right.crossVectors(_fwd, _up).normalize();
   camera.position.addScaledVector(_fwd, fz * spd);
   camera.position.addScaledVector(_right, fx * spd);
   camera.position.addScaledVector(_up, fy * spd);   // «вверх» — к оси станции
+
+  /* Труба-солнце — сплошное тело, а не декорация: внутрь неё не пускаем.
+     Отталкиваем по радиусу, оставляя движение вдоль оси свободным. */
+  const keep = CONFIG.SUN.r + CONFIG.SUN.clear;
+  const rr = Math.hypot(camera.position.x, camera.position.y);
+  if (rr < keep) {
+    if (rr < 1e-4) camera.position.x = keep;         // ровно на оси — отводим вбок
+    else {
+      const k = keep / rr;
+      camera.position.x *= k;
+      camera.position.y *= k;
+    }
+  }
 
   /* мягко держим камеру внутри станции */
   const r = Math.hypot(camera.position.x, camera.position.y);

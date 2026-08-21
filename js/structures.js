@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { CONFIG } from './config.js';
 import { mulberry32, D2R, TAU, surfaceQuat, surfacePos, mergeGeos, rod, panelUV,
   fadeByFog, deepDispose } from './util.js';
-import { makeEndCapTexture } from './textures.js';
+import { makeEndCapTexture, heightToNormal } from './textures.js';
 import { patchRoughnessAlpha } from './world.js';
 
 /* Материалы, которыми управляет палитра день/ночь */
@@ -256,20 +256,50 @@ function buildTower(group, panel, panelNormal) {
 /* ═══════════════════════════════════════════════════════════════════════════
    ТОРЦЫ: диск с кольцевой текстурой, ступица и 6 спиц одной геометрией
    ═══════════════════════════════════════════════════════════════════════════ */
-function buildEndCaps(group, renderer, low) {
+function buildEndCaps(group, renderer, low, normals) {
   const R = CONFIG.R, HL = CONFIG.L / 2;
-  const { map, emis } = makeEndCapTexture(low ? 512 : 1024, mulberry32(CONFIG.SEED + 99));
+  const { map, emis, canvas } = makeEndCapTexture(low ? 512 : 1024, mulberry32(CONFIG.SEED + 99));
   map.anisotropy = Math.min(8, renderer.capabilities.getMaxAnisotropy());
+
+  /* Рельеф торца берётся из его же рисунка — как у корпуса и фасадов */
+  const nrm = normals ? heightToNormal(canvas, CONFIG.NORMALS.endcap, 1024) : null;
 
   for (const sign of [-1, 1]) {
     const mat = new THREE.MeshStandardMaterial({
       map, emissiveMap: emis, emissive: 0xffffff, emissiveIntensity: 0,
+      normalMap: nrm, normalScale: new THREE.Vector2(1, 1),
       side: THREE.DoubleSide, roughness: 0.85, metalness: 0.12
     });
     structMats.glass.push(mat);
-    const disc = new THREE.Mesh(new THREE.CircleGeometry(R, 72), mat);
+
+    /* Не плоский диск, а ступенчатая воронка: кольцевые уступы уходят вглубь
+       к ступице. Плоскость выдавала себя сразу — вся глубина была нарисована,
+       и при взгляде вдоль оси торец читался наклейкой. */
+    const E = CONFIG.ENDCAP;
+    const prof = [];
+    for (let k = 0; k <= E.rings; k++) {
+      const u = k / E.rings;
+      const r = R * (1 - u);
+      /* уступ: сначала вглубь, потом сужение — отсюда и ступени */
+      const depth = E.depth * Math.pow(u, E.curve);
+      prof.push(new THREE.Vector2(Math.max(0.6, r), depth));
+      if (k < E.rings) prof.push(new THREE.Vector2(Math.max(0.6, r - R / E.rings * E.step), depth));
+    }
+    const cap = new THREE.LatheGeometry(prof, 72);
+    cap.rotateX(-Math.PI / 2);
+    /* UV вдоль радиуса: текстура нарисована кольцами от края к ступице */
+    const pos = cap.attributes.position, uv = cap.attributes.uv;
+    for (let k = 0; k < pos.count; k++) {
+      const rr = Math.hypot(pos.getX(k), pos.getY(k)) / R;
+      const ang = Math.atan2(pos.getY(k), pos.getX(k));
+      uv.setXY(k, 0.5 + Math.cos(ang) * rr * 0.5, 0.5 + Math.sin(ang) * rr * 0.5);
+    }
+    uv.needsUpdate = true;
+    cap.computeVertexNormals();
+
+    const disc = new THREE.Mesh(cap, mat);
     disc.position.z = sign * HL;
-    if (sign > 0) disc.rotation.y = Math.PI;
+    disc.scale.z = -sign;                   // воронка уходит внутрь станции
     group.add(disc); parts.push(disc);
 
     const p = [];
@@ -300,7 +330,8 @@ export function buildStructures(group, renderer, quality, panel, panelNormal) {
   disposeStructures(group);
   buildAxis(group, panel, panelNormal);
   buildTower(group, panel, panelNormal);
-  buildEndCaps(group, renderer, quality === 'LOW');
+  buildEndCaps(group, renderer, quality === 'LOW',
+    (CONFIG.QUALITY[quality] || CONFIG.QUALITY.HIGH).normals);
 }
 
 const _m = new THREE.Matrix4(), _q = new THREE.Quaternion(), _v = new THREE.Vector3();

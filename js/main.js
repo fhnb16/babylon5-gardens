@@ -653,6 +653,23 @@ function initUI() {
   };
   sSat.oninput = () => { $('sSatV').textContent = sSat.value + '%'; };
 
+  /* Два режима полёта. По умолчанию горизонт следует изгибу цилиндра — так
+     видно, что стоишь внутри вращающегося тела. Свободный ведёт себя как в
+     обычной игре: лево это лево, крен сохраняется. */
+  const swFly = $('sFly');
+  ctl.freeFly = prefs.get('freeFly', false);
+  const showFly = () => {
+    swFly.classList.toggle('on', ctl.freeFly);
+    $('sFlyV').textContent = ctl.freeFly ? 'Свободный' : 'Горизонт по цилиндру';
+  };
+  swFly.onclick = () => {
+    ctl.freeFly = !ctl.freeFly;
+    prefs.set('freeFly', ctl.freeFly);
+    showFly();
+    syncFromCamera(camera);          // выровнять при возврате к цилиндру
+  };
+  showFly();
+
   const sSens = $('sSens');
   sSens.value = prefs.get('sens', 100);
   sSens.oninput = () => {
