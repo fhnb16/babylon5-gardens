@@ -607,6 +607,18 @@ export function makeFootprintTexture() {
   return tex2;
 }
 
+/** Полоса окон на кузове машины. UV коробки идут 0…1 на каждую грань,
+    поэтому одна горизонтальная полоса даёт остекление по всем бортам. */
+export function makeCarWindows() {
+  const S = 32, { c, g } = cv(S, S);
+  g.fillStyle = '#000'; g.fillRect(0, 0, S, S);
+  g.fillStyle = '#cfe0f2';
+  g.fillRect(0, S * 0.30, S, S * 0.26);
+  g.fillStyle = '#000';
+  for (let x = 2; x < S; x += 9) g.fillRect(x, S * 0.30, 2, S * 0.26);   // стойки
+  return tex(c);
+}
+
 export function makeGlowTexture() {
   const W = 64, H = 8, { c, g } = cv(W, H);
   const gr = g.createLinearGradient(0, 0, W, 0);

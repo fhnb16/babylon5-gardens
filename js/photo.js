@@ -295,9 +295,7 @@ export function traceStep() {
 
   /* набрали нужное — дальше только показываем, не жжём кадры впустую */
   if (n >= trace.total) {
-    quad.material = showMat;
-    R.setRenderTarget(null);
-    R.render(qScene, qCam);
+    showAccum(accum[(n - 1) % 2 === 0 ? 0 : 1]);
     return 1;
   }
 
@@ -333,12 +331,9 @@ export function traceStep() {
   R.setRenderTarget(dst);
   R.render(qScene, qCam);
 
-  /* показать накопленное */
-  showMat.uniforms.tAccum.value = dst.texture;
-  showMat.uniforms.uExposure.value = R.toneMappingExposure;
-  quad.material = showMat;
-  R.setRenderTarget(null);
-  R.render(qScene, qCam);
+  /* Показать накопленное — через ту же постобработку, что и обычный кадр:
+     иначе включение трассировки выключало бы свечение и лучи. */
+  showAccum(dst);
 
   C.clearViewOffset();
   trace.sample = Math.min(n + 1, trace.total);
@@ -564,7 +559,6 @@ export function resizePost(renderer) {
     type: THREE.HalfFloatType, depthBuffer: true, samples: CONFIG.MSAA_SAMPLES,
     minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter
   });
-  fxMat.uniforms.tScene.value = fxRT.texture;
   fxMat.uniforms.uRes.value.set(s.x, s.y);
 }
 
@@ -577,18 +571,26 @@ export function renderFrame(renderer, scene, camera) {
   }
   renderer.setRenderTarget(fxRT);
   renderer.render(scene, camera);
+  composite(renderer, fxRT.texture, renderer.toneMappingExposure);
+}
 
-  const exposure = renderer.toneMappingExposure;
+/** Свечение, лучи, тонмаппинг и FXAA поверх готового HDR-кадра.
+    Общий для обычного вывода и для накопленного кадра трассировки: раньше
+    трассировка шла мимо постобработки, и включение лучей ГАСИЛО свечение
+    и лучи от оси — картинка «переставала меняться». */
+export function composite(renderer, srcTexture, exposure) {
+  if (!fxMat) { return false; }
   const P = CONFIG.POST;
   const pass = (mat, target) => {
     fxQuad.material = mat;
     renderer.setRenderTarget(target);
     renderer.render(fxScene, fxCam);
   };
+  fxMat.uniforms.tScene.value = srcTexture;
 
   if (glowOn || raysOn) {
     /* яркая выборка — общая для свечения и лучей */
-    brMat.uniforms.tScene.value = fxRT.texture;
+    brMat.uniforms.tScene.value = srcTexture;
     brMat.uniforms.uExposure.value = exposure;
     pass(brMat, blRT);
 
@@ -614,6 +616,17 @@ export function renderFrame(renderer, scene, camera) {
   fxMat.uniforms.uExposure.value = exposure;
   fxMat.uniforms.uFxaa.value = fxaaFilter ? 1 : 0;
   pass(fxMat, null);
+  return true;
+}
+
+function showAccum(rt) {
+  if (composite(R, rt.texture, R.toneMappingExposure)) return;
+  /* без цепочки постобработки — свой минимальный вывод */
+  showMat.uniforms.tAccum.value = rt.texture;
+  showMat.uniforms.uExposure.value = R.toneMappingExposure;
+  quad.material = showMat;
+  R.setRenderTarget(null);
+  R.render(qScene, qCam);
 }
 
 export function stopTrace(windUniform) {

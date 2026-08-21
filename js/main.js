@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { CONFIG } from './config.js';
 import { mulberry32, clamp, lerp, easeInOut, tpVec, aimAt, TAU } from './util.js';
 import { makeSoftSprite, makeGlowTexture } from './textures.js';
-import { buildWorld, worldMats, hullU, windU, updateTraffic } from './world.js';
+import { buildWorld, worldMats, hullU, windU, updateTraffic, trafficMeshes } from './world.js';
 import { buildStructures, structMats, updateStructures } from './structures.js';
 import { ctl, isMobile, initControls, updateControls, syncFromCamera, resetStick, stationUp } from './controls.js';
 import { audio, startAudio, updateAudio, setVolume, setEnabled, suspendAudio } from './audio.js';
@@ -123,15 +123,28 @@ function buildAmbient() {
 
   hemi = new THREE.HemisphereLight(CONFIG.DAY.hemiSky, CONFIG.DAY.hemiGround, CONFIG.DAY.hemiInt);
   scene.add(hemi);
-  for (const z of CONFIG.LIGHT_Z) {
-    const l = new THREE.PointLight(CONFIG.DAY.pointCol, CONFIG.DAY.pointInt, 380, 1.05);
+  buildLights();
+}
+
+/** Источники пересобираются при смене пресета: их число входит в стоимость
+    каждого фрагмента, и на слабом устройстве это заметнее любой геометрии. */
+function buildLights() {
+  for (const l of lights) scene.remove(l);
+  lights = [];
+  const zs = currentQuality() === 'LOW' ? CONFIG.LIGHT_Z_LOW : CONFIG.LIGHT_Z;
+  /* суммарная отдача не должна зависеть от числа ламп */
+  const k = CONFIG.LIGHT_Z.length / zs.length;
+  for (const z of zs) {
+    const l = new THREE.PointLight(CONFIG.DAY.pointCol, CONFIG.DAY.pointInt * k, 380, 1.05);
     l.position.set(0, 0, z);
+    l.userData.k = k;
     lights.push(l); scene.add(l);
   }
 }
 
 function rebuild() {
   const q = currentQuality();
+  buildLights();
   /* §14: в пресете LOW облака выключаются */
   if (clouds) clouds.visible = q !== 'LOW';
   const res = buildWorld(worldGroup, renderer, q);
@@ -167,11 +180,13 @@ function applyPalette(ph) {
   hemi.intensity = f('hemiInt');
 
   mixC(A.pointCol, B.pointCol, t);
-  for (const l of lights) { l.color.copy(_r); l.intensity = f('pointInt'); }
+  for (const l of lights) { l.color.copy(_r); l.intensity = f('pointInt') * (l.userData.k || 1); }
 
   const sunE = f('sunEmis');
   mixC(A.sunCol, B.sunCol, t);
-  if (structMats.sun) structMats.sun.color.copy(_r).multiplyScalar(sunE);
+  /* Труба уходит выше единицы: в кадре она и так белая, зато свечение
+     получает настоящий HDR-источник, а не еле-еле проходящий порог. */
+  if (structMats.sun) structMats.sun.color.copy(_r).multiplyScalar(sunE * CONFIG.POST.sunHdr);
   glow.material.color.copy(_r);
   glow.material.opacity = f('glowOp');
 
@@ -180,7 +195,14 @@ function applyPalette(ph) {
   for (const m of structMats.glass) m.emissiveIntensity = emis * 0.45;
   if (structMats.liftGlass) structMats.liftGlass.emissiveIntensity = lerp(1.4, 0.3, daylight);
 
-  if (worldMats.traffic) worldMats.traffic.opacity = lerp(1.0, 0.12, daylight);
+  /* Свет машин: окна еле тлеют, фары бьют. Днём и то и другое почти не видно. */
+  if (worldMats.trafficBody) {
+    worldMats.trafficBody.emissiveIntensity = lerp(CONFIG.TRAFFIC.win, 0.05, daylight);
+  }
+  if (worldMats.trafficLamp) {
+    const b = lerp(CONFIG.TRAFFIC.lamp, 0.12, daylight);
+    worldMats.trafficLamp.color.setRGB(b, b, b);
+  }
   if (worldMats.nav) {
     worldMats.nav.opacity = clamp(f('navInt'), 0, 1);
     worldMats.nav.size = f('navSize');
@@ -513,12 +535,16 @@ function initUI() {
     swGlow.classList.toggle('on', glowOn);
     swRays.classList.toggle('on', raysOn);
     swTraffic.classList.toggle('on', trafficOn);
-    if (worldMats.traffic) worldMats.traffic.visible = trafficOn;
+    for (const o of trafficMeshes()) o.visible = trafficOn;
     applyAA();
   };
   swGlow.onclick = () => { glowOn = !glowOn; prefs.set('glow', glowOn); syncPost(); };
   swRays.onclick = () => { raysOn = !raysOn; prefs.set('rays', raysOn); syncPost(); };
   swTraffic.onclick = () => { trafficOn = !trafficOn; prefs.set('traffic', trafficOn); syncPost(); };
+  /* Обязательная первая покраска: без неё состояние в переменных есть, а на
+     переключателях его нет — первый же клик «включал» соседей, потому что
+     они всё это время были включены и только теперь отрисовались. */
+  syncPost();
 
   const sSat = $('sSat');
   sSat.value = Math.round(CONFIG.SATURATION * 100);
@@ -596,6 +622,17 @@ function initUI() {
     $('fps').classList.toggle('show', showFps);
     prefs.set('fps', showFps);
   };
+
+  /* Кликабельна была только сама пилюля переключателя — 15% ширины строки.
+     Промах по подписи не делал ничего, второй тык попадал в соседнюю строку,
+     и со стороны это выглядело как «включается не то». Вся строка со
+     переключателем теперь переключает его. */
+  for (const row of document.querySelectorAll('.row')) {
+    const sw = row.querySelector('.sw');
+    if (!sw) continue;
+    row.style.cursor = 'pointer';
+    row.addEventListener('click', e => { if (e.target !== sw) sw.click(); });
+  }
 
   $('go').onclick = () => {
     $('intro').classList.add('hide');

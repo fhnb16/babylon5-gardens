@@ -43,6 +43,7 @@ globalThis.document = {
     return { width: 1, height: 1, nodeType: 1, getContext: ctx, toDataURL: () => 'data:,' };
   },
   getElementById: () => null,
+  querySelectorAll: () => [],
   addEventListener() {}
 };
 globalThis.self = globalThis;

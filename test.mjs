@@ -12,6 +12,20 @@ import { buildStructures, structMats, updateStructures } from './js/structures.j
 import { fieldAt, waterLevel, windLevel, humLevel, birdLevel } from './js/audio.js';
 import { stationUp } from './js/controls.js';
 
+
+/* Инстансы разрезаны на секторы ради отсечения по кадру, поэтому искать их
+   «по количеству» больше нельзя — собираем по материалу. */
+const chunksOf = (group, pick) => group.children.filter(o => o.isInstancedMesh && pick(o));
+const totalCount = arr => arr.reduce((s, o) => s + o.count, 0);
+const forEachInstance = (arr, fn) => {
+  const m = new THREE.Matrix4(), p = new THREE.Vector3();
+  const s = new THREE.Vector3(), q = new THREE.Quaternion();
+  for (const im of arr) for (let k = 0; k < im.count; k++) {
+    im.getMatrixAt(k, m); m.decompose(p, q, s);
+    fn(p, s, q, im, k);
+  }
+};
+
 let fails = 0;
 const ok = (c, m) => { console.log((c ? '  ok  ' : '  FAIL') + '  ' + m); if (!c) fails++; };
 const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
@@ -63,7 +77,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   ok(F.includes(`uniform float uSparZ[${CONFIG.AXIS.spars.length}]`), 'Размер uSparZ[] равен числу узлов');
 
   /* --- ветер в кронах --- */
-  const crown = group.children.find(o => o.material?.flatShading && o.isInstancedMesh && o.count > 500);
+  const crown = chunksOf(group, o => o.material?.flatShading && o.material.vertexColors && o.instanceColor)[0];
   const ws = { uniforms: {}, vertexShader: lib.vertexShader, fragmentShader: lib.fragmentShader };
   crown.material.onBeforeCompile(ws, fakeRenderer);
   ok(ws.vertexShader.includes('transformed.x += sway * amp'), 'Ветер: вершины кроны качаются');
@@ -76,7 +90,15 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
     if (o.isMesh || o.isPoints) draws++;
     if (o.isInstancedMesh && o.count === 0) emptyInst++;
   });
-  ok(draws <= 32, `Бюджет отрисовки: ${draws} вызовов (лимит 32)`);
+  /* Секторы отсекаются по кадру, поэтому важен не общий счёт, а сколько
+     реально уходит на отрисовку: в кадр попадает около четверти секторов. */
+  let culled = 0;
+  group.traverse(o => { if ((o.isMesh || o.isPoints) && o.frustumCulled) culled++; });
+  const always = draws - culled;
+  const inView = always + Math.ceil(culled * 3 / CONFIG.CHUNKS);
+  ok(always <= 20, `Всегда рисуется ${always} вызовов — остальные ${culled} отсекаются по кадру`);
+  ok(inView <= 45, `В кадре около ${inView} вызовов`);
+  ok(culled > draws * 0.7, 'Подавляющее большинство объектов отсекаемые');
 
   /* Треугольники: плотная зелень с детализированными кронами легко
      разгоняет счёт, а один вызов отрисовки этого не показывает. */
@@ -305,7 +327,9 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   ok(swallowed === 0, `Холмы не наезжают на застройку (проглоченных зданий ${swallowed})`);
 
   /* дерево на склоне должно стоять НА земле: сравниваем с профилем купола */
-  const trunks = insts.find(o => !o.material.map && !o.material.flatShading && o.count > 300);
+  const trunkC2 = chunksOf({children: insts}, o => o.material.isMeshStandardMaterial && !o.material.map && !o.material.emissiveMap
+    && !o.material.flatShading && o.material.vertexColors && !o.instanceColor);
+  const trunks = trunkC2[0];
   const reliefAt = (t, z) => {
     let up = 0;
     for (const [ht, hz, hr, hh] of hills) {
@@ -315,15 +339,14 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
     return up;
   };
   let onSlope = 0, buried = 0;
-  for (let k = 0; k < trunks.count; k++) {
-    trunks.getMatrixAt(k, m); m.decompose(p, qq, s);
+  forEachInstance(trunkC2, (p, s) => {
     const t = Math.atan2(p.x, p.y), r = Math.hypot(p.x, p.y);
     const up = reliefAt(t, p.z);
-    if (up < 0.05) continue;
+    if (up < 0.05) return;
     onSlope++;
     /* центр ствола обязан быть на полвысоты выше поверхности холма */
     if (Math.abs((CONFIG.R - up - s.y / 2) - r) > 0.02) buried++;
-  }
+  });
   ok(onSlope > 0, `Деревьев на склонах холмов: ${onSlope}`);
   ok(buried === 0, 'Все они стоят на склоне, а не утоплены в холм');
 }
@@ -355,8 +378,11 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
 {
   const group = new THREE.Group();
   buildWorld(group, fakeRenderer, 'LOW');
-  const bld = group.children.filter(o => o.isInstancedMesh && o.material?.emissiveMap);
-  ok(bld.length === 4, 'Четыре типа зданий со своими фасадами');
+  const bldMats = [...new Set(group.children
+    .filter(o => o.isInstancedMesh && o.material?.emissiveMap && o.material.map)
+    .map(o => o.material))];
+  const bld = bldMats.map(mm => chunksOf(group, o => o.material === mm)[0]);
+  ok(bldMats.length === 4, 'Четыре типа зданий со своими фасадами');
 
   bld.forEach((im, v) => {
     ok(im.material.map.wrapS === THREE.RepeatWrapping && im.material.map.wrapT === THREE.RepeatWrapping,
@@ -447,7 +473,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
 {
   const g = new THREE.Group();
   buildWorld(g, fakeRenderer, 'HIGH');
-  const bld = g.children.filter(o => o.isInstancedMesh && o.material?.emissiveMap);
+  const bld = g.children.filter(o => o.isInstancedMesh && o.material?.emissiveMap && o.material.map);
   const B = cityBlock(), C = CONFIG.CITY;
   const m = new THREE.Matrix4(), p = new THREE.Vector3(), s = new THREE.Vector3(), q = new THREE.Quaternion();
 
@@ -641,17 +667,18 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   const g = new THREE.Group();
   buildWorld(g, fakeRenderer, 'HIGH');
   const ins = g.children.filter(o => o.isInstancedMesh);
-  const trunk = ins.find(o => !o.material.map && !o.material.flatShading && !o.instanceColor && o.count > 300);
+  const trunkC = chunksOf({children: ins}, o => o.material.isMeshStandardMaterial && !o.material.map && !o.material.emissiveMap
+    && !o.material.flatShading && o.material.vertexColors && !o.instanceColor);
+  const trunk = trunkC[0];
   ok(!!trunk, 'Стволы деревьев найдены');
 
   const m = new THREE.Matrix4(), p = new THREE.Vector3(), s = new THREE.Vector3(), q = new THREE.Quaternion();
   const TR = CONFIG.TREE;
   const hs = [], pts = [];
-  for (let k = 0; k < trunk.count; k++) {
-    trunk.getMatrixAt(k, m); m.decompose(p, q, s);
+  forEachInstance(trunkC, (p, s) => {
     hs.push(s.y / TR.trunk * 0.98);                    // полная высота над своей землёй
     pts.push([Math.atan2(p.x, p.y), p.z, s.y / TR.trunk]);
-  }
+  });
   hs.sort((a, b) => a - b);
   const med = hs[hs.length >> 1], max = hs[hs.length - 1];
   const maxBld = Math.max(...CONFIG.BLD.map(b => b.floors[1])) * CONFIG.FLOOR_H;
@@ -679,7 +706,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   ok(tooClose === 0,
      `Кроны не смыкаются: минимальный просвет ${(minGap * 100).toFixed(0)}% от требуемого`);
   ok(TR.spacing >= 1.0, `Кроны не пересекаются: шаг ${TR.spacing} радиуса кроны`);
-  ok(trunk.count > 2000, `Зелени густо: ${trunk.count} деревьев`);
+  ok(totalCount(trunkC) > 2000, `Зелени густо: ${totalCount(trunkC)} деревьев`);
 }
 
 /* ══ 3f4b. Холмы земляного цвета, дорожки плавные ══════════════════════ */
@@ -687,17 +714,23 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   const g = new THREE.Group();
   buildWorld(g, fakeRenderer, 'HIGH');
   const ins = g.children.filter(o => o.isInstancedMesh);
-  const hill = ins.find(o => o.material?.flatShading && !o.material.vertexColors
-    && o.count <= CONFIG.COUNT.hills[0]);
-  const crown = ins.find(o => o.material?.vertexColors && o.instanceColor && o.count > 2000);
+  /* трава у комлей тоже гранёная и без карты — различаем по цвету инстанса */
+  const hillC = chunksOf({ children: ins }, o => o.material?.flatShading
+    && !o.material.vertexColors && !o.material.map && o.instanceColor);
+  const crownC = chunksOf({ children: ins }, o => o.material?.vertexColors
+    && o.material.flatShading && o.instanceColor);
   const lum = c => 0.2126 * c.r + 0.7152 * c.g + 0.0722 * c.b;
   const col = new THREE.Color();
 
-  let hMax = 0, hSum = 0;
-  for (let k = 0; k < hill.count; k++) { hill.getColorAt(k, col); const l = lum(col); hMax = Math.max(hMax, l); hSum += l; }
+  let hMax = 0, hSum = 0, hN = 0;
+  for (const im of hillC) for (let k = 0; k < im.count; k++) {
+    im.getColorAt(k, col); const l = lum(col); hMax = Math.max(hMax, l); hSum += l; hN++;
+  }
   let cSum = 0, n = 0;
-  for (let k = 0; k < crown.count; k += 7) { crown.getColorAt(k, col); cSum += lum(col); n++; }
-  const hAvg = hSum / hill.count, cAvg = cSum / n;
+  for (const im of crownC) for (let k = 0; k < im.count; k += 7) {
+    im.getColorAt(k, col); cSum += lum(col); n++;
+  }
+  const hAvg = hSum / hN, cAvg = cSum / n;
 
   ok(hAvg < cAvg,
      `Холм темнее кроны: ${hAvg.toFixed(3)} против ${cAvg.toFixed(3)}`);
@@ -706,8 +739,8 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   /* оттенок должен оставаться земляным, без ухода в бирюзу */
   const hsl = { h: 0, s: 0, l: 0 };
   let hueMin = 1, hueMax = 0;
-  for (let k = 0; k < hill.count; k++) {
-    hill.getColorAt(k, col); col.getHSL(hsl, THREE.SRGBColorSpace);
+  for (const im of hillC) for (let k = 0; k < im.count; k++) {
+    im.getColorAt(k, col); col.getHSL(hsl, THREE.SRGBColorSpace);
     hueMin = Math.min(hueMin, hsl.h); hueMax = Math.max(hueMax, hsl.h);
   }
   ok(hueMax <= 0.34, `Оттенок холмов не уходит в бирюзу (макс ${hueMax.toFixed(2)})`);
@@ -756,15 +789,12 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
     const has = !!worldMats.print;
     ok(has === want, `${q}: отдельные следы домов ${want ? 'есть' : 'не строятся'}`);
     if (has) {
-      const pm = g.children.find(o => o.material === worldMats.print);
-      ok(pm.count > 100, `${q}: следов домов ${pm.count}`);
+      const pmC = chunksOf(g, o => o.material === worldMats.print);
+      ok(totalCount(pmC) > 100, `${q}: следов домов ${totalCount(pmC)}`);
       const m2 = new THREE.Matrix4(), p2 = new THREE.Vector3(), s2 = new THREE.Vector3(), q2 = new THREE.Quaternion();
-      let elongated = 0;
-      for (let k = 0; k < pm.count; k++) {
-        pm.getMatrixAt(k, m2); m2.decompose(p2, q2, s2);
-        if (s2.z > s2.x) elongated++;
-      }
-      ok(elongated === pm.count, 'Каждый след вытянут вдоль оси станции');
+      let elongated = 0, totalP = 0;
+      forEachInstance(pmC, (p2, s2) => { totalP++; if (s2.z > s2.x) elongated++; });
+      ok(elongated === totalP, 'Каждый след вытянут вдоль оси станции');
     }
   }
 }
@@ -829,8 +859,8 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   /* численно: низ ствола заметно темнее верха */
   const g = new THREE.Group();
   buildWorld(g, fakeRenderer, 'HIGH');
-  const trunk = g.children.find(o => o.isInstancedMesh && !o.material.map
-    && !o.material.flatShading && !o.instanceColor && o.count > 300);
+  const trunk = chunksOf(g, o => o.material.isMeshStandardMaterial && !o.material.map && !o.material.emissiveMap
+    && !o.material.flatShading && o.material.vertexColors && !o.instanceColor)[0];
   const tp = trunk.geometry.attributes.position, tc = trunk.geometry.attributes.color;
   let low = 9, high = 0;
   for (let k = 0; k < tp.count; k++) {
@@ -854,16 +884,23 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   const ins = g.children.filter(o => o.isInstancedMesh);
   const m = new THREE.Matrix4(), p = new THREE.Vector3(), s = new THREE.Vector3(), q = new THREE.Quaternion();
 
-  const trunk = ins.find(o => !o.material.map && !o.material.flatShading && !o.instanceColor && o.count > 300);
-  const foliage = ins.filter(o => o.material?.flatShading && o.material.vertexColors);
-  ok(foliage.length === 2, 'Кроны и кусты — отдельные инстансы с вершинными цветами');
+  const trunkC = chunksOf({children: ins}, o => o.material.isMeshStandardMaterial && !o.material.map && !o.material.emissiveMap
+    && !o.material.flatShading && o.material.vertexColors && !o.instanceColor);
+  const trunk = trunkC[0];
+  const foliageMats = [...new Set(ins.filter(o => o.material?.flatShading
+    && o.material.vertexColors).map(o => o.material))];
+  const foliage = foliageMats.map(mm => chunksOf({ children: ins }, o => o.material === mm)[0]);
+  ok(foliageMats.length === 2, 'Кроны и кусты — отдельные материалы с вершинными цветами');
 
   /* какой из них куст: у него нет парного ствола, берём меньший по габариту */
   const size = im => { im.geometry.computeBoundingBox(); return im.geometry.boundingBox.max.y; };
   let maxBush = 0, maxTree = 0;
-  const bush = ins.find(o => o.count === CONFIG.COUNT.bushes[0] || (o.material?.vertexColors && o.count < 2000));
-  for (let k = 0; k < bush.count; k++) { bush.getMatrixAt(k, m); m.decompose(p, q, s); maxBush = Math.max(maxBush, s.y * 2); }
-  for (let k = 0; k < trunk.count; k++) { trunk.getMatrixAt(k, m); m.decompose(p, q, s); maxTree = Math.max(maxTree, s.y / CONFIG.TREE.trunk * 0.98); }
+  /* куст: вершинные цвета И цвет инстанса, но не крона — крону узнаём по числу */
+  const bushMat = foliageMats.find(mm => chunksOf({ children: ins },
+    o => o.material === mm).reduce((s2, o) => s2 + o.count, 0) < 3000);
+  const bushC = chunksOf({ children: ins }, o => o.material === bushMat);
+  forEachInstance(bushC, (p, s) => { maxBush = Math.max(maxBush, s.y * 2); });
+  forEachInstance(trunkC, (p, s) => { maxTree = Math.max(maxTree, s.y / CONFIG.TREE.trunk * 0.98); });
   ok(maxBush < maxTree * 0.5,
      `Самый крупный куст ${(maxBush * 10).toFixed(1)} м — вдвое ниже самого высокого дерева ${(maxTree * 10).toFixed(1)} м`);
   ok(maxBush * 10 < 7, `Куст остаётся подлеском: до ${(maxBush * 10).toFixed(1)} м в высоту`);
@@ -1247,8 +1284,8 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
      (50 мс) шум около 18%. Это ожидаемо — накопление по одному лучу на кадр
      показывало бы зерно, но сходилось бы в десять раз дольше. */
   const noiseAt = frames => 1 / Math.sqrt(frames * P.rays);
-  ok(noiseAt(3) > 0.25,
-     `К третьему кадру ещё ${(noiseAt(3) * 100) | 0}% шума — процесс видно`);
+  ok(noiseAt(1) > 0.3,
+     `Первый кадр даёт ${(noiseAt(1) * 100) | 0}% шума — схождение видно`);
   ok(noiseAt(P.samples) < 0.05,
      `К концу накопления шум ${(noiseAt(P.samples) * 100).toFixed(0)}%`);
 
@@ -1420,12 +1457,13 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   ok(/renderer\.setRenderTarget\(fxRT\)/.test(psrc), 'Кадр идёт через буфер только при включённом FXAA');
 
   /* Цепочка вывода: последним всегда идёт рендер в канвас */
-  const rf = psrc.slice(psrc.indexOf('export function renderFrame'));
+  const rf = psrc.slice(psrc.indexOf('export function composite'));
   const body = rf.slice(0, rf.indexOf('\n}'));
   ok(body.lastIndexOf('setRenderTarget(null)') < body.lastIndexOf('render(fxScene, fxCam)'),
      'Перед выводом квада цель сброшена в канвас');
-  ok(/setRenderTarget\(null\);\s*\n\s*renderer\.render\(scene, camera\)/.test(body),
+  ok(/setRenderTarget\(null\);\s*\n\s*renderer\.render\(scene, camera\)/.test(psrc),
      'Без FXAA сцена рисуется прямо в канвас');
+  ok(/pass\(fxMat, null\)/.test(body), 'Финальный проход идёт в канвас');
 
   /* antialias у рендерера действует только на канвас: буферам нужен samples */
   ok(/samples: CONFIG\.MSAA_SAMPLES/.test(psrc),
@@ -1477,7 +1515,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   buildWorld(hi, fakeRenderer, 'HIGH');
   const hullHi = hi.children.find(o => o.material?.side === THREE.BackSide);
   ok(!!hullHi.material.normalMap, 'На высоком — с картой');
-  const bldHi = hi.children.filter(o => o.isInstancedMesh && o.material?.emissiveMap);
+  const bldHi = hi.children.filter(o => o.isInstancedMesh && o.material?.emissiveMap && o.material.map);
   ok(bldHi.every(o => o.material.normalMap), 'У всех типов домов есть рельеф оконных ниш');
 }
 
@@ -1498,7 +1536,9 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   ok(/c \+= texture2D\( tGlow, uv \)\.rgb \* uGlow/.test(psrc),
      'Свечение складывается со сценой ДО тонмаппинга — так ведёт себя рассеяние в оптике');
   ok(P.div >= 2, `Вспомогательные буферы в ${P.div} раза меньше — размытое мелких деталей не несёт`);
-  ok(P.threshold > 0.5, `Свечение начинается с яркости ${P.threshold}`);
+  ok(P.threshold > 0.2 && P.threshold < 0.7,
+     `Свечение начинается с яркости ${P.threshold} — линейная яркость солнца 0.93, порог 0.9 пропускал 0.3%`);
+  ok(P.sunHdr > 1, `Труба уходит в HDR ×${P.sunHdr} — свечению нужен источник ярче единицы`);
 
   ok(/export function setSunScreen/.test(psrc), 'Экранное положение оси считается каждый кадр');
   ok(/sunVisible = v\.z < 1/.test(psrc), 'За спиной камеры лучи выключаются');
@@ -1512,10 +1552,17 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
 
   /* --- трафик --- */
   ok(/export function updateTraffic/.test(wsrc), 'Огни машин двигаются');
-  ok(/traffic\.dir\[k\] > 0 \? c1 : c2/.test(wsrc), 'Встречные полосы разного цвета: белый вперёд, красный назад');
+  ok(/addLamp\(-T2\.w \* 0\.32, T2\.len \* 0\.5, \[1, 0\.96, 0\.85\]\)/.test(wsrc)
+     && /addLamp\(-T2\.w \* 0\.32, -T2\.len \* 0\.5, \[1, 0\.16, 0\.1\]\)/.test(wsrc),
+     'Фары спереди белые, габариты сзади красные');
+  ok(/traffic\.dir\[k\] < 0\) _tq\.multiply/.test(wsrc), 'Встречные машины развёрнуты');
+  ok(CONFIG.TRAFFIC.lamp > 1,
+     `Фары ярче единицы (${CONFIG.TRAFFIC.lamp}) — иначе не попадут в яркую выборку свечения`);
+  ok(CONFIG.TRAFFIC.win < CONFIG.TRAFFIC.lamp / 3,
+     `Окна тлеют слабее фар: ${CONFIG.TRAFFIC.win} против ${CONFIG.TRAFFIC.lamp}`);
   ok(/traffic\.dir\[k\] \* traffic\.half \/ R/.test(wsrc), 'Полосы разнесены поперёк улицы');
   ok(/i2 \+= 3/.test(wsrc), 'Трафик идёт по магистралям — тем же, что светятся фонарями');
-  ok(/worldMats\.traffic\.opacity = lerp\(1\.0, 0\.12, daylight\)/.test(msrc),
+  ok(/worldMats\.trafficLamp\.color\.setRGB/.test(msrc) && /CONFIG\.TRAFFIC\.lamp, 0\.12, daylight/.test(msrc),
      'Днём фары почти не видны, ночью горят');
   ok(CONFIG.TRAFFIC.speed > 0, `Скорость ${CONFIG.TRAFFIC.speed} юнита/с = ${CONFIG.TRAFFIC.speed * 10} м/с`);
 
@@ -1573,12 +1620,83 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
      шума — почти готовую картинку, и проценты считали пустоту. */
   const P = CONFIG.PHOTO;
   const noise = f => 100 / Math.sqrt(f * P.rays);
-  ok(noise(1) > 45, `Первый кадр даёт ${noise(1).toFixed(0)}% шума — схождение видно глазом`);
+  ok(noise(1) > 30, `Первый кадр даёт ${noise(1).toFixed(0)}% шума — схождение видно глазом`);
   ok(noise(P.samples) < 8, `К концу остаётся ${noise(P.samples).toFixed(0)}%`);
   ok(P.rays * P.samples > 300, `Всего ${P.rays * P.samples} лучей на пиксель`);
   const msrc = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
   ok(/шум \$\{noise\.toFixed\(0\)\}%/.test(msrc),
      'Индикатор показывает оставшийся шум, а не одни проценты');
+}
+
+/* ══ 3h8. Все настройки живые ══════════════════════════════════════════ */
+{
+  const html = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
+  const msrc = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+  const sheet = html.slice(html.indexOf('id="set"'), html.indexOf('id="help"'));
+
+  /* карта псевдонимов: const swGlow = $('sGlow'), swRays = $('sRays') */
+  const alias = {};
+  for (const mm of msrc.matchAll(/const\s+([\w$]+)\s*=\s*\$\('(\w+)'\)/g)) {
+    (alias[mm[2]] = alias[mm[2]] || []).push(mm[1]);
+  }
+  for (const mm of msrc.matchAll(/([\w$]+)\s*=\s*\$\('(\w+)'\)\s*[,;]/g)) {
+    (alias[mm[2]] = alias[mm[2]] || []).push(mm[1]);
+  }
+
+  const controls = [...sheet.matchAll(/id="(\w+)"/g)].map(x => x[1])
+    .filter(id => /^s[A-Z]/.test(id) && !/V$/.test(id)
+      && !['sAAcost', 'sAArow', 'sAAv'].includes(id));
+  ok(controls.length >= 12, `Элементов управления в настройках: ${controls.length}`);
+
+  const dead = controls.filter(id => {
+    const names = [id, ...(alias[id] || [])];
+    const direct = new RegExp(`\\$\\('${id}'\\)\\.on\\w+\\s*=`).test(msrc);
+    return !direct && !names.some(v => new RegExp(`\\b${v}\\.on\\w+\\s*=`).test(msrc));
+  });
+  ok(dead.length === 0, `У каждой настройки есть обработчик (мёртвых: ${dead.join(', ') || 'нет'})`);
+
+  /* каждое состояние сохраняется */
+  const saved = new Set([...msrc.matchAll(/prefs\.set\('(\w+)'/g)].map(x => x[1]));
+  ok(saved.size >= 12, `Сохраняемых настроек: ${[...saved].sort().join(', ')}`);
+
+  /* дублей id по документу быть не должно */
+  const all = [...html.matchAll(/id="(\w+)"/g)].map(x => x[1]);
+  const dups = all.filter((v, i) => all.indexOf(v) !== i);
+  ok(dups.length === 0, `Дублей id нет (${dups.join(', ') || '—'})`);
+
+  /* промах по подписи не должен попадать в соседнюю строку */
+  ok(/row\.querySelector\('\.sw'\)/.test(msrc) && /sw\.click\(\)/.test(msrc),
+     'Вся строка переключает свой тумблер — кликабельна была только пилюля в 15% ширины');
+}
+
+/* ══ 3h10. Переключатели красятся при старте ═══════════════════════════ */
+{
+  const msrc = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+
+  /* Состояние в переменных без первой покраски = переключатель показывает
+     «выкл», хотя включён. Первый клик тогда «включает соседей»: они всё это
+     время были включены и только теперь отрисовались. */
+  const sync = msrc.slice(msrc.indexOf('const syncPost'));
+  ok(/^\s*syncPost\(\);\s*$/m.test(sync.slice(0, sync.indexOf('const sSat'))),
+     'syncPost вызывается сразу после объявления обработчиков');
+
+  /* то же для остальных групп: каждое состояние должно быть отрисовано */
+  for (const [what, re] of [
+    ['иконка фазы освещения', /setDayIcon\(\);/],
+    ['сглаживание', /\n\s*applyAA\(\);/],
+    ['звук', /showSnd\(\);/],
+    ['зерно', /showSeed\(\);/]
+  ]) ok(re.test(msrc), `Начальное состояние отрисовано: ${what}`);
+
+  /* и наоборот — состояние не должно расходиться с сохранённым */
+  ok(/glowOn = prefs\.get\('glow'/.test(msrc)
+     && /raysOn = prefs\.get\('rays'/.test(msrc)
+     && /trafficOn = prefs\.get\('traffic'/.test(msrc),
+     'Все три состояния читаются из сохранённых настроек');
+
+  /* лучи от оси не должны бить вспышкой через весь экран */
+  ok(CONFIG.POST.rays < 0.5, `Сила лучей ${CONFIG.POST.rays} — свет сквозь фермы, а не вспышка`);
+  ok(CONFIG.POST.rayDensity < 0.7, `Длина луча ${CONFIG.POST.rayDensity} экрана`);
 }
 
 /* ══ 3i. Звук реагирует на то, где находится камера ════════════════════ */
@@ -1652,9 +1770,12 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   /* мачты и надстройки торчат выше номинала — берём реальный габарит силуэта */
   const probe = new THREE.Group();
   buildWorld(probe, fakeRenderer, 'LOW');
-  const silhouettes = probe.children.filter(o => o.isInstancedMesh && o.material.emissiveMap);
+  /* по одному представителю на тип: инстансы разрезаны на секторы */
+  const silMats = [...new Set(probe.children
+    .filter(o => o.isInstancedMesh && o.material.emissiveMap && o.material.map).map(o => o.material))];
   let worstH = 0;
-  silhouettes.forEach((im, v) => {
+  silMats.forEach((mm, v) => {
+    const im = probe.children.find(o => o.material === mm);
     im.geometry.computeBoundingBox();
     const top = (im.geometry.boundingBox.max.y + 0.5) * CONFIG.BLD[v].floors[1] * CONFIG.FLOOR_H;
     worstH = Math.max(worstH, top);

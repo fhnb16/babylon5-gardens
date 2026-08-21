@@ -5,7 +5,7 @@ import {
 } from './util.js';
 import {
   makeHullMaps, makeDetailTexture, makeFacade, makePanelTexture, makeSoftSprite,
-  makeBlobTexture, makeFootprintTexture, heightToNormal
+  makeBlobTexture, makeFootprintTexture, heightToNormal, makeCarWindows
 } from './textures.js';
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -275,7 +275,8 @@ function buildingGeo(type) {
 /* ═══════════════════════════════════════════════════════════════════════════
    СБОРКА МИРА
    ═══════════════════════════════════════════════════════════════════════════ */
-export const worldMats = { bld: [], nav: null, blob: null, print: null, traffic: null };
+export const worldMats = { bld: [], nav: null, blob: null, print: null,
+  trafficBody: null, trafficLamp: null, trafficMesh: null };
 let parts = [];
 let traffic = null;
 
@@ -283,7 +284,8 @@ export function disposeWorld(group) {
   for (const o of parts) { group.remove(o); deepDispose(o); }
   parts = [];
   worldMats.bld = []; worldMats.nav = null; worldMats.blob = null;
-  worldMats.print = null; worldMats.traffic = null; traffic = null;
+  worldMats.print = null; worldMats.trafficBody = null;
+  worldMats.trafficLamp = null; worldMats.trafficMesh = null; traffic = null;
 }
 
 export function buildWorld(group, renderer, quality) {
@@ -434,13 +436,29 @@ export function buildWorld(group, renderer, quality) {
   const shadows = [];   // круглые пятна: [θ, z, радиус, подъём]
   const prints = [];    // следы домов: [θ, z, ширина, глубина, поворот]
 
+  /* Инстансы режутся на сектора по дуге. Один меш на весь цилиндр отсечь
+     нельзя — он всегда в кадре, поэтому GPU считал вершины всей станции,
+     включая половину за спиной камеры. Сектор со своей сферой отсекается
+     обычным frustum culling: при обзоре 62° в кадр попадает около шестой
+     части окружности. Вызовов больше, но вершинной работы кратно меньше. */
+  const CH = CONFIG.CHUNKS;
   const instance = (geo, mat, list, fn) => {
-    const im = new THREE.InstancedMesh(geo, mat, list.length);
-    im.frustumCulled = false;
-    for (let k = 0; k < list.length; k++) fn(k, list[k][0], list[k][1], im, list[k][2]);
-    im.instanceMatrix.needsUpdate = true;
-    if (im.instanceColor) im.instanceColor.needsUpdate = true;
-    return add(im);
+    const buckets = Array.from({ length: CH }, () => []);
+    for (const item of list) {
+      const t = ((item[0] % TAU) + TAU) % TAU;
+      buckets[Math.min(CH - 1, (t / TAU * CH) | 0)].push(item);
+    }
+    const made = [];
+    for (const b of buckets) {
+      if (!b.length) continue;
+      const im = new THREE.InstancedMesh(geo, mat, b.length);
+      for (let k = 0; k < b.length; k++) fn(k, b[k][0], b[k][1], im, b[k][2]);
+      im.instanceMatrix.needsUpdate = true;
+      if (im.instanceColor) im.instanceColor.needsUpdate = true;
+      im.computeBoundingSphere();          // сфера по реальным матрицам инстансов
+      made.push(add(im));
+    }
+    return made;
   };
 
   /* ─────────── ЗДАНИЯ: 4 силуэта × свой фасад ─────────── */
@@ -509,18 +527,13 @@ export function buildWorld(group, renderer, quality) {
       ]);
       const carMat = new THREE.MeshStandardMaterial({ roughness: 0.42, metalness: 0.35 });
       const carCols = [0xb9c2cb, 0x8a94a0, 0x6d4f46, 0x39506b, 0xa8564a, 0xd8d2c4];
-      const im = new THREE.InstancedMesh(body, carMat, cars.length);
-      im.frustumCulled = false;
-      for (let k = 0; k < cars.length; k++) {
-        const [t, z, vert, r2] = cars[k];
-        surfaceQuat(t, q).multiply(qs.setFromAxisAngle(UP, vert ? 0 : Math.PI / 2));
-        m4.compose(surfacePos(t, R - 0.07, z, v3), q, sc.set(1, 1, 1));
-        im.setMatrixAt(k, m4);
-        im.setColorAt(k, natural(carCols[(r2 * carCols.length) | 0], 0.7, new THREE.Color()));
-      }
-      im.instanceMatrix.needsUpdate = true;
-      im.instanceColor.needsUpdate = true;
-      add(im);
+      instance(body, carMat, cars.map(([t, z, vert, r2]) => [t, z, { vert, r2 }]),
+        (k, t, z, m2, o) => {
+          surfaceQuat(t, q).multiply(qs.setFromAxisAngle(UP, o.vert ? 0 : Math.PI / 2));
+          m4.compose(surfacePos(t, R - 0.07, z, v3), q, sc.set(1, 1, 1));
+          m2.setMatrixAt(k, m4);
+          m2.setColorAt(k, natural(carCols[(o.r2 * carCols.length) | 0], 0.7, new THREE.Color()));
+        });
     }
   }
 
@@ -584,12 +597,18 @@ export function buildWorld(group, renderer, quality) {
   };
   const treePts = sample(W_TREE, Math.round(CONFIG.COUNT.trees[i] * Q.trees),
     () => treeH() * TR.crown * TR.spacing, true);
-  const th = new Float32Array(treePts.length), tr = new Float32Array(treePts.length);
-  const tu = new Float32Array(treePts.length);          // подъём по склону холма
-  for (let k = 0; k < treePts.length; k++) {
-    const H = treePts[k][2] / (TR.crown * TR.spacing);   // восстанавливаем высоту
-    th[k] = H * TR.trunk; tr[k] = H * TR.crown;
-    tu[k] = relief(treePts[k][0], treePts[k][1]);
+  const SZ = CONFIG.SEASONS[CONFIG.SEASON] || CONFIG.SEASONS.summer;
+  /* Данные дерева кладём В САМ элемент списка, а не в параллельный массив по
+     индексу: инстансы режутся на секторы, и колбэк получает номер ВНУТРИ
+     сектора — по глобальному индексу читалось бы чужое дерево. */
+  for (const item of treePts) {
+    const H = item[2] / (TR.crown * TR.spacing);          // восстанавливаем высоту
+    item[2] = {
+      H, th: H * TR.trunk, tr: H * TR.crown,
+      up: relief(item[0], item[1]),
+      spin: rnd() * TAU, squash: 0.85 + rnd() * 0.45,
+      fall: rnd() < SZ.accent, tint: rnd()
+    };
   }
 
   /* Комель ствола темнеет к земле — та же причина, что и у цоколя дома:
@@ -608,27 +627,26 @@ export function buildWorld(group, renderer, quality) {
     trunkGeo,
     new THREE.MeshStandardMaterial({ color: 0x6b5236, roughness: 1, vertexColors: true }),
     treePts,
-    (k, t, z, im) => {
-      const hs = th[k] / TR.trunk;                    // полная высота дерева
-      m4.compose(surfacePos(t, R - tu[k] - th[k] / 2, z, v3), surfaceQuat(t, q), sc.set(hs, th[k], hs));
+    (k, t, z, im, o) => {
+      m4.compose(surfacePos(t, R - o.up - o.th / 2, z, v3), surfaceQuat(t, q),
+        sc.set(o.H, o.th, o.H));
       im.setMatrixAt(k, m4);
     });
 
-  const SZ = CONFIG.SEASONS[CONFIG.SEASON] || CONFIG.SEASONS.summer;
   const FOL = CONFIG.FOLIAGE, det = Q.foliage;
   const crownMat = new THREE.MeshStandardMaterial({
     roughness: 0.9, flatShading: true, vertexColors: true
   });
   patchWindMaterial(crownMat);
   instance(foliageGeo(det, mulberry32(CONFIG.SEED + 5), FOL.wobble, FOL.dither),
-    crownMat, treePts, (k, t, z, im) => {
-    const r = tr[k];
-    surfaceQuat(t, q).multiply(qs.setFromAxisAngle(UP, rnd() * TAU));
-    m4.compose(surfacePos(t, R - tu[k] - (th[k] + r * 0.55), z, v3), q, sc.set(r, r * (0.85 + rnd() * 0.45), r));
+    crownMat, treePts, (k, t, z, im, o) => {
+    surfaceQuat(t, q).multiply(qs.setFromAxisAngle(UP, o.spin));
+    m4.compose(surfacePos(t, R - o.up - (o.th + o.tr * 0.55), z, v3), q,
+      sc.set(o.tr, o.tr * o.squash, o.tr));
     im.setMatrixAt(k, m4);
-    im.setColorAt(k, natural(rnd() < SZ.accent ? pick(rnd, SZ.accents) : pick(rnd, SZ.greens),
-      CONFIG.SATURATION, new THREE.Color()));
-    shadows.push([t, z, r * 1.5, tu[k]]);
+    const pal = o.fall ? SZ.accents : SZ.greens;
+    im.setColorAt(k, natural(pal[(o.tint * pal.length) | 0], CONFIG.SATURATION, new THREE.Color()));
+    shadows.push([t, z, { r: o.tr * 1.5, up: o.up }]);
   });
 
   /* ─────────── ТРАВА У КОМЛЕЙ ───────────
@@ -658,10 +676,10 @@ export function buildWorld(group, renderer, quality) {
       color: 0x5c8a3c, roughness: 1, side: THREE.DoubleSide, flatShading: true
     });
     patchWindMaterial(tuftMat);
-    instance(tuftGeo, tuftMat, treePts, (k, t, z, im) => {
-      const s = 0.6 + treePts[k][2] * 1.4;
-      surfaceQuat(t, q).multiply(qs.setFromAxisAngle(UP, rnd() * TAU));
-      m4.compose(surfacePos(t, R - tu[k], z, v3), q, sc.set(s, s, s));
+    instance(tuftGeo, tuftMat, treePts, (k, t, z, im, o) => {
+      const s = CONFIG.TREE.tuft * (0.7 + o.H * 0.5);
+      surfaceQuat(t, q).multiply(qs.setFromAxisAngle(UP, o.spin));
+      m4.compose(surfacePos(t, R - o.up, z, v3), q, sc.set(s, s, s));
       im.setMatrixAt(k, m4);
     });
   }
@@ -685,7 +703,7 @@ export function buildWorld(group, renderer, quality) {
         sc.set(s, s * BS.flat, s));
       im.setMatrixAt(k, m4);
       im.setColorAt(k, natural(pick(rnd, bushCols), CONFIG.SATURATION, new THREE.Color()));
-      shadows.push([t, z, s * 1.3, up]);
+      shadows.push([t, z, { r: s * 1.3, up }]);
     });
 
   /* ─────────── КОНТАКТНЫЕ ТЕНИ ───────────
@@ -702,18 +720,15 @@ export function buildWorld(group, renderer, quality) {
   worldMats.blob = blobMat;
 
   /* на LOW следы домов не строим — они идут круглыми пятнами вместе с зеленью */
-  if (!Q.footprint) for (const [t, z, w2, d2] of prints) shadows.push([t, z, Math.max(w2, d2) * 0.75, 0]);
-
-  const blobs = new THREE.InstancedMesh(decal, blobMat, shadows.length);
-  blobs.frustumCulled = false;
-  blobs.renderOrder = 1;
-  for (let k = 0; k < shadows.length; k++) {
-    const [t, z, r, up] = shadows[k];
-    m4.compose(surfacePos(t, R - up - 0.04, z, v3), surfaceQuat(t, q), sc.set(r * 2, 1, r * 2));
-    blobs.setMatrixAt(k, m4);
+  if (!Q.footprint) for (const [t, z, w2, d2] of prints) {
+    shadows.push([t, z, { r: Math.max(w2, d2) * 0.75, up: 0 }]);
   }
-  blobs.instanceMatrix.needsUpdate = true;
-  add(blobs);
+
+  for (const im of instance(decal, blobMat, shadows, (k, t, z, m2, info) => {
+    m4.compose(surfacePos(t, R - info.up - 0.04, z, v3), surfaceQuat(t, q),
+      sc.set(info.r * 2, 1, info.r * 2));
+    m2.setMatrixAt(k, m4);
+  })) im.renderOrder = 1;
 
   if (Q.footprint) {
     const printMat = new THREE.MeshBasicMaterial({
@@ -721,56 +736,78 @@ export function buildWorld(group, renderer, quality) {
       depthWrite: false, fog: true
     });
     worldMats.print = printMat;
-    const pm = new THREE.InstancedMesh(decal, printMat, prints.length);
-    pm.frustumCulled = false;
-    pm.renderOrder = 1;
     const P = CONFIG.PRINT;
-    for (let k = 0; k < prints.length; k++) {
-      const [t, z, w2, d2, spin] = prints[k];
-      const along = spin % 2;                     // куда развёрнут дом
-      surfaceQuat(t, q).multiply(qs.setFromAxisAngle(UP, spin * Math.PI / 2));
+    const list = prints.map(([t, z, w2, d2, spin]) => [t, z, { w: w2, d: d2, spin }]);
+    for (const im of instance(decal, printMat, list, (k, t, z, m2, o) => {
+      const along = o.spin % 2;                   // куда развёрнут дом
+      surfaceQuat(t, q).multiply(qs.setFromAxisAngle(UP, o.spin * Math.PI / 2));
       m4.compose(surfacePos(t, R - 0.05, z, v3), q,
-        sc.set((along ? d2 : w2) * P.across, 1, (along ? w2 : d2) * P.along));
-      pm.setMatrixAt(k, m4);
-    }
-    pm.instanceMatrix.needsUpdate = true;
-    add(pm);
+        sc.set((along ? o.d : o.w) * P.across, 1, (along ? o.w : o.d) * P.along));
+      m2.setMatrixAt(k, m4);
+    })) im.renderOrder = 1;
   }
 
   /* ─────────── ТРАФИК ───────────
-     Огни машин на магистралях. Магистраль — каждая третья улица сетки, та же,
-     что светится фонарями. Точки едут вдоль полосы, цвет зависит от
-     направления: вперёд белый, назад красный. Позиции обновляет
-     updateTraffic — по одному буферу на все огни. */
+     Машины на магистралях: кузов с остеклением и отдельные лампы. Свет
+     разделён по силе — окна еле тлеют, фары бьют. Точки заменены мешами:
+     точка не показывает, куда машина едет, а фара показывает.
+     Материал ламп базовый и с цветом ярче единицы: он не зависит от
+     освещения и честно попадает в яркую выборку свечения. */
   {
     const lanes = [];
     for (let i2 = 0; i2 < C.cols; i2 += 3) {
       if (!cellUsable(i2, Math.floor(C.rows / 2))) continue;
-      const t = cityCenter(i2, 0).t - (BLK.stepT / 2) / R;
-      lanes.push(t);
+      lanes.push(cityCenter(i2, 0).t - (BLK.stepT / 2) / R);
     }
     if (lanes.length) {
       const per = CONFIG.TRAFFIC.perLane;
       const n = lanes.length * per;
-      const pos = new Float32Array(n * 3), col = new Float32Array(n * 3);
-      traffic = { lanes, per, dir: new Float32Array(n), off: new Float32Array(n), pos, half: BLK.street * 0.22 };
-      const c1 = new THREE.Color(0xfff0cf), c2 = new THREE.Color(0xff4b32);
+      const T2 = CONFIG.TRAFFIC;
+
+      const bodyGeo = mergeGeos([
+        rod(T2.w, T2.h * 0.62, T2.len, 0, T2.h * 0.31, 0),
+        rod(T2.w * 0.86, T2.h * 0.5, T2.len * 0.52, 0, T2.h * 0.72, -T2.len * 0.04)
+      ]);
+      worldMats.trafficBody = new THREE.MeshStandardMaterial({
+        color: 0x2c3340, roughness: 0.35, metalness: 0.5,
+        emissiveMap: makeCarWindows(), emissive: 0xffffff, emissiveIntensity: 0
+      });
+
+      /* фары спереди, габариты сзади — цвет в вершинах, яркость в материале */
+      const lampParts = [];
+      const lampCol = [];
+      const addLamp = (x, z, col) => {
+        const g0 = rod(T2.w * 0.24, T2.h * 0.2, 0.06, x, T2.h * 0.34, z);
+        lampParts.push(g0);
+        for (let k = 0; k < g0.attributes.position.count; k++) lampCol.push(...col);
+      };
+      addLamp(-T2.w * 0.32, T2.len * 0.5, [1, 0.96, 0.85]);
+      addLamp(T2.w * 0.32, T2.len * 0.5, [1, 0.96, 0.85]);
+      addLamp(-T2.w * 0.32, -T2.len * 0.5, [1, 0.16, 0.1]);
+      addLamp(T2.w * 0.32, -T2.len * 0.5, [1, 0.16, 0.1]);
+      const lampGeo = mergeGeos(lampParts);
+      lampGeo.setAttribute('color', new THREE.Float32BufferAttribute(lampCol, 3));
+      worldMats.trafficLamp = new THREE.MeshBasicMaterial({
+        vertexColors: true, toneMapped: false, color: new THREE.Color(0, 0, 0)
+      });
+
+      const bodies = new THREE.InstancedMesh(bodyGeo, worldMats.trafficBody, n);
+      const lamps = new THREE.InstancedMesh(lampGeo, worldMats.trafficLamp, n);
+      bodies.frustumCulled = lamps.frustumCulled = false;
+      const tint = [0x9aa4b0, 0x6f7b88, 0x8a5a4e, 0x40566e, 0xb4b0a6, 0x55606c];
+      for (let k = 0; k < n; k++) {
+        bodies.setColorAt(k, natural(tint[(rnd() * tint.length) | 0], 0.75, new THREE.Color()));
+      }
+      traffic = {
+        lanes, per, bodies, lamps,
+        dir: new Float32Array(n), off: new Float32Array(n), half: C.street * 0.22
+      };
       for (let k = 0; k < n; k++) {
         traffic.dir[k] = k % 2 ? 1 : -1;
         traffic.off[k] = rnd() * CONFIG.L;
-        const c = traffic.dir[k] > 0 ? c1 : c2;
-        col[k * 3] = c.r; col[k * 3 + 1] = c.g; col[k * 3 + 2] = c.b;
       }
-      const geo = new THREE.BufferGeometry();
-      geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
-      geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
-      worldMats.traffic = new THREE.PointsMaterial({
-        size: 0.75, map: makeSoftSprite(0.6), vertexColors: true, transparent: true,
-        opacity: 0, depthWrite: false, blending: THREE.AdditiveBlending
-      });
-      traffic.points = new THREE.Points(geo, worldMats.traffic);
-      traffic.points.frustumCulled = false;
-      add(traffic.points);
+      worldMats.trafficMesh = bodies;
+      add(bodies); add(lamps);
       updateTraffic(0);
     }
   }
@@ -814,20 +851,30 @@ export function uvSelfTest(geo, flip) {
 }
 
 
-/** Огни машин едут вдоль магистралей. Один буфер на все — обновляется целиком. */
+/** Кузова и лампы — для переключателя видимости */
+export const trafficMeshes = () => traffic ? [traffic.bodies, traffic.lamps] : [];
+
+/** Машины едут вдоль магистралей. Кузов и лампы делят одну матрицу. */
 export function updateTraffic(dt) {
   if (!traffic) return;
   const R = CONFIG.R, L = CONFIG.L, HL = L / 2;
   const sp = CONFIG.TRAFFIC.speed;
-  const p = traffic.pos, n = traffic.dir.length;
+  const n = traffic.dir.length;
   for (let k = 0; k < n; k++) {
     traffic.off[k] = (traffic.off[k] + traffic.dir[k] * sp * dt + L) % L;
     const z = traffic.off[k] - HL;
     /* встречные полосы разнесены поперёк улицы */
     const t = traffic.lanes[(k / traffic.per) | 0] + traffic.dir[k] * traffic.half / R;
-    p[k * 3] = Math.sin(t) * (R - 0.35);
-    p[k * 3 + 1] = Math.cos(t) * (R - 0.35);
-    p[k * 3 + 2] = z;
+    _tq.copy(surfaceQuat(t, _tq2));
+    if (traffic.dir[k] < 0) _tq.multiply(_tqs.setFromAxisAngle(_tup, Math.PI));
+    _tm.compose(surfacePos(t, R - CONFIG.TRAFFIC.h * 0.5, z, _tv), _tq, _tone);
+    traffic.bodies.setMatrixAt(k, _tm);
+    traffic.lamps.setMatrixAt(k, _tm);
   }
-  traffic.points.geometry.attributes.position.needsUpdate = true;
+  traffic.bodies.instanceMatrix.needsUpdate = true;
+  traffic.lamps.instanceMatrix.needsUpdate = true;
 }
+
+const _tm = new THREE.Matrix4(), _tq = new THREE.Quaternion(), _tq2 = new THREE.Quaternion();
+const _tqs = new THREE.Quaternion(), _tv = new THREE.Vector3();
+const _tup = new THREE.Vector3(0, 1, 0), _tone = new THREE.Vector3(1, 1, 1);
