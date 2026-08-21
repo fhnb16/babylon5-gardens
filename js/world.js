@@ -834,7 +834,7 @@ export function buildWorld(group, renderer, quality) {
   });
   add(new THREE.Points(ng, worldMats.nav));
 
-  return { panel, panelNormal, drawn: sceneParts.length };
+  return { panel, panelNormal, albedo, drawn: sceneParts.length };
 }
 
 /** Самотест ориентации UV: сверяем реальные UV геометрии с мировым θ */

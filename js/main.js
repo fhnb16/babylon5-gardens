@@ -8,7 +8,7 @@ import { ctl, isMobile, initControls, updateControls, syncFromCamera, resetStick
 import { audio, startAudio, updateAudio, setVolume, setEnabled, suspendAudio } from './audio.js';
 import { trace, startTrace, traceStep, stopTrace,
   setPost, setSunScreen, resizePost, renderFrame,
-  setTraceDebug, DEBUG_NAMES, setAmbientShare } from './photo.js';
+  setTraceDebug, DEBUG_NAMES, setAmbientShare, setHullRef } from './photo.js';
 
 const $ = id => document.getElementById(id);
 const stage = $('stage');
@@ -160,6 +160,7 @@ function rebuild() {
   if (clouds) clouds.visible = q !== 'LOW';
   const res = buildWorld(worldGroup, renderer, q);
   panel = res.panel;
+  hullAlbedoTex = res.albedo || null;
   buildStructures(worldGroup, renderer, q, panel, res.panelNormal);
 }
 
@@ -240,6 +241,8 @@ function applyPalette(ph) {
    переводятся в мировые — посадочная точка честно едет с вращением
    ═══════════════════════════════════════════════════════════════════════════ */
 const fly = {
+  a0: 0, a1: 0, da: 0, r0: 0, r1: 0, z0: 0, z1: 0, rMid: 20,
+  aim: new THREE.Vector3(),
   on: false, t: 0, dur: 3,
   p0: new THREE.Vector3(), p1: new THREE.Vector3(), p2: new THREE.Vector3(),
   look: new THREE.Vector3(), q0: new THREE.Quaternion(), rot0: 0
@@ -247,7 +250,7 @@ const fly = {
 const _qA = new THREE.Quaternion(), _qB = new THREE.Quaternion();
 const _upA = new THREE.Vector3();
 const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _Z = new THREE.Vector3(0, 0, 1);
-const _vAudio = new THREE.Vector3();
+const _vAudio = new THREE.Vector3(), _v3 = new THREE.Vector3();
 
 function goTo(i, instant = false) {
   const tp = CONFIG.TP[i];
@@ -266,43 +269,78 @@ function goTo(i, instant = false) {
   fly.p2.copy(target);
   fly.look.copy(look);
 
-  /* дуга: контрольная точка приподнята к оси */
-  fly.p1.addVectors(fly.p0, fly.p2).multiplyScalar(0.5);
-  const rad = Math.hypot(fly.p1.x, fly.p1.y);
-  if (rad > 1e-3) {
-    const nr = Math.max(CONFIG.FLY.arcMinR, rad - CONFIG.FLY.arc);
-    fly.p1.x *= nr / rad; fly.p1.y *= nr / rad;
-  }
+  /* Траектория ведётся в цилиндрических координатах: угол по кратчайшей
+     дуге, радиус с выносом к середине. Между башней (r = 28) и трубой
+     (r = 3.4) объём пуст, поэтому путь через этот коридор свободен ПО
+     ПОСТРОЕНИЮ — проверять столкновения не с чем. Прежняя почти прямая
+     хорда шла впритирку к полу и таранила застройку. */
+  const F = CONFIG.FLY;
+  fly.a0 = Math.atan2(fly.p0.x, fly.p0.y);
+  fly.a1 = Math.atan2(fly.p2.x, fly.p2.y);
+  /* кратчайшее направление обхода */
+  fly.da = ((fly.a1 - fly.a0 + Math.PI) % TAU + TAU) % TAU - Math.PI;
+  fly.r0 = Math.hypot(fly.p0.x, fly.p0.y);
+  fly.r1 = Math.hypot(fly.p2.x, fly.p2.y);
+  fly.z0 = fly.p0.z; fly.z1 = fly.p2.z;
+  /* середина коридора, но не дальше того, где мы и так летим */
+  fly.rMid = clamp(Math.min(fly.r0, fly.r1, CONFIG.R * F.corridor),
+    CONFIG.SUN.r + CONFIG.SUN.clear + 2, CONFIG.TOWER ? CONFIG.R - 8 : CONFIG.R - 8);
 
-  fly.dur = clamp(CONFIG.FLY.min + fly.p0.distanceTo(fly.p2) / 90, CONFIG.FLY.min, CONFIG.FLY.max);
-  fly.q0.copy(camera.quaternion);
+  /* длительность — по фактической длине пути, а не по хорде */
+  const arc = Math.abs(fly.da) * (fly.r0 + fly.r1) * 0.5;
+  const len = Math.hypot(arc, fly.z1 - fly.z0, fly.r1 - fly.r0);
+  fly.dur = clamp(F.min + len / F.speed, F.min, F.max);
+
+  /* цель взгляда стартует там, куда камера смотрит сейчас: иначе на первом
+     же кадре она рывком развернётся к пункту назначения */
+  camera.getWorldDirection(_v2);
+  fly.aim.copy(camera.position).addScaledVector(_v2, 60);
+  worldGroup.worldToLocal(fly.aim);
+
   fly.rot0 = worldGroup.rotation.z;
   fly.t = 0; fly.on = true;
   resetStick();
 }
 
+/** Точка траектории в локальных координатах мира */
+function flyPoint(e, out) {
+  const bump = Math.sin(Math.PI * clamp(e, 0, 1));   // 0 на концах, 1 в середине
+  const a = fly.a0 + fly.da * e;
+  const rLine = lerp(fly.r0, fly.r1, e);
+  const r = rLine + (fly.rMid - rLine) * bump * CONFIG.FLY.pull;
+  return out.set(Math.sin(a) * r, Math.cos(a) * r, lerp(fly.z0, fly.z1, e));
+}
+
 function updateFly(dt) {
   if (!fly.on) return;
   fly.t = Math.min(1, fly.t + dt / fly.dur);
-  const e = easeInOut(fly.t), it = 1 - e;
+  const e = easeInOut(fly.t);
   worldGroup.updateMatrixWorld();
 
-  _v.set(
-    it * it * fly.p0.x + 2 * it * e * fly.p1.x + e * e * fly.p2.x,
-    it * it * fly.p0.y + 2 * it * e * fly.p1.y + e * e * fly.p2.y,
-    it * it * fly.p0.z + 2 * it * e * fly.p1.z + e * e * fly.p2.z
-  );
+  flyPoint(e, _v);
   worldGroup.localToWorld(_v);
   camera.position.copy(_v);
 
-  _v2.copy(fly.look); worldGroup.localToWorld(_v2);
+  /* Куда смотреть: сперва вперёд по курсу, к концу — в заданную точку.
+     Цель ещё и догоняется экспоненциально, поэтому повороты выходят
+     плавными: резкая смена направления не дёргает камеру, а закладывает
+     дугу. Прежний slerp между стартовым и конечным кватернионом вращал
+     камеру равномерно независимо от того, куда она в этот момент летит. */
+  flyPoint(Math.min(1, e + CONFIG.FLY.lead), _v3);
+  _v2.lerpVectors(_v3, fly.look, smoothstep01(0.45, 1, e));
+  fly.aim.lerp(_v2, 1 - Math.exp(-dt * CONFIG.FLY.turn));
+
+  _v2.copy(fly.aim); worldGroup.localToWorld(_v2);
   stationUp(_v, _upA);
-  aimAt(_v, _v2, _upA, _qB);
-  _qA.setFromAxisAngle(_Z, worldGroup.rotation.z - fly.rot0).multiply(fly.q0);
-  camera.quaternion.slerpQuaternions(_qA, _qB, e);
+  aimAt(_v, _v2, _upA, camera.quaternion);
 
   if (fly.t >= 1) { fly.on = false; syncFromCamera(camera); }
 }
+
+const smoothstep01 = (a, b, x) => {
+  const t = clamp((x - a) / (b - a), 0, 1);
+  return t * t * (3 - 2 * t);
+};
 function cancelFly() { fly.on = false; setTour(false); syncFromCamera(camera); }
 const stopTracing = () => { if (trace.active) setTrace(false); };
 
@@ -774,6 +812,7 @@ let dprIndex = 0, dprCap = 0, paused = false, frames = 0, winT = 0, upT = 0, wor
 const capForQuality = () => Math.min(CONFIG.QUALITY[currentQuality()].dpr, isMobile ? 3 : 4);
 const startDpr = () => quality === 'AUTO' && isMobile ? Math.min(2, capForQuality()) : capForQuality();
 let ssaa = 1, shotBoost = 1, aaLabel = 'MSAA', windBase = 1;
+let hullAlbedoTex = null;
 let glowOn = false, raysOn = false, trafficOn = true;
 /* Множитель суперсэмплинга применяется ПОВЕРХ плотности экрана. Раньше здесь
    стоял min(devicePixelRatio, шаг) — на обычном мониторе 1× он намертво
@@ -832,6 +871,8 @@ function loop() {
   updateStructures(dt);
   if (trafficOn) updateTraffic(dt);
   setSunScreen(camera, worldGroup);
+  /* отражениям нужно альбедо корпуса и текущий угол поворота мира */
+  setHullRef(hullAlbedoTex, worldGroup.rotation.z);
 
   /* Авто-режим гонит фазу по кругу непрерывно: день сам перетекает в закат,
      закат в ночь, ночь снова в день. Ручное переключение двигает цель на одну

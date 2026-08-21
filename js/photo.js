@@ -61,6 +61,9 @@ const AO_FRAG = `
   uniform float uAoNear, uAoFar, uDebug;
   uniform vec3 uSunA, uSunB, uSunU, uSunV;   // труба-солнце в видовых координатах
   uniform float uSunR, uShadow, uAmbient;
+  uniform mat4 uInvView;                     // видовые → мировые
+  uniform sampler2D tHull;                   // альбедо корпуса
+  uniform float uHullR, uHullL, uWorldRot, uSunGlow;
 
   vec3 viewPos( vec2 uv, float d ) {
     vec4 c = uProjInv * vec4( uv * 2.0 - 1.0, d * 2.0 - 1.0, 1.0 );
@@ -180,48 +183,60 @@ const AO_FRAG = `
       }
       if ( wsum > 0.0 ) vis = lit / wsum;
 
-      /* ─── Отражения ───
-         Гладкие поверхности (вода, стекло, металл) отражают. Направление
-         считается точно, а вот попадание ищется маршем по буферу глубины:
-         шаг растёт, потому что вдали точность всё равно не нужна. Френель
-         даёт то, что видно в жизни: под острым углом отражает всё. */
+      /* ─── Отражения: пересечение с настоящими телами ───
+         Отражать здесь может только то, что есть в цилиндре: труба-солнце и
+         борт станции. Оба — цилиндры вдоль оси, и луч пересекается с ними
+         ФОРМУЛОЙ, а не маршем по экрану. Экранный марш давал чёрные пятна
+         там, где луч уходил за кадр, хотя борт в той стороне есть. */
       float smoothness = 1.0 - rough;
       if ( smoothness > 0.25 ) {
         vec3 V = normalize( P );
         vec3 Rd = reflect( V, N );
-        vec3 pos = P;
-        float st = uRefStep * ( 0.6 + 0.8 * hash( vec3( vUv * uRes, uSeed ) ) );
-        for ( int i = 0; i < REF_STEPS; i ++ ) {
-          pos += Rd * st;
-          vec4 rp = uProj * vec4( pos, 1.0 );
-          vec2 ruv = ( rp.xy / rp.w ) * 0.5 + 0.5;
-          if ( ruv.x < 0.0 || ruv.x > 1.0 || ruv.y < 0.0 || ruv.y > 1.0 ) break;
-          float rd = texture2D( tDepth, ruv ).x;
-          if ( rd < 1.0 ) {
-            vec3 hp = viewPos( ruv, rd );
-            float gap = hp.z - pos.z;
-            if ( gap > 0.0 && gap < st * 2.0 ) {
-              /* Попадание засчитываем, только если оно ДАЛЬШЕ отражающей
-                 точки: иначе луч упёрся в то, что стоит перед ней, и в воду
-                 попадает изнанка чужого объекта — чёрное пятно. */
-              if ( hp.z > P.z ) break;
-              /* Луч не должен «отражать» соседний пиксель: при почти
-                 касательном взгляде цель оказывается в полупикселе от
-                 источника, и вода начинает отражать саму себя. */
-              if ( length( ruv - vUv ) * uRes.y < 2.0 ) break;
-              float fres = pow( 1.0 - max( 0.0, dot( -V, N ) ), 4.0 );
-              /* к краю экрана отражение обрывается — гасим, чтобы не резало */
-              vec2 e = abs( ruv - 0.5 ) * 2.0;
-              float edge = 1.0 - max( e.x, e.y );
-              /* и гасим по пройденному пути: дальние попадания ненадёжны */
-              float reach = 1.0 - float( i ) / float( REF_STEPS );
-              refl = texture2D( tBeauty, ruv ).rgb * smoothness
-                   * ( 0.05 + 0.95 * fres ) * uReflect
-                   * smoothstep( 0.0, 0.2, edge ) * reach;
-              break;
+
+        /* в мировые координаты: тела заданы там */
+        vec3 wo = ( uInvView * vec4( P, 1.0 ) ).xyz;
+        vec3 wd = normalize( ( uInvView * vec4( Rd, 0.0 ) ).xyz );
+
+        vec3 hitCol = vec3( 0.0 );
+        float got = 0.0;
+
+        /* труба-солнце: ближний корень, луч идёт снаружи внутрь */
+        float a = dot( wd.xy, wd.xy );
+        if ( a > 1e-6 ) {
+          float b = 2.0 * dot( wo.xy, wd.xy );
+          float c0 = dot( wo.xy, wo.xy ) - uSunR * uSunR;
+          float disc = b * b - 4.0 * a * c0;
+          if ( disc > 0.0 ) {
+            float tS = ( -b - sqrt( disc ) ) / ( 2.0 * a );
+            if ( tS > 0.02 && abs( wo.z + wd.z * tS ) < uHullL * 0.5 ) {
+              hitCol = vec3( 1.0, 0.94, 0.78 ) * uSunGlow;
+              got = 1.0;
             }
           }
-          st *= 1.35;
+
+          /* борт станции: дальний корень, мы внутри цилиндра */
+          if ( got < 0.5 ) {
+            float cH = dot( wo.xy, wo.xy ) - uHullR * uHullR;
+            float dH = b * b - 4.0 * a * cH;
+            if ( dH > 0.0 ) {
+              float tH = ( -b + sqrt( dH ) ) / ( 2.0 * a );
+              vec3 hw = wo + wd * tH;
+              if ( tH > 0.02 && abs( hw.z ) < uHullL * 0.5 ) {
+                /* Цвет берём из альбедо корпуса по UV точки попадания.
+                   Мир вращается — угол снимаем поворотом назад. */
+                float th = atan( hw.x, hw.y ) - uWorldRot;
+                float uu = fract( 0.5 - th / 6.28318531 );
+                float vv = hw.z / uHullL + 0.5;
+                hitCol = texture2D( tHull, vec2( uu, vv ) ).rgb;
+                got = 1.0;
+              }
+            }
+          }
+        }
+
+        if ( got > 0.5 ) {
+          float fres = pow( 1.0 - max( 0.0, dot( -V, N ) ), 4.0 );
+          refl = hitCol * smoothness * ( 0.05 + 0.95 * fres ) * uReflect;
         }
       }
 
@@ -381,7 +396,11 @@ export function startTrace(renderer, scene, camera, windUniform) {
       uSunA: { value: new THREE.Vector3() }, uSunB: { value: new THREE.Vector3() },
       uSunU: { value: new THREE.Vector3() }, uSunV: { value: new THREE.Vector3() },
       uSunR: { value: CONFIG.SUN.r }, uShadow: { value: P.shadow },
-      uAmbient: { value: 0.22 }
+      uAmbient: { value: 0.22 },
+      uInvView: { value: new THREE.Matrix4() },
+      tHull: { value: null }, uHullR: { value: CONFIG.R },
+      uHullL: { value: CONFIG.L }, uWorldRot: { value: 0 },
+      uSunGlow: { value: P.sunGlow }
     }
   });
   showMat = new THREE.ShaderMaterial({
@@ -450,6 +469,9 @@ export function traceStep() {
   aoMat.uniforms.uSunU.value.copy(_sunU);
   aoMat.uniforms.uSunV.value.copy(_sunV);
   aoMat.uniforms.uAmbient.value = ambientShare;
+  aoMat.uniforms.uInvView.value.copy(C.matrixWorld);
+  aoMat.uniforms.uWorldRot.value = traceWorldRot;
+  aoMat.uniforms.tHull.value = hullAlbedo;
 
   /* трассировка затенения и накопление */
   const src = accum[n % 2 === 0 ? 1 : 0], dst = accum[n % 2 === 0 ? 0 : 1];
@@ -740,7 +762,11 @@ const _sunF = new THREE.Vector3();
 const _sunP = new THREE.Vector3(), _sunAxis = new THREE.Vector3();
 const _sunU = new THREE.Vector3(), _sunV = new THREE.Vector3();
 const _sunScreen = new THREE.Vector3();
-let ambientShare = 0.22;
+let ambientShare = 0.22, hullAlbedo = null, traceWorldRot = 0;
+
+/** Альбедо корпуса и текущий поворот мира: по ним трассировка находит,
+    что отражается в воде, без всякого экранного пространства. */
+export function setHullRef(tex2, rot) { hullAlbedo = tex2; traceWorldRot = rot; }
 
 /** Доля рассеянного света: столько остаётся в тени от осевого источника */
 export function setAmbientShare(v) { ambientShare = v; }

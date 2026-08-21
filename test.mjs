@@ -1337,15 +1337,31 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   ok(P.bounce > 0, `Сила переотражения ${P.bounce}`);
 
   /* отражения */
+  /* Отражения считаются пересечением с НАСТОЯЩИМИ телами, а не маршем по
+     экрану: в цилиндре отражать может только труба-солнце и борт станции,
+     оба — цилиндры вдоль оси, и пересечение решается формулой. Экранный
+     марш давал чёрные пятна там, где луч уходил за кадр. */
   ok(/vec3 Rd = reflect\( V, N \)/.test(src), 'Отражённый луч считается точно');
-  ok(/for \( int i = 0; i < REF_STEPS; i \+\+ \)/.test(src),
-     `Марш отражения по буферу глубины, ${P.refSteps} шагов`);
-  ok(/st \*= 1\.35/.test(src), 'Шаг марша растёт: вдали точность не нужна');
+  ok(!/for \( int i = 0; i < REF_STEPS; i \+\+ \)/.test(src),
+     'Марша по буферу глубины не осталось');
+  ok(/float disc = b \* b - 4\.0 \* a \* c0/.test(src), 'Пересечение с трубой-солнцем решается формулой');
+  ok(/float dH = b \* b - 4\.0 \* a \* cH/.test(src), 'Пересечение с бортом станции — тоже');
+  ok(/\( -b - sqrt\( disc \) \)/.test(src) && /\( -b \+ sqrt\( dH \) \)/.test(src),
+     'У трубы берётся ближний корень, у борта дальний: внутрь цилиндра мы смотрим изнутри');
+  ok(/texture2D\( tHull, vec2\( uu, vv \) \)/.test(src),
+     'Цвет борта берётся из альбедо корпуса по точке попадания');
+  ok(/atan\( hw\.x, hw\.y \) - uWorldRot/.test(src),
+     'Вращение мира снимается поворотом назад — иначе отражение поедет вместе со станцией');
+  ok(/abs\( hw\.z \) < uHullL \* 0\.5/.test(src), 'За торцы отражение не уходит');
   ok(/pow\( 1\.0 - max\( 0\.0, dot\( -V, N \) \), 4\.0 \)/.test(src),
      'Френель: под острым углом отражает сильнее — как в жизни');
-  ok(/smoothstep\( 0\.0, 0\.2, edge \)/.test(src),
-     'У края экрана отражение гаснет, а не обрывается');
-  ok(P.reflect > 0 && P.refStep > 0, `Отражения: сила ${P.reflect}, шаг ${P.refStep}`);
+  ok(P.reflect > 0 && P.sunGlow > 1, `Отражения: сила ${P.reflect}, труба ярче единицы (${P.sunGlow})`);
+
+  const psrc3 = readFileSync(new URL('./js/photo.js', import.meta.url), 'utf8');
+  ok(/export function setHullRef/.test(psrc3), 'Альбедо корпуса и угол мира передаются трассировке');
+  const msrc3 = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+  ok(/setHullRef\(hullAlbedoTex, worldGroup\.rotation\.z\)/.test(msrc3),
+     'Угол берётся текущий, каждый кадр');
 
   /* шероховатость берётся из альфы кадра, а не из отдельного прохода */
   ok(/float rough = beauty\.a/.test(src), 'Шероховатость читается из альфа-канала кадра');
@@ -1807,8 +1823,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
      'Есть режим шероховатости — по нему видно, откуда берутся отражения');
   ok(/vec3\( 0\.1, 0\.9, 0\.2 \)/.test(psrc) && /vec3\( 0\.9, 0\.15, 0\.1 \)/.test(psrc),
      'Есть карта попаданий луча: зелёный — нашёл цель, красный — ушёл за экран');
-  ok(/length\( ruv - vUv \) \* uRes\.y < 2\.0/.test(psrc),
-     'Луч не отражает соседний пиксель: при касательном взгляде вода отражала саму себя');
+
 
   ok(/export function setTraceDebug/.test(psrc) && /trace\.sample = 0/.test(psrc),
      'Смена режима сбрасывает накопление: иначе поверх старого кадра ляжет новый');
@@ -1957,11 +1972,12 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   ok(/\(CONFIG\.QUALITY\[currentQuality\(\)\] \|\| CONFIG\.QUALITY\.HIGH\)\.lights/.test(msrc),
      'Число берётся из пресета, а не из проверки на LOW');
 
-  /* отражения не должны давать чёрных пятен */
-  ok(/if \( hp\.z > P\.z \) break/.test(psrc),
-     'Попадание ближе отражающей точки отбрасывается — иначе в воду попадает изнанка чужого объекта');
-  ok(/float reach = 1\.0 - float\( i \) \/ float\( REF_STEPS \)/.test(psrc),
-     'Дальние попадания гасятся: чем длиннее марш, тем менее надёжен результат');
+  /* Костылей экранного марша больше нет: они лечили симптомы того, что луч
+     не находил цели за кадром. Аналитическое пересечение находит всегда. */
+  ok(!/length\( ruv - vUv \)/.test(psrc) && !/float reach = /.test(psrc),
+     'Заплатки экранного марша убраны вместе с ним');
+
+
 }
 
 /* ══ 3h16. Мусор в горячем пути ════════════════════════════════════════ */
@@ -2166,6 +2182,58 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
     ok(!!c.material.normalMap, 'У торца есть карта рельефа');
   }
   ok(CONFIG.ENDCAP.rings >= 4, `Кольцевых уступов: ${CONFIG.ENDCAP.rings}`);
+}
+
+/* ══ 3h21. Траектория перелёта ═════════════════════════════════════════ */
+{
+  const F = CONFIG.FLY, clampN = (v, a, b) => Math.max(a, Math.min(b, v));
+  const lerpN = (a, b, t) => a + (b - a) * t;
+  const keep = CONFIG.SUN.r + CONFIG.SUN.clear;
+  const towerTop = CONFIG.R - CONFIG.TOWER.h;
+
+  /* Между башней и трубой объём пуст. Если середина пути идёт по этому
+     коридору, столкновений не будет по построению — проверять нечего.
+     Прежняя почти прямая хорда шла впритирку к полу и таранила застройку. */
+  let hi = 0, lo = 99, worstPair = '';
+  for (let i = 0; i < CONFIG.TP.length; i++) {
+    for (let j = 0; j < CONFIG.TP.length; j++) {
+      if (i === j) continue;
+      const A = tpVec(CONFIG.TP[i].pos), B = tpVec(CONFIG.TP[j].pos);
+      const r0 = Math.hypot(A.x, A.y), r1 = Math.hypot(B.x, B.y);
+      const rMid = clampN(Math.min(r0, r1, CONFIG.R * F.corridor), keep + 2, CONFIG.R - 8);
+      for (let k = 8; k <= 32; k++) {
+        const e = k / 40, bump = Math.sin(Math.PI * e);
+        const rl = lerpN(r0, r1, e);
+        const r = rl + (rMid - rl) * bump * F.pull;
+        if (r > hi) { hi = r; worstPair = `${CONFIG.TP[i].name} → ${CONFIG.TP[j].name}`; }
+        lo = Math.min(lo, r);
+      }
+    }
+  }
+  const pairs = CONFIG.TP.length * (CONFIG.TP.length - 1);
+  ok(hi <= towerTop,
+     `Все ${pairs} перелётов: середина не выше r=${hi.toFixed(1)} при верхе башни ${towerTop} (худший: ${worstPair})`);
+  ok(lo >= keep, `И не ближе r=${lo.toFixed(1)} к трубе при запасе ${keep.toFixed(1)}`);
+
+  const msrc = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+  ok(/function flyPoint/.test(msrc), 'Траектория считается в цилиндрических координатах');
+  ok(/fly\.da = \(\(fly\.a1 - fly\.a0 \+ Math\.PI\) % TAU/.test(msrc),
+     'Угол проходится по кратчайшей дуге, а не через полный круг');
+  ok(/const bump = Math\.sin\( ?Math\.PI \* clamp\(e, 0, 1\) ?\)/.test(msrc)
+     || /Math\.sin\(Math\.PI \* clamp\(e, 0, 1\)\)/.test(msrc),
+     'Вынос к коридору нулевой на концах и полный в середине');
+
+  /* повороты камеры */
+  ok(/flyPoint\(Math\.min\(1, e \+ CONFIG\.FLY\.lead\), _v3\)/.test(msrc),
+     'Камера смотрит вперёд по курсу, а не в конечную точку с самого старта');
+  ok(/fly\.aim\.lerp\(_v2, 1 - Math\.exp\(-dt \* CONFIG\.FLY\.turn\)\)/.test(msrc),
+     'Цель взгляда догоняется экспоненциально — повороты закладываются дугой, а не рывком');
+  ok(!/slerpQuaternions/.test(msrc),
+     'Равномерного slerp между стартом и финишем нет: он вращал камеру независимо от того, куда она летит');
+  ok(/camera\.getWorldDirection\(_v2\);\s*\n\s*fly\.aim\.copy/.test(msrc),
+     'На старте цель взгляда — там, куда камера смотрит сейчас: иначе рывок на первом кадре');
+  ok(F.lead > 0 && F.turn > 0, `Взгляд вперёд на ${F.lead} пути, догон ${F.turn}/с`);
+  ok(/len \/ F\.speed/.test(msrc), 'Длительность считается по длине пути, а не по хорде');
 }
 
 /* ══ 3i. Звук реагирует на то, где находится камера ════════════════════ */
