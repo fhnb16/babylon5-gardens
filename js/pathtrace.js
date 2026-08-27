@@ -91,10 +91,21 @@ export async function startPath(renderer, scene, camera, wind, mobile) {
     pt.ready = true;
     return true;
   } catch (e) {
-    pt.error = String(e && e.message ? e.message : e);
-    stopPath();
+    /* Отказ нельзя проглатывать. Раньше здесь вызывался stopPath(), он снимал
+       pt.active — а сообщение показывалось только пока флаг взведён. Итог:
+       нажатие не давало ни картинки, ни ошибки, ни следа в консоли. */
+    fail(e);
     return false;
   }
+}
+
+/** Записать отказ так, чтобы его было видно и на экране, и в консоли */
+function fail(e) {
+  pt.error = String(e && e.message ? e.message : e);
+  console.error('[трассировка пути]', e);
+  cleanup();
+  pt.active = false;
+  pt.ready = false;
 }
 
 /** Сообщить, что камера сдвинулась: накопление начинается заново. */
@@ -117,22 +128,28 @@ export function pathStep() {
     tracer.renderSample();
     pt.samples = tracer.samples;
   } catch (e) {
-    pt.error = String(e && e.message ? e.message : e);
-    stopPath();
+    fail(e);
     return 1;
   }
   return Math.min(1, pt.samples / CONFIG.PATH.samples);
 }
 
-export function stopPath() {
+/** Вернуть сцену в исходное состояние. Отдельно от stopPath, потому что при
+    отказе состояние вернуть надо, а сообщение — сохранить. */
+function cleanup() {
   if (windU) windU.value = savedWind;
   restoreHidden();
   if (tracer) {
     try { tracer.dispose?.(); } catch { /* нечего освобождать */ }
   }
   tracer = null;
-  pt.active = false; pt.ready = false; pt.build = 0; pt.samples = 0;
   R = S = C = null;
+}
+
+export function stopPath() {
+  cleanup();
+  pt.active = false; pt.ready = false; pt.build = 0; pt.samples = 0;
+  pt.error = null;
 }
 
 /** Сообщение для индикатора: постройка дерева и накопление — разные фазы,

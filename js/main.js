@@ -477,6 +477,14 @@ function setClean(on) {
 
 /* Трассировка идёт только по неподвижному кадру: любое движение мира или
    камеры обнулило бы накопленное. Поэтому на время съёмки мир замирает. */
+/** Единственное место, где пишется строка индикатора: раньше её ставили в
+    трёх местах по-разному, и сообщение об отказе терялось. */
+function showTrace(text) {
+  const el = $('traceInfo');
+  el.textContent = text;
+  el.classList.add('show');
+}
+
 function setTrace(on) {
   const info = $('traceInfo'), btn = $('bTrace');
   if (on && !trace.active) {
@@ -573,13 +581,19 @@ function initUI() {
      включению — она весит больше самого проекта. */
   const bPath = $('bPath');
   bPath.onclick = async () => {
-    if (pt.active) { stopPath(); bPath.classList.remove('on'); return; }
+    if (pt.active || pt.error) { stopPath(); bPath.classList.remove('on'); return; }
     setTrace(false);
     setTraceDebug(0);
     bPath.classList.add('on');
+    /* сразу показываем, что нажатие принято: библиотека грузится с сети и
+       дерево строится не мгновенно, без отклика это выглядит как поломка */
+    showTrace('загрузка библиотеки…');
     /* станцию и ветер уже остановил фото-режим — сцена статична */
     const okStart = await startPath(renderer, scene, camera, windU.uWind, isMobile);
-    if (!okStart) bPath.classList.remove('on');
+    if (!okStart) {
+      bPath.classList.remove('on');
+      showTrace(pathLabel());
+    }
   };
 
   /* Наглядный ответ на вопрос «а точно ли это считается лучами»: показываем
@@ -943,10 +957,14 @@ function loop() {
       pathCameraMoved();
     }
     pathStep();
-    $('traceInfo').textContent = pathLabel();
-    $('traceInfo').classList.add('show');
-    if (pt.error) $('bPath').classList.remove('on');
+    showTrace(pathLabel());
     return;
+  }
+  /* Отказ показывается и после того, как трассировка снялась: иначе нажатие
+     выглядит как «ничего не произошло». */
+  if (pt.error) {
+    showTrace(pathLabel());
+    $('bPath').classList.remove('on');
   }
 
   if (trace.active) {

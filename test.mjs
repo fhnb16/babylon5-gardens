@@ -2649,9 +2649,20 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
      'Библиотека подгружается по первому включению, а не при старте');
   ok(!/^import .*three-gpu-pathtracer/m.test(src), 'Статического импорта нет');
 
-  /* карта импортов должна покрывать всё, что тянет сборка */
-  for (const dep of ['three-gpu-pathtracer', 'three-mesh-bvh', 'three/examples/jsm/']) {
-    ok(html.includes(`"${dep}"`), `Карта импортов знает «${dep}»`);
+  /* Карта импортов должна покрывать всё, что тянут сборки. Забытая
+     зависимость даёт молчаливый отказ загрузки модуля. */
+  const map = JSON.parse(html.slice(html.indexOf('{', html.indexOf('importmap')),
+    html.indexOf('</script>', html.indexOf('importmap'))).trim());
+  const keys = Object.keys(map.imports);
+  for (const dep of ['three', 'three-gpu-pathtracer', 'three-mesh-bvh', 'three/examples/jsm/']) {
+    ok(keys.includes(dep), `Карта импортов знает «${dep}»`);
+  }
+  /* каждый адрес — на существующий файл сборки, а не на каталог пакета */
+  for (const [k, v] of Object.entries(map.imports)) {
+    ok(k.endsWith('/') || /\.js$/.test(v), `«${k}» ведёт на файл, а не на каталог`);
+    ok(/^https:\/\//.test(v), `«${k}» грузится по https`);
+    const ver = (v.match(/@([\d.]+)\//) || [])[1];
+    ok(!ver || /^\d+\.\d+\.\d+$/.test(ver), `«${k}»: версия закреплена точно (${ver})`);
   }
 
   /* дерево строится один раз — это возможно только на статичной сцене */
@@ -2663,11 +2674,19 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
      'Вращение станции уже остановлено фото-режимом — сцена статична');
 
   /* отказ обязан быть мягким */
-  ok(/catch \(e\) \{[\s\S]{0,120}pt\.error =/.test(src),
+  ok(/function fail\(e\) \{[\s\S]{0,200}pt\.error =/.test(src),
      'Отказ ловится и превращается в сообщение, а не роняет страницу');
+  ok(/console\.error\('\[трассировка пути\]'/.test(src),
+     'И попадает в консоль: молчаливый отказ не отличить от неработающей кнопки');
+  ok(!/pt\.error = String[\s\S]{0,60}stopPath\(\)/.test(src),
+     'Сообщение не стирается тут же: stopPath сбрасывает ошибку, и нажатие выглядело как «ничего не произошло»');
   ok(/pt\.error\) return `путь недоступен/.test(src), 'Причина отказа показывается');
-  ok(/if \(!okStart\) bPath\.classList\.remove\('on'\)/.test(msrc),
+  ok(/if \(!okStart\) \{\s*\n\s*bPath\.classList\.remove\('on'\);/.test(msrc),
      'Не запустилось — кнопка гаснет, обычный кадр остаётся доступен');
+  ok(/showTrace\('загрузка библиотеки…'\)/.test(msrc),
+     'Нажатие сразу даёт отклик: библиотека грузится с сети, без отклика это выглядит поломкой');
+  ok(/if \(pt\.error\) \{\s*\n\s*showTrace\(pathLabel\(\)\)/.test(msrc),
+     'Отказ виден и после того, как трассировка снялась');
 
   /* точки и прозрачное дерево обхода не описывает */
   ok(/hideNonSolid/.test(src),
