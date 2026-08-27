@@ -8,11 +8,12 @@ import { CONFIG } from './js/config.js';
 import { D2R, TAU, zoneAt, mulberry32, clamp as clampNum, tpVec, aimAt, natural,
   cityBlock, cityCenter, cellInfo, cellUsable, pickFloors, turnToward, clampPitch,
   surfacePos, mergeGeos, rod } from './js/util.js';
-import { buildWorld, worldMats, hullU, uvSelfTest } from './js/world.js';
+import { buildWorld, worldMats, hullU, uvSelfTest, patchAllRoughness } from './js/world.js';
 import { buildStructures, structMats, updateStructures,
   liftSeat, liftCount2, setLiftInside } from './js/structures.js';
 import { fieldAt, waterLevel, windLevel, humLevel, birdLevel } from './js/audio.js';
 import { stationUp } from './js/controls.js';
+import { tracePlan } from './js/photo.js';
 
 
 /* Инстансы разрезаны на секторы ради отсечения по кадру, поэтому искать их
@@ -217,7 +218,9 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   const gap = nearest * carR - CONFIG.AXIS.trussW / 2 - 1.45;
   ok(gap > 0, `Кабина проходит между фермами, зазор ${gap.toFixed(2)} юнита`);
 
-  ok(structMats.glass.length >= 3, 'Стёкла башни и торцов управляются палитрой');
+  /* торцы слиты в один инстанс, поэтому материалов стало меньше */
+  ok(structMats.glass.length >= 2,
+     `Стёкла башни и торцов управляются палитрой (${structMats.glass.length})`);
   ok(!!structMats.sun && !!structMats.beacon, 'Солнечная труба и маяк доступны палитре');
 }
 
@@ -1655,7 +1658,8 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
 
   ok(/export function setSunScreen/.test(psrc), 'Экранное положение оси считается каждый кадр');
   ok(/sunVisible = v\.z < 1/.test(psrc), 'За спиной камеры лучи выключаются');
-  ok(/uRays\.value = raysOn && sunVisible/.test(psrc), 'Лучи гаснут, когда ось не в кадре');
+  ok(/uRays\.value = raysOn && rayRT && sunVisible/.test(psrc),
+     'Лучи гаснут, когда ось не в кадре или буфер не заведён');
 
   /* --- один буфер на всех --- */
   ok(/export function setPost/.test(psrc), 'FXAA, свечение и лучи включают общую цепочку');
@@ -2180,15 +2184,14 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   const g = new THREE.Group();
   const res = buildWorld(g, fakeRenderer, 'HIGH');
   buildStructures(g, fakeRenderer, 'HIGH', res.panel, res.panelNormal);
-  const caps = g.children.filter(o => o.isMesh && o.material?.side === THREE.DoubleSide
+  const caps = g.children.filter(o => o.isInstancedMesh && o.material?.side === THREE.DoubleSide
     && o.material.emissiveMap);
-  ok(caps.length === 2, `Торцов: ${caps.length}`);
-  for (const c of caps) {
-    c.geometry.computeBoundingBox();
-    const d = c.geometry.boundingBox.max.z - c.geometry.boundingBox.min.z;
-    ok(d > 5, `Торец уходит вглубь на ${(d * 10) | 0} м, а не нарисован на плоскости`);
-    ok(!!c.material.normalMap, 'У торца есть карта рельефа');
-  }
+  ok(caps.length === 1 && caps[0].count === 2,
+     `Оба торца — один инстанс на два: ${caps.length} меш(а), ${caps[0]?.count} экземпляра`);
+  caps[0].geometry.computeBoundingBox();
+  const capD = caps[0].geometry.boundingBox.max.z - caps[0].geometry.boundingBox.min.z;
+  ok(capD > 5, `Торец уходит вглубь на ${(capD * 10) | 0} м, а не нарисован на плоскости`);
+  ok(!!caps[0].material.normalMap, 'У торца есть карта рельефа');
   ok(CONFIG.ENDCAP.rings >= 4, `Кольцевых уступов: ${CONFIG.ENDCAP.rings}`);
 }
 
@@ -2331,7 +2334,8 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   /* Экранные отражения требуют буфера глубины, буфера нормалей и отдельного
      прохода — и всё равно чернеют по краям кадра. Фрагменту воды всё нужное
      известно и так: своя точка, своя нормаль, а отражатели аналитические. */
-  ok(/if \( uMirror > 0\.001 \)/.test(wsrc), 'Отражение считается в шейдере корпуса');
+  ok(/if \( uMirror > 0\.001 && hullMask\.r > 0\.02 \)/.test(wsrc),
+     'Отражение считается в шейдере корпуса и только для воды');
   ok(/vec3 Pw = vec3\( sT \* uHullR, cT \* uHullR, vZo \)/.test(wsrc),
      'Точка на корпусе берётся из угла и z — она известна точно');
   ok(/vec3 Vw = normalize\( Pw - uCamObj \)/.test(wsrc),
@@ -2453,7 +2457,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
      `Труба доходит до ступицы: конец на ${CONFIG.SUN.len / 2}, ступица на ${hub}`);
   ok(CONFIG.SUN.len / 2 < HL, 'И не торчит наружу за обод торца');
   const ssrc = readFileSync(new URL('./js/structures.js', import.meta.url), 'utf8');
-  ok(/sign \* \(HL - CONFIG\.ENDCAP\.depth\)/.test(ssrc),
+  ok(/sign \* \(flipZ \? HL : HL - E\.depth\)/.test(ssrc),
      'Ступица со спицами садится на дно воронки, а не висит на прежней глубине');
 
   /* Опоры — монолитные колонны, решётка только у ходовой балки */
@@ -2473,6 +2477,164 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
      `Крупнейший шаг марша ${biggest.toFixed(1)} против ширины дома ${bldW} — перепрыгнуть нельзя`);
   ok(total > 150, `Марш достаёт на ${(total * 10) | 0} м`);
   ok(P.refSteps >= 64, `Шагов ${P.refSteps}: снимок ждёт сколько угодно, экономить незачем`);
+}
+
+/* ══ 3h26. Шероховатость и охват отражений ═════════════════════════════ */
+{
+  const g = new THREE.Group();
+  const res = buildWorld(g, fakeRenderer, 'ULTRA');
+  buildStructures(g, fakeRenderer, 'ULTRA', res.panel, res.panelNormal);
+  patchAllRoughness(g);
+
+  /* Альфа непатченного материала хранит непрозрачность — единицу, — и
+     трассировка принимает такую поверхность за зеркальную. Патчить надо ВСЕ
+     непрозрачные материалы, а не выборочно. */
+  const seen = new Set();
+  let total = 0, missing = 0;
+  g.traverse(o => {
+    const list = Array.isArray(o.material) ? o.material : (o.material ? [o.material] : []);
+    for (const m of list) {
+      if (!m || seen.has(m.uuid) || m.transparent || !m.isMeshStandardMaterial) continue;
+      seen.add(m.uuid); total++;
+      if (!m.userData.__ra) missing++;
+    }
+  });
+  ok(total > 15, `Непрозрачных материалов в сцене: ${total}`);
+  ok(missing === 0, `Все пишут шероховатость в альфу (без неё: ${missing})`);
+
+  /* Отражать должна практически одна вода */
+  const P = CONFIG.PHOTO;
+  const weight = r => Math.pow(Math.max(0, (1 - r - P.mirrorMin) / (1 - P.mirrorMin)), 4);
+  const water = weight(0.045), metal = weight(0.45), facade = weight(0.68), hull = weight(0.95);
+  ok(water > 0.1, `Вода отражает (${(water * 100).toFixed(0)}%)`);
+  ok(metal < 0.01 && facade < 0.01 && hull < 0.01,
+     `Металл, фасады и грунт не отражают (${(metal * 100).toFixed(1)}%, ${(facade * 100).toFixed(1)}%, ${(hull * 100).toFixed(1)}%)`);
+  const psrc = readFileSync(new URL('./js/photo.js', import.meta.url), 'utf8');
+  ok(/pow\( clamp\( \( 1\.0 - rough - uMirrorMin \)/.test(psrc),
+     'Вес отражения — степенная функция гладкости, а не порог с линейным весом');
+  const wsrc = readFileSync(new URL('./js/world.js', import.meta.url), 'utf8');
+  ok(/uMirror > 0\.001 && hullMask\.r > 0\.02/.test(wsrc),
+     'В реальном времени отражает только вода, а не весь корпус');
+
+  /* Пресеты согласованы: ULTRA нигде не слабее ULTRAM */
+  const Q = CONFIG.QUALITY;
+  const keys = [...new Set(Object.values(Q).flatMap(p => Object.keys(p)))];
+  const order = ['LOW', 'HIGH', 'ULTRAM', 'ULTRA'];
+  for (const k of keys) {
+    ok(order.every(q => Q[q][k] !== undefined), `Поле «${k}» задано во всех пресетах`);
+  }
+  const weaker = keys.filter(k =>
+    typeof Q.ULTRA[k] === 'number' && typeof Q.ULTRAM[k] === 'number' && Q.ULTRA[k] < Q.ULTRAM[k]);
+  ok(weaker.length === 0,
+     `ULTRA нигде не слабее мобильной ультры${weaker.length ? ' (' + weaker.join(', ') + ')' : ''}`);
+
+  /* Трассировка на телефоне короче */
+  const deskt = tracePlan(false), mob = tracePlan(true);
+  ok(mob.rays * mob.samples < deskt.rays * deskt.samples / 4,
+     `На телефоне ${mob.rays * mob.samples} лучей против ${deskt.rays * deskt.samples} на настольном`);
+  ok(mob.refSteps < deskt.refSteps && mob.shadowSteps < deskt.shadowSteps,
+     'И марши короче: марш отражения и теней');
+  const msrc = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+  ok(/startTrace\(renderer, scene, camera, windU\.uWind, isMobile\)/.test(msrc),
+     'План выбирается по устройству');
+}
+
+/* ══ 3h27. Проходы постобработки и слияние статики ═════════════════════ */
+{
+  const psrc = readFileSync(new URL('./js/photo.js', import.meta.url), 'utf8');
+  const ssrc = readFileSync(new URL('./js/structures.js', import.meta.url), 'utf8');
+
+  /* Считаем проходы по коду: сколько pass() вызывается в каждой ветке.
+     Лишний проход при выключенном эффекте — это полный экран впустую. */
+  const body = psrc.slice(psrc.indexOf('export function composite'));
+  const end = body.indexOf('\n}');
+  const comp = body.slice(0, end);
+  ok(/if \(\(glowOn \|\| raysOn\) && blRT\)/.test(comp),
+     'Яркая выборка и размытие не выполняются, когда свечение и лучи выключены');
+  ok(/if \(raysOn && rayRT\)/.test(comp), 'Проход лучей — только при включённых лучах');
+  ok(/if \(smaaOn && smaaRT\.length\)/.test(comp), 'Три прохода SMAA — только при SMAA');
+  ok(/export const postPasses/.test(psrc), 'Число проходов доступно для замера');
+
+  /* буферы заводятся по надобности, а не висят всегда */
+  ok(/brRT = blRT = rayRT = null;/.test(psrc) && /if \(glowOn \|\| raysOn\) \{/.test(psrc),
+     'Половинные буферы свечения и лучей заводятся только при включённых эффектах');
+  ok(/if \(raysOn\) rayRT = half\(\);/.test(psrc), 'Буфер лучей — отдельно от свечения');
+  ok(/if \(taaOn\) \{/.test(psrc), 'Буферы TAA — только при TAA');
+  ok(/if \(smaaOn\) \{/.test(psrc), 'Буферы SMAA — только при SMAA');
+
+  /* минимальная цепочка: без режима и без эффектов буфера нет вовсе */
+  ok(/if \(!fxOn \|\| !fxRT\) \{\s*\n\s*renderer\.setRenderTarget\(null\)/.test(psrc),
+     'Без сглаживания и эффектов кадр идёт прямо в канвас, минуя всю цепочку');
+
+  /* слияние статики: одинаковая геометрия не должна рисоваться дважды */
+  const g = new THREE.Group();
+  const res = buildWorld(g, fakeRenderer, 'ULTRA');
+  buildStructures(g, fakeRenderer, 'ULTRA', res.panel, res.panelNormal);
+  const bySig = new Map();
+  g.traverse(o => {
+    if (!o.isMesh || o.isInstancedMesh) return;
+    const p = o.geometry.attributes.position;
+    const sig = (o.geometry.index ? o.geometry.index.count : p.count) + '/' + p.count;
+    bySig.set(sig, (bySig.get(sig) || 0) + 1);
+  });
+  const dups = [...bySig.entries()].filter(([, n]) => n > 1);
+  ok(dups.length === 0,
+     `Одиночных мешей с повторяющейся геометрией нет${dups.length ? ' (' + dups.length + ')' : ''}`);
+  ok(/const twin = \(geo, mat, flipZ\)/.test(ssrc),
+     'Оба торца — два инстанса одной геометрии, а не два отдельных меша');
+
+  let solo = 0;
+  g.traverse(o => { if ((o.isMesh || o.isPoints) && !o.isInstancedMesh) solo++; });
+  ok(solo <= 10, `Одиночных мешей в сцене: ${solo}`);
+}
+
+/* ══ 3h28. Вкладки внизу, кабина без щелей, тени ловят ближнее ═════════ */
+{
+  const html = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
+  const css = readFileSync(new URL('./style.css', import.meta.url), 'utf8');
+  const ssrc = readFileSync(new URL('./js/structures.js', import.meta.url), 'utf8');
+
+  /* вкладки внизу и не уезжают вместе с прокруткой */
+  const sheet = html.slice(html.indexOf('id="set"'), html.indexOf('id="help"'));
+  ok(sheet.indexOf('class="tabs"') > sheet.indexOf('data-tab="0"'),
+     'Вкладки идут после панелей — то есть внизу шторки');
+  ok(/\.tabs\{[^}]*position:sticky;bottom:0/.test(css),
+     'Вкладки закреплены у нижнего края и не уезжают с прокруткой');
+  ok(/\.tabs\{[^}]*grid-template-columns:repeat\(5,1fr\)/.test(css),
+     'Пять вкладок в одну строку, без переноса и растягивания');
+  ok(/\.tabbtn\{[^}]*text-overflow:ellipsis/.test(css), 'Длинные подписи не ломают сетку');
+  ok(/\.row\{padding:8px 2px/.test(css), 'Строки уплотнены, чтобы список влезал');
+
+  /* кабина: борт закрыт по всей высоте */
+  const CR = CONFIG.LIFTCAR, hh2 = CR.h / 2;
+  const winTop = CR.h * 0.04 + CR.h * 0.26, winBot = CR.h * 0.04 - CR.h * 0.26;
+  ok((hh2 - CR.floor) - winTop > 0.05, 'Между окном и потолком есть зазор — его надо закрывать');
+  ok(/const upH = \(hh - CR\.floor\) - winTop/.test(ssrc), 'Панель над окнами есть');
+  ok(/const dnH = winBot - \(-hh \+ CR\.floor\)/.test(ssrc), 'И под окнами тоже');
+
+  /* стекло изнутри исчезает целиком */
+  ok(/m\.opacity = inside \? 0 : 1/.test(ssrc),
+     'Изнутри стекло полностью прозрачно: любая остаточная непрозрачность даёт тонировку');
+  ok(/lifts\.glass\.visible = !inside/.test(ssrc), 'И сама панель убирается из отрисовки');
+
+  /* теневой марш обязан ловить ближние преграды */
+  const P = CONFIG.PHOTO;
+  ok(P.shadowStep < CONFIG.TREE.h[0],
+     `Первый шаг теневого луча ${P.shadowStep} мельче нижней кромки кроны ${CONFIG.TREE.h[0]}`);
+  let st = P.shadowStep, reach = 0;
+  for (let k = 0; k < P.shadowSteps; k++) { reach += st; st *= P.shadowGrow; }
+  ok(reach > 20, `Марш достаёт на ${reach.toFixed(0)} юнитов — до оси станции`);
+  const psrc = readFileSync(new URL('./js/photo.js', import.meta.url), 'utf8');
+  ok(/float st = uShadowStep;/.test(psrc),
+     'Шаг не зависит от расстояния до солнца: доля от него начиналась выше крон');
+  ok(!/float st = dist \* 0\.02/.test(psrc), 'Прежней доли от расстояния не осталось');
+
+  /* секторы — из пресета: они задают число вызовов, а не содержимое */
+  for (const q of ['LOW', 'HIGH', 'ULTRAM', 'ULTRA']) {
+    ok(CONFIG.QUALITY[q].chunks > 0, `${q}: секторов ${CONFIG.QUALITY[q].chunks}`);
+  }
+  ok(CONFIG.QUALITY.ULTRAM.chunks < CONFIG.QUALITY.ULTRA.chunks,
+     'На телефоне секторов меньше: там вызов дороже сэкономленных вершин');
 }
 
 /* ══ 3i. Звук реагирует на то, где находится камера ════════════════════ */

@@ -481,7 +481,7 @@ function setTrace(on) {
   if (on && !trace.active) {
     shotBoost = CONFIG.SHOT.scale;      // трассируем сразу в масштабе снимка
     resize();
-    startTrace(renderer, scene, camera, windU.uWind);
+    startTrace(renderer, scene, camera, windU.uWind, isMobile);
   } else if (!on && trace.active) {
     stopTrace(windU.uWind);
     shotBoost = 1;
@@ -924,10 +924,10 @@ function loop() {
     const done = traceStep();
     /* Показываем не только проценты, но и оставшийся шум: по нему видно,
        что именно ещё уточняется, а проценты сами по себе ни о чём не говорят. */
-    const noise = 100 / Math.sqrt(Math.max(1, trace.sample) * CONFIG.PHOTO.rays);
+    const noise = 100 / Math.sqrt(Math.max(1, trace.sample) * trace.rays);
     const what = trace.debug ? `только ${DEBUG_NAMES[trace.debug]} · ` : '';
     $('traceInfo').textContent = done >= 1
-      ? `${what}готово · ${trace.total * CONFIG.PHOTO.rays} лучей на пиксель`
+      ? `${what}готово · ${trace.total * trace.rays} лучей на пиксель`
       : `${what}${(done * 100) | 0}% · шум ${noise.toFixed(0)}%`;
     if (shotPending) { shotPending = false; grabShot(); }
     return;

@@ -183,11 +183,19 @@ body.clean #rideBar{display:none}
 .row:last-child{border-bottom:none}
 
 /* ── вкладки настроек ── */
-.tabs{display:flex;gap:6px;margin:2px 0 10px;flex-wrap:wrap}
+/* Вкладки внизу шторки: до них тянуться пальцем ближе, и они не уезжают
+   вверх вместе с прокруткой длинного списка. */
+.tabs{
+  position:sticky;bottom:0;z-index:2;
+  display:grid;grid-template-columns:repeat(5,1fr);gap:4px;
+  margin:10px -2px 0;padding:8px 2px calc(2px + var(--sab));
+  background:linear-gradient(to top,var(--panel) 62%,transparent);
+}
 .tabbtn{
-  flex:1 1 auto;padding:8px 12px;border-radius:11px;cursor:pointer;
+  min-width:0;padding:9px 2px;border-radius:11px;cursor:pointer;
   background:rgba(255,255,255,.05);border:1px solid rgba(180,214,255,.14);
-  color:var(--dim);font:600 10px/1 ui-sans-serif,system-ui;letter-spacing:.14em;
+  color:var(--dim);font:600 9px/1 ui-sans-serif,system-ui;letter-spacing:.06em;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
   transition:background .16s,color .16s,border-color .16s;
 }
 .tabbtn:hover{background:rgba(255,255,255,.09)}
@@ -195,8 +203,8 @@ body.clean #rideBar{display:none}
 .tab{display:none}
 .tab.on{display:block}
 .row.off{opacity:.4;pointer-events:none}
-.row label{font-size:14px}
-.row small{display:block;font-size:11px;color:rgba(219,232,247,.45)}
+.row label{min-width:0;font-size:14px}
+.row small{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:block;font-size:11px;color:rgba(219,232,247,.45)}
 .row input[type=range]{width:44%;min-width:120px;accent-color:#ffd9a0;height:28px}
 .row select{
   background:rgba(255,255,255,.08);color:var(--ink);border:1px solid rgba(180,214,255,.2);
@@ -275,6 +283,9 @@ body.clean #rideBar{display:none}
   .sheet h2{margin-bottom:8px}
   .row{padding:8px 2px}
   #help .cols{grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px}
+  .tabs{grid-template-columns:repeat(5,1fr);padding:6px 2px calc(2px + var(--sab))}
+  .tabbtn{padding:7px 2px;font-size:8px}
+  .row{padding:6px 2px}
 
   #photobar{bottom:calc(10px + var(--sab));gap:10px}
   #photobar .btn{width:46px;height:46px;min-width:46px;min-height:46px}

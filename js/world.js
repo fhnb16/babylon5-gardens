@@ -157,7 +157,9 @@ function patchHullMaterial(mat, nArm, nSpar) {
              вдоль оси. Пересечение решается формулой прямо здесь. Экранный
              марш потребовал бы буфера глубины, буфера нормалей и отдельного
              прохода, а на краях кадра всё равно оставлял бы чёрные пятна. */
-          if ( uMirror > 0.001 ) {
+          /* Отражает только вода: раньше условие пропускало весь корпус,
+             и трава с асфальтом получали зеркальную составляющую. */
+          if ( uMirror > 0.001 && hullMask.r > 0.02 ) {
             float sT = sin( vTh ), cT = cos( vTh );
             vec3 Pw = vec3( sT * uHullR, cT * uHullR, vZo );
             vec3 up = vec3( -sT, -cT, 0.0 );
@@ -211,6 +213,8 @@ function patchHullMaterial(mat, nArm, nSpar) {
     негде взять, что зеркально (вода, металл), а что нет. Одна строка на
     материал вместо отдельного G-буфера с ещё одним проходом сцены. */
 export function patchRoughnessAlpha(mat) {
+  if (mat.userData.__ra) return mat;
+  mat.userData.__ra = true;
   const prev = mat.onBeforeCompile;
   mat.onBeforeCompile = (s, r) => {
     prev?.call(mat, s, r);
@@ -219,6 +223,23 @@ export function patchRoughnessAlpha(mat) {
   };
   const key = mat.customProgramCacheKey;
   mat.customProgramCacheKey = () => (key ? key.call(mat) : '') + '-ra';
+  return mat;
+}
+
+/** Пройтись по всему поддереву и записать шероховатость в альфу каждому
+    непрозрачному материалу. Выборочный патч оставлял альфу непрозрачности —
+    единицу, — и трассировка принимала такие поверхности за зеркальные:
+    отражало колонны, фермы и дома, а должно было только воду. */
+export function patchAllRoughness(root) {
+  const seen = new Set();
+  root.traverse(o => {
+    const list = Array.isArray(o.material) ? o.material : (o.material ? [o.material] : []);
+    for (const m of list) {
+      if (!m || seen.has(m.uuid) || m.transparent || !m.isMeshStandardMaterial) continue;
+      seen.add(m.uuid);
+      patchRoughnessAlpha(m);
+    }
+  });
 }
 
 /** Ветер в кронах: сдвигаем вершины инстанса, фаза — из его же матрицы */
@@ -498,7 +519,7 @@ export function buildWorld(group, renderer, quality) {
      включая половину за спиной камеры. Сектор со своей сферой отсекается
      обычным frustum culling: при обзоре 62° в кадр попадает около шестой
      части окружности. Вызовов больше, но вершинной работы кратно меньше. */
-  const CH = CONFIG.CHUNKS;
+  const CH = Q.chunks || CONFIG.CHUNKS;
   const instance = (geo, mat, list, fn) => {
     const buckets = Array.from({ length: CH }, () => []);
     for (const item of list) {

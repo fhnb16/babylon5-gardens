@@ -24,7 +24,7 @@ import {
    и так считается аналитически и точно.
    ═══════════════════════════════════════════════════════════════════════════ */
 
-export const trace = { active: false, sample: 0, total: 0, debug: 0 };
+export const trace = { active: false, sample: 0, total: 0, debug: 0, rays: 8 };
 /* 0 — обычный кадр, 1 — затенение, 2 — переотражённый свет,
    3 — отражения, 4 — шероховатость из альфы кадра */
 export const DEBUG_NAMES = ['кадр', 'затенение', 'переотражения', 'отражения',
@@ -57,10 +57,10 @@ const AO_FRAG = `
   uniform sampler2D tBeauty, tNormal, tDepth, tPrev;
   uniform mat4 uProj, uProjInv;
   uniform vec2 uRes;
-  uniform float uRadius, uIntensity, uSeed, uBlend, uBias, uFogD, uBounce, uReflect, uRefStep, uRefGrow;
+  uniform float uRadius, uIntensity, uSeed, uBlend, uBias, uFogD, uBounce, uReflect, uRefStep, uRefGrow, uMirrorMin;
   uniform float uAoNear, uAoFar, uDebug;
   uniform vec3 uSunA, uSunB, uSunU, uSunV;   // труба-солнце в видовых координатах
-  uniform float uSunR, uShadow, uAmbient;
+  uniform float uSunR, uShadow, uAmbient, uShadowStep, uShadowGrow;
   uniform mat4 uInvView;                     // видовые → мировые
   uniform sampler2D tHull;                   // альбедо корпуса
   uniform float uHullR, uHullL, uWorldRot, uSunGlow;
@@ -158,10 +158,13 @@ const AO_FRAG = `
         if ( ndl <= 0.0 ) continue;              // источник за поверхностью
         wsum += ndl;
 
-        /* марш к источнику: шаг растёт, вблизи важна точность, вдали нет */
+        /* Марш к источнику. Шаг стартует МЕЛКИМ и не зависит от расстояния до
+           солнца: раньше он был долей этого расстояния и начинался с 0.9
+           юнита — выше большинства крон. Ближние преграды, которые и дают
+           видимую тень, просто перешагивались, и свет читался как растровый. */
         float blocked = 0.0;
-        float st = dist * 0.02;
-        float travel = st * ( 1.0 + hash( sd3 + 11.0 ) );
+        float st = uShadowStep;
+        float travel = st * ( 0.5 + hash( sd3 + 11.0 ) );
         for ( int s = 0; s < SHADOW_STEPS; s ++ ) {
           vec3 sp = P + dir * travel;
           vec4 cp = uProj * vec4( sp, 1.0 );
@@ -176,7 +179,7 @@ const AO_FRAG = `
             if ( gap2 > uBias && gap2 < uRadius * 6.0 ) { blocked = 1.0; break; }
           }
           travel += st;
-          st *= 1.25;
+          st *= uShadowGrow;
           if ( travel > dist ) break;
         }
         lit += ndl * ( 1.0 - blocked );
@@ -188,8 +191,14 @@ const AO_FRAG = `
          борт станции. Оба — цилиндры вдоль оси, и луч пересекается с ними
          ФОРМУЛОЙ, а не маршем по экрану. Экранный марш давал чёрные пятна
          там, где луч уходил за кадр, хотя борт в той стороне есть. */
-      float smoothness = 1.0 - rough;
-      if ( smoothness > 0.25 ) {
+      /* Зеркалить должно только по-настоящему гладкое. Прежний порог 0.25 с
+         линейным весом давал металлу с шероховатостью 0.45 больше половины
+         зеркала, а фасадам треть — колонны и дома блестели хромом. Четвёртая
+         степень от нормированной гладкости оставляет отражение почти одной
+         воде: вода 24%, металл и фасады — ноль. */
+      float smoothness = pow( clamp( ( 1.0 - rough - uMirrorMin ) /
+        max( 1e-4, 1.0 - uMirrorMin ), 0.0, 1.0 ), 4.0 );
+      if ( smoothness > 0.02 ) {
         vec3 V = normalize( P );
         vec3 Rd = reflect( V, N );
 
@@ -394,10 +403,21 @@ function hideTransparent(root) {
 }
 const restoreTransparent = () => { for (const o of hidden) o.visible = true; hidden = []; };
 
-export function startTrace(renderer, scene, camera, windUniform) {
+/** Параметры трассировки для текущего устройства */
+export function tracePlan(mobile) {
+  const P = CONFIG.PHOTO;
+  return mobile
+    ? { rays: P.mobileRays, samples: P.mobileSamples,
+        refSteps: P.mobileRefSteps, shadowSteps: P.mobileShadowSteps }
+    : { rays: P.rays, samples: P.samples,
+        refSteps: P.refSteps, shadowSteps: P.shadowSteps };
+}
+
+export function startTrace(renderer, scene, camera, windUniform, mobile = false) {
   if (trace.active) return;
   R = renderer; S = scene; C = camera;
   const P = CONFIG.PHOTO;
+  const plan = tracePlan(mobile);
 
   /* Плотность пикселей задаёт main: во время съёмки он поднимает её до
      масштаба снимка, и буферы здесь просто повторяют текущий размер. */
@@ -412,7 +432,7 @@ export function startTrace(renderer, scene, camera, windUniform) {
   qCam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
   qScene = new THREE.Scene();
   aoMat = new THREE.ShaderMaterial({
-    defines: { RAYS: P.rays, REF_STEPS: P.refSteps, SHADOW_STEPS: P.shadowSteps },
+    defines: { RAYS: plan.rays, REF_STEPS: plan.refSteps, SHADOW_STEPS: plan.shadowSteps },
     vertexShader: VERT, fragmentShader: AO_FRAG,
     uniforms: {
       tBeauty: { value: rtBeauty.texture }, tNormal: { value: rtNormal.texture },
@@ -424,11 +444,13 @@ export function startTrace(renderer, scene, camera, windUniform) {
       uFogD: { value: 0 }, uBounce: { value: P.bounce },
       uReflect: { value: P.reflect }, uRefStep: { value: P.refStep },
       uRefGrow: { value: P.refGrow },
+      uMirrorMin: { value: P.mirrorMin },
       uAoNear: { value: P.aoNear }, uAoFar: { value: P.aoFar },
       uDebug: { value: 0 },
       uSunA: { value: new THREE.Vector3() }, uSunB: { value: new THREE.Vector3() },
       uSunU: { value: new THREE.Vector3() }, uSunV: { value: new THREE.Vector3() },
       uSunR: { value: CONFIG.SUN.r }, uShadow: { value: P.shadow },
+      uShadowStep: { value: P.shadowStep }, uShadowGrow: { value: P.shadowGrow },
       uAmbient: { value: 0.22 },
       uInvView: { value: new THREE.Matrix4() },
       tHull: { value: null }, uHullR: { value: CONFIG.R },
@@ -451,7 +473,8 @@ export function startTrace(renderer, scene, camera, windUniform) {
 
   trace.active = true;
   trace.sample = 0;
-  trace.total = P.samples;
+  trace.total = plan.samples;
+  trace.rays = plan.rays;
 }
 
 /** Один шаг накопления. Возвращает долю готовности 0…1 */
@@ -749,6 +772,10 @@ export function setPost(renderer, { mode = null, glow = false, rays = false } = 
 }
 
 let fxaaFilter = false, aaMode = null, samples = 0, taaOn = false;
+let passCount = 0;
+/** Сколько полноэкранных проходов ушло на последний кадр: по нему видно,
+    не выполняется ли лишнего, когда эффект выключен. */
+export const postPasses = () => passCount;
 
 export function setFxaa(renderer, on, filter = true) {
   fxOn = !!on;
@@ -844,11 +871,17 @@ export function resizePost(renderer) {
     minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter
   });
   for (const t of [brRT, blRT, rayRT]) t?.dispose();
-  /* Свечение и лучи считаются в половинном разрешении: размытое всё равно
-     не несёт мелких деталей, а стоит вчетверо дешевле. */
-  brRT = half(); blRT = half(); rayRT = half();
-  fxMat.uniforms.tGlow.value = brRT.texture;
-  fxMat.uniforms.tRays.value = rayRT.texture;
+  brRT = blRT = rayRT = null;
+  /* Буферы свечения и лучей заводятся, только когда они включены: раньше
+     три половинных цели висели в памяти всегда, даже при выключенных
+     эффектах. Считаются они в половинном разрешении — размытое мелких
+     деталей не несёт, а стоит вчетверо дешевле. */
+  if (glowOn || raysOn) {
+    brRT = half(); blRT = half();
+    if (raysOn) rayRT = half();
+  }
+  fxMat.uniforms.tGlow.value = brRT ? brRT.texture : null;
+  fxMat.uniforms.tRays.value = rayRT ? rayRT.texture : null;
   fxRT?.dispose();
   /* MSAA берётся отсюда: у канваса он задаётся при создании рендерера и на
      лету не выключается, а «выкл» обязан выключать всё. TAA перепроецирует
@@ -989,20 +1022,22 @@ function runTaa(renderer, camera, worldRot) {
 export function composite(renderer, srcTexture, exposure) {
   if (!fxMat) { return false; }
   const P = CONFIG.POST;
+  passCount = 0;
   const pass = (mat, target) => {
+    passCount++;
     fxQuad.material = mat;
     renderer.setRenderTarget(target);
     renderer.render(fxScene, fxCam);
   };
   fxMat.uniforms.tScene.value = srcTexture;
 
-  if (glowOn || raysOn) {
+  if ((glowOn || raysOn) && blRT) {
     /* яркая выборка — общая для свечения и лучей */
     brMat.uniforms.tScene.value = srcTexture;
     brMat.uniforms.uExposure.value = exposure;
     pass(brMat, blRT);
 
-    if (raysOn) {
+    if (raysOn && rayRT) {
       rayMat.uniforms.tSrc.value = blRT.texture;
       pass(rayMat, rayRT);
     }
@@ -1018,9 +1053,9 @@ export function composite(renderer, srcTexture, exposure) {
     }
   }
 
-  fxMat.uniforms.tGlow.value = glowOn ? blRT.texture : null;
+  fxMat.uniforms.tGlow.value = glowOn && blRT ? blRT.texture : null;
   fxMat.uniforms.uGlow.value = glowOn ? P.glow : 0;
-  fxMat.uniforms.uRays.value = raysOn && sunVisible ? P.rays : 0;
+  fxMat.uniforms.uRays.value = raysOn && rayRT && sunVisible ? P.rays : 0;
   fxMat.uniforms.uExposure.value = exposure;
   fxMat.uniforms.uFxaa.value = fxaaFilter ? 1 : 0;
 

@@ -124,10 +124,22 @@ function buildAxis(group, panel, panelNormal) {
       carParts.push(rod(CR.floor, CR.h * 0.86, CR.pillar, sx * hw, 0, z));
     }
   }
-  /* подоконный пояс и карниз — по ним читается, где окна */
+  /* Борт выше и ниже окон: без него между окном и потолком оставался зазор
+     в треть юнита, и салон просвечивал щелями. Окно занимает пояс, всё
+     остальное по высоте закрыто. */
+  const winTop = CR.h * 0.04 + CR.h * 0.26, winBot = CR.h * 0.04 - CR.h * 0.26;
   for (const sx of [-1, 1]) {
-    carParts.push(rod(CR.floor * 1.4, CR.belt, CR.len, sx * hw, -CR.h * 0.22, 0));
-    carParts.push(rod(CR.floor * 1.4, CR.belt, CR.len, sx * hw, CR.h * 0.3, 0));
+    const upH = (hh - CR.floor) - winTop;
+    if (upH > 0.001) {
+      carParts.push(rod(CR.floor, upH, CR.len, sx * hw, winTop + upH / 2, 0));
+    }
+    const dnH = winBot - (-hh + CR.floor);
+    if (dnH > 0.001) {
+      carParts.push(rod(CR.floor, dnH, CR.len, sx * hw, winBot - dnH / 2, 0));
+    }
+    /* подоконный пояс и карниз — по ним читается, где окна */
+    carParts.push(rod(CR.floor * 1.4, CR.belt, CR.len, sx * hw, winBot, 0));
+    carParts.push(rod(CR.floor * 1.4, CR.belt, CR.len, sx * hw, winTop, 0));
   }
   /* катки по рельсу */
   for (const sgn of [-1, 1]) {
@@ -377,30 +389,25 @@ function buildEndCaps(group, renderer, low, normals) {
   /* Рельеф торца берётся из его же рисунка — как у корпуса и фасадов */
   const nrm = normals ? heightToNormal(canvas, CONFIG.NORMALS.endcap, 1024) : null;
 
-  for (const sign of [-1, 1]) {
-    const mat = new THREE.MeshStandardMaterial({
-      map, emissiveMap: emis, emissive: 0xffffff, emissiveIntensity: 0,
-      normalMap: nrm, normalScale: new THREE.Vector2(1, 1),
-      side: THREE.DoubleSide, roughness: 0.85, metalness: 0.12
-    });
-    structMats.glass.push(mat);
+  /* Оба торца — одна геометрия и один материал на двоих. Раньше на каждый
+     заводились свои: четыре вызова отрисовки и три лишних материала там,
+     где хватает двух инстансов. */
+  const E = CONFIG.ENDCAP;
 
-    /* Не плоский диск, а ступенчатая воронка: кольцевые уступы уходят вглубь
-       к ступице. Плоскость выдавала себя сразу — вся глубина была нарисована,
-       и при взгляде вдоль оси торец читался наклейкой. */
-    const E = CONFIG.ENDCAP;
-    const prof = [];
-    for (let k = 0; k <= E.rings; k++) {
-      const u = k / E.rings;
-      const r = R * (1 - u);
-      /* уступ: сначала вглубь, потом сужение — отсюда и ступени */
-      const depth = E.depth * Math.pow(u, E.curve);
-      prof.push(new THREE.Vector2(Math.max(0.6, r), depth));
-      if (k < E.rings) prof.push(new THREE.Vector2(Math.max(0.6, r - R / E.rings * E.step), depth));
-    }
-    const cap = new THREE.LatheGeometry(prof, 72);
-    cap.rotateX(-Math.PI / 2);
-    /* UV вдоль радиуса: текстура нарисована кольцами от края к ступице */
+  /* Ступенчатая воронка: кольцевые уступы уходят вглубь к ступице. Плоский
+     диск выдавал себя сразу — вся глубина была нарисована. */
+  const prof = [];
+  for (let k = 0; k <= E.rings; k++) {
+    const u = k / E.rings;
+    const r = R * (1 - u);
+    const depth = E.depth * Math.pow(u, E.curve);
+    prof.push(new THREE.Vector2(Math.max(0.6, r), depth));
+    if (k < E.rings) prof.push(new THREE.Vector2(Math.max(0.6, r - R / E.rings * E.step), depth));
+  }
+  const cap = new THREE.LatheGeometry(prof, 72);
+  cap.rotateX(-Math.PI / 2);
+  /* UV вдоль радиуса: текстура нарисована кольцами от края к ступице */
+  {
     const pos = cap.attributes.position, uv = cap.attributes.uv;
     for (let k = 0; k < pos.count; k++) {
       const rr = Math.hypot(pos.getX(k), pos.getY(k)) / R;
@@ -408,32 +415,50 @@ function buildEndCaps(group, renderer, low, normals) {
       uv.setXY(k, 0.5 + Math.cos(ang) * rr * 0.5, 0.5 + Math.sin(ang) * rr * 0.5);
     }
     uv.needsUpdate = true;
-    cap.computeVertexNormals();
-
-    const disc = new THREE.Mesh(cap, mat);
-    disc.position.z = sign * HL;
-    disc.scale.z = -sign;                   // воронка уходит внутрь станции
-    group.add(disc); parts.push(disc);
-
-    const p = [];
-    const hub = new THREE.CylinderGeometry(4.6, 4.6, 18, 18, 1, false);
-    hub.rotateX(Math.PI / 2);
-    p.push(hub);
-    for (let k = 0; k < 6; k++) {
-      const a = (k / 6) * TAU + 0.26;
-      const spoke = new THREE.BoxGeometry(1.7, 1.2, R - 6);
-      spoke.rotateX(Math.PI / 2);
-      spoke.translate(0, (R + 4) / 2 - 2, 0);
-      spoke.rotateZ(-a);
-      p.push(spoke);
-    }
-    const merged = panelUV(mergeGeos(p), CONFIG.PANEL_TILE);
-    merged.translate(0, 0, sign * (HL - CONFIG.ENDCAP.depth));
-    const mesh = new THREE.Mesh(merged, new THREE.MeshStandardMaterial({
-      color: 0xa7b0ba, roughness: 0.45, metalness: 0.55
-    }));
-    group.add(mesh); parts.push(mesh);
   }
+  cap.computeVertexNormals();
+
+  const capMat = new THREE.MeshStandardMaterial({
+    map, emissiveMap: emis, emissive: 0xffffff, emissiveIntensity: 0,
+    normalMap: nrm, normalScale: new THREE.Vector2(1, 1),
+    side: THREE.DoubleSide, roughness: 0.85, metalness: 0.12
+  });
+  structMats.glass.push(capMat);
+
+  /* ступица со спицами — тоже одна геометрия на оба торца */
+  const hubParts = [];
+  const hub = new THREE.CylinderGeometry(4.6, 4.6, 18, 18, 1, false);
+  hub.rotateX(Math.PI / 2);
+  hubParts.push(hub);
+  for (let k = 0; k < 6; k++) {
+    const a = (k / 6) * TAU + 0.26;
+    const spoke = new THREE.BoxGeometry(1.7, 1.2, R - 6);
+    spoke.rotateX(Math.PI / 2);
+    spoke.translate(0, (R + 4) / 2 - 2, 0);
+    spoke.rotateZ(-a);
+    hubParts.push(spoke);
+  }
+  const hubGeo = panelUV(mergeGeos(hubParts), CONFIG.PANEL_TILE);
+  const hubMat = new THREE.MeshStandardMaterial({
+    color: 0xa7b0ba, roughness: 0.45, metalness: 0.55
+  });
+
+  /* по два инстанса на каждую геометрию: у −z воронка развёрнута */
+  const twin = (geo, mat, flipZ) => {
+    const im = new THREE.InstancedMesh(geo, mat, 2);
+    const m = new THREE.Matrix4();
+    [-1, 1].forEach((sign, k) => {
+      m.identity();
+      if (flipZ) m.makeScale(1, 1, -sign);
+      m.setPosition(0, 0, sign * (flipZ ? HL : HL - E.depth));
+      im.setMatrixAt(k, m);
+    });
+    im.instanceMatrix.needsUpdate = true;
+    im.frustumCulled = false;
+    group.add(im); parts.push(im);
+  };
+  twin(cap, capMat, true);
+  twin(hubGeo, hubMat, false);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -486,9 +511,11 @@ export function liftSeat(k, outPos, outDir) {
 export const liftCount2 = () => (lifts ? lifts.z.length : 0);
 
 /** Изнутри стекло прозрачное, снаружи — светящееся */
+/** Изнутри стекло убирается совсем: любая остаточная непрозрачность даёт
+    тонировку, а пассажир должен видеть цилиндр без цветного фильтра.
+    Снаружи оно на месте и светится. */
 export function setLiftInside(inside) {
   const m = structMats.liftGlass;
-  if (!m) return;
-  m.opacity = inside ? CONFIG.LIFTCAR.insideOpacity : 1;
-  m.depthWrite = !inside;
+  if (m) { m.opacity = inside ? 0 : 1; m.depthWrite = !inside; }
+  if (lifts && lifts.glass) lifts.glass.visible = !inside;
 }

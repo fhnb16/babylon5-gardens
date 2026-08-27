@@ -311,13 +311,13 @@ export const CONFIG = {
   PRINT: { across: 1.19, along: 1.9, dark: 0.72 },
 
   QUALITY: {
-    LOW:    { count: 1, foliage: 0, trees: 1.0,  hullTex: 1024, mask: 512,  aniso: 4,  dpr: 0, footprint: false, normals: 0,    lights: 3, mirror: 0 },
-    HIGH:   { count: 0, foliage: 1, trees: 1.0,  hullTex: 2048, mask: 1024, aniso: 8,  dpr: 4, footprint: true,  normals: 1024, lights: 5, mirror: 0 },
+    LOW:    { count: 1, foliage: 0, trees: 1.0,  hullTex: 1024, mask: 512,  aniso: 4,  dpr: 0, footprint: false, normals: 0,    lights: 3, mirror: 0, chunks: 4 },
+    HIGH:   { count: 0, foliage: 1, trees: 1.0,  hullTex: 2048, mask: 1024, aniso: 8,  dpr: 4, footprint: true,  normals: 1024, lights: 5, mirror: 0, chunks: 8 },
     /* Ультра для телефона: все возможности те же — нормали, следы домов,
        подробная маска фонарей, — режется только листва. Она и есть 78%
        геометрии, всё остальное вместе весит вчетверо меньше. */
-    ULTRAM: { count: 0, foliage: 1, trees: 0.85, hullTex: 2048, mask: 2048, aniso: 8,  dpr: 3, footprint: true,  normals: 1024, lights: 3, mirror: 1 },
-    ULTRA:  { count: 0, foliage: 2, trees: 1.3,  hullTex: 2048, mask: 2048, aniso: 16, dpr: 4, footprint: true,  normals: 2048, lights: 5, mirror: 1 }
+    ULTRAM: { count: 0, foliage: 1, trees: 0.85, hullTex: 2048, mask: 2048, aniso: 8,  dpr: 3, footprint: true,  normals: 1024, lights: 3, mirror: 1, chunks: 4 },
+    ULTRA:  { count: 0, foliage: 2, trees: 1.3,  hullTex: 2048, mask: 2048, aniso: 16, dpr: 4, footprint: true,  normals: 2048, lights: 5, mirror: 1, chunks: 8 }
   },
 
   /* Трассировка в фото-режиме. rays — лучей на пиксель за кадр,
@@ -328,9 +328,19 @@ export const CONFIG = {
        практически готовую картинку, и оставшиеся 95 кадров правили то, чего
        глаз не различает: индикатор считал пустоту. Три луча дают 58% на первом
        кадре, и схождение видно своими глазами, как и должно быть. */
-    rays: 8, samples: 200, radius: 1.4, intensity: 2.0, bias: 0.015,
-    shadow: 1.0, shadowSteps: 16,   // прямой свет: сила и шагов марша к солнцу
+    /* На телефоне трассировка идёт вчетверо короче: разница в кадре почти
+       не видна, а ждать полторы сотни кадров на мобильном GPU незачем. */
+    rays: 8, samples: 200,
+    mobileRays: 4, mobileSamples: 48, mobileRefSteps: 40, mobileShadowSteps: 8,
+    radius: 1.4, intensity: 2.0, bias: 0.015,
+    /* Прямой свет: сила, шагов марша к солнцу, стартовый шаг и его рост.
+       Стартовый шаг обязан быть мельче самой мелкой преграды — крона
+       начинается в 0.4 юнита над землёй. */
+    shadow: 1.0, shadowSteps: 16, shadowStep: 0.08, shadowGrow: 1.4,
     sunGlow: 3.5,                   // яркость трубы в отражении
+    /* Ниже этой гладкости поверхность не отражает вовсе: порог 0.25 с
+       линейным весом давал металлу больше половины зеркала. */
+    mirrorMin: 0.85,
     bounce: 3.0,          // сила переотражённого света
     reflect: 1.25,        // сила зеркальных отражений
     /* Марш отражённого луча. Двадцать шагов с ростом 1.35 разгоняли шаг до
@@ -373,10 +383,11 @@ export const CONFIG = {
     div: 2, threshold: 0.45, radius: 2.6, glow: 1.15, sunHdr: 2.6,
     rays: 0.3, raySteps: 32, rayDensity: 0.5, rayDecay: 0.9
   },
-  /* На сколько секторов по дуге режутся инстансы ради отсечения по кадру.
-     Восемь — баланс: отсекается 63% вершин, а в кадре остаётся 27 вызовов.
-     Шестнадцать отсекли бы 75%, но подняли бы вызовы до 159 — на мобильном
-     это уже дороже сэкономленного. */
+  /* Запасное число секторов, если пресет его не задал. Само число живёт в
+     пресете: оно определяет НЕ содержимое кадра, а количество вызовов
+     отрисовки. Больше секторов — точнее отсечение вершин, но больше вызовов;
+     на телефоне вызов дороже сэкономленных вершин, поэтому там их вдвое
+     меньше. */
   CHUNKS: 8,
   /* Два рычага против самой дорогой части кадра. Листва — от 62 до 78%
      геометрии, поэтому её плотность влияет сильнее всего остального вместе
