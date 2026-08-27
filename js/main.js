@@ -587,9 +587,13 @@ function initUI() {
     bPath.classList.add('on');
     /* сразу показываем, что нажатие принято: библиотека грузится с сети и
        дерево строится не мгновенно, без отклика это выглядит как поломка */
+    /* Порядок важен: сперва надпись, потом долгая работа. Постройка дерева
+       блокирует поток на секунды, и без заранее отрисованного предупреждения
+       это неотличимо от зависшей вкладки. */
     showTrace('загрузка библиотеки…');
     /* станцию и ветер уже остановил фото-режим — сцена статична */
-    const okStart = await startPath(renderer, scene, camera, windU.uWind, isMobile);
+    const okStart = await startPath(renderer, scene, camera, windU.uWind, isMobile,
+      showTrace, structMats.sun, hemi);
     if (!okStart) {
       bPath.classList.remove('on');
       showTrace(pathLabel());

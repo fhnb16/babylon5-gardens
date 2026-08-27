@@ -378,7 +378,9 @@ export const CONFIG = {
      На телефоне всё скромнее, но работает та же библиотека. */
   PATH: {
     samples: 400, scale: 1, tiles: 3, bounces: 5, texSize: 2048,
-    mobileScale: 0.6, mobileTiles: 6, mobileBounces: 3
+    mobileScale: 0.6, mobileTiles: 6, mobileBounces: 3,
+    sunEmit: 14,      // яркость трубы как источника: она узкая, а светит на всё
+    envScale: 0.85    // во что превращается полусферный свет, которого библиотека не знает
   },
 
   /* Постобработка: свечение и лучи от оси. div — во сколько раз меньше
