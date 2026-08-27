@@ -14,7 +14,14 @@
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 <meta name="description" content="Интерактивный цилиндр О'Нилла: полёт внутри вращающейся станции">
 <script type="importmap">
-{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js" } }
+{
+  "imports": {
+    "three": "https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js",
+    "three/examples/jsm/": "https://cdn.jsdelivr.net/npm/three@0.165.0/examples/jsm/",
+    "three-mesh-bvh": "https://cdn.jsdelivr.net/npm/three-mesh-bvh@0.7.8/build/index.module.js",
+    "three-gpu-pathtracer": "https://cdn.jsdelivr.net/npm/three-gpu-pathtracer@0.0.23/build/index.module.js"
+  }
+}
 </script>
 </head>
 <body>
@@ -65,6 +72,9 @@
     </div>
     <div class="btn glass" id="bTrace" title="Трассировка" aria-label="Трассировка">
       <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.4v3.2M12 18.4v3.2M2.4 12h3.2M18.4 12h3.2M5.2 5.2l2.3 2.3M16.5 16.5l2.3 2.3M18.8 5.2l-2.3 2.3M7.5 16.5l-2.3 2.3"/></svg>
+    </div>
+    <div class="btn glass" id="bPath" title="Полная трассировка пути" aria-label="Полная трассировка пути">
+      <svg viewBox="0 0 24 24"><path d="M3.6 20.4 20.4 3.6"/><path d="M20.4 3.6 12 7.2l1.9 4.9 4.9 1.9z"/><circle cx="5.4" cy="18.6" r="2.1"/></svg>
     </div>
     <div class="btn glass" id="bDebug" title="Показать вклад лучей" aria-label="Показать вклад лучей">
       <svg viewBox="0 0 24 24"><path d="M3.4 12a8.6 8.6 0 0 1 17.2 0"/><path d="M12 3.4v17.2"/><circle cx="12" cy="12" r="3"/></svg>
@@ -243,7 +253,9 @@
       <p>📷 Фото-режим — HUD прячется, затвор сохраняет PNG</p>
       <p>Снимок рендерится вчетверо крупнее и ужимается</p>
       <p>В фото-режиме ✳ — трассировка света, затем затвор</p>
-      <p>◉ рядом — вклад лучей: затенение, переотражения,</p>
+      <p>✦ — полная трассировка пути: настоящий свет по всей</p>
+      <p>геометрии, без экранных ограничений. Грузится по нажатию</p>
+      <p>◉ — вклад экранных лучей: затенение, переотражения,</p>
       <p>отражения, прямой свет, шероховатость, карта лучей</p>
       <p>Свечение, лучи от оси и трафик — в настройках</p>
       <p>Сезон, качество и громкость — там же</p>

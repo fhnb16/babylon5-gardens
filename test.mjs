@@ -2637,6 +2637,62 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
      'На телефоне секторов меньше: там вызов дороже сэкономленных вершин');
 }
 
+/* ══ 3h29. Полная трассировка пути ═════════════════════════════════════ */
+{
+  const src = readFileSync(new URL('./js/pathtrace.js', import.meta.url), 'utf8');
+  const html = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
+  const msrc = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+
+  /* Библиотека грузится лениво: она весит больше самого проекта, платить за
+     неё при обычном запуске незачем. */
+  ok(/await import\('three-gpu-pathtracer'\)/.test(src),
+     'Библиотека подгружается по первому включению, а не при старте');
+  ok(!/^import .*three-gpu-pathtracer/m.test(src), 'Статического импорта нет');
+
+  /* карта импортов должна покрывать всё, что тянет сборка */
+  for (const dep of ['three-gpu-pathtracer', 'three-mesh-bvh', 'three/examples/jsm/']) {
+    ok(html.includes(`"${dep}"`), `Карта импортов знает «${dep}»`);
+  }
+
+  /* дерево строится один раз — это возможно только на статичной сцене */
+  ok(/setSceneAsync\(scene, camera/.test(src), 'Дерево строится асинхронно, с прогрессом');
+  ok(/onProgress: v => \{ pt\.build = v; \}/.test(src), 'Прогресс постройки виден');
+  ok(/windU\.value = 0/.test(src),
+     'Ветер останавливается: дерево описывает геометрию в покое, а кроны смещает вершинный шейдер');
+  ok(/omegaSaved = omega;\s*\n\s*omega = 0;/.test(msrc),
+     'Вращение станции уже остановлено фото-режимом — сцена статична');
+
+  /* отказ обязан быть мягким */
+  ok(/catch \(e\) \{[\s\S]{0,120}pt\.error =/.test(src),
+     'Отказ ловится и превращается в сообщение, а не роняет страницу');
+  ok(/pt\.error\) return `путь недоступен/.test(src), 'Причина отказа показывается');
+  ok(/if \(!okStart\) bPath\.classList\.remove\('on'\)/.test(msrc),
+     'Не запустилось — кнопка гаснет, обычный кадр остаётся доступен');
+
+  /* точки и прозрачное дерево обхода не описывает */
+  ok(/hideNonSolid/.test(src),
+     'Спрайты и прозрачные плоскости прячутся: дерево их не описывает, вышли бы чёрные дыры');
+  ok(/restoreHidden/.test(src), 'И возвращаются на место при выходе');
+
+  /* накопление */
+  ok(/if \(done >= 1\) return 1;/.test(src),
+     'Набрав нужное, счёт прекращается — путь стоит на порядок дороже обычной отрисовки');
+  ok(/export function pathCameraMoved/.test(src) && /tracer\.updateCamera\(\)/.test(src),
+     'Сдвиг камеры сбрасывает накопление');
+  ok(/if \(!camera\.position\.equals\(_ptPrev\)\)/.test(msrc), 'Движение отслеживается в цикле');
+  ok(/pathStep\(\);[\s\S]{0,200}return;/.test(msrc),
+     'Путь выводит кадр сам, обычная отрисовка пропускается целиком');
+
+  /* настройки по устройству */
+  const P = CONFIG.PATH;
+  ok(P.mobileScale < P.scale && P.mobileBounces < P.bounces,
+     `На телефоне доля разрешения ${P.mobileScale} и ${P.mobileBounces} переотражения против ${P.scale} и ${P.bounces}`);
+  ok(P.mobileTiles > P.tiles,
+     `Полос больше (${P.mobileTiles}): короче каждый вызов, браузер не считает вкладку зависшей`);
+  ok(P.samples >= 100, `Выборок пути до готовности: ${P.samples}`);
+  ok(html.includes('id="bPath"'), 'Кнопка пути есть в фото-режиме');
+}
+
 /* ══ 3i. Звук реагирует на то, где находится камера ════════════════════ */
 {
   /* Решения о громкости вынесены в чистые функции — их можно проверить

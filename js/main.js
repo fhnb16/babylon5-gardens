@@ -8,6 +8,7 @@ import { buildStructures, structMats, updateStructures,
   liftSeat, liftCount2, setLiftInside } from './structures.js';
 import { ctl, isMobile, initControls, updateControls, syncFromCamera, resetStick, stationUp } from './controls.js';
 import { audio, startAudio, updateAudio, setVolume, setEnabled, suspendAudio } from './audio.js';
+import { pt, startPath, pathStep, stopPath, pathLabel, pathCameraMoved } from './pathtrace.js';
 import { trace, startTrace, traceStep, stopTrace,
   setPost, setSunScreen, resizePost, renderFrame,
   setTraceDebug, DEBUG_NAMES, setAmbientShare, setHullRef } from './photo.js';
@@ -258,7 +259,7 @@ const _v = new THREE.Vector3(), _v2 = new THREE.Vector3(), _Z = new THREE.Vector
 const _vAudio = new THREE.Vector3(), _v3 = new THREE.Vector3();
 const _upB = new THREE.Vector3(), _dirA = new THREE.Vector3(), _dirB = new THREE.Vector3();
 const _qTurn = new THREE.Quaternion(), _qStep = new THREE.Quaternion();
-const _vMirror = new THREE.Vector3();
+const _vMirror = new THREE.Vector3(), _ptPrev = new THREE.Vector3();
 
 function goTo(i, instant = false) {
   const tp = CONFIG.TP[i];
@@ -566,6 +567,20 @@ function initUI() {
   $('bPhotoExit').onclick = () => setClean(false);
   $('bShot').onclick = () => { shotPending = true; };
   $('bTrace').onclick = () => setTrace(!trace.active);
+
+  /* Полная трассировка пути: считает настоящий путь света по дереву обхода
+     всей геометрии, без экранных ограничений. Библиотека грузится по первому
+     включению — она весит больше самого проекта. */
+  const bPath = $('bPath');
+  bPath.onclick = async () => {
+    if (pt.active) { stopPath(); bPath.classList.remove('on'); return; }
+    setTrace(false);
+    setTraceDebug(0);
+    bPath.classList.add('on');
+    /* станцию и ветер уже остановил фото-режим — сцена статична */
+    const okStart = await startPath(renderer, scene, camera, windU.uWind, isMobile);
+    if (!okStart) bPath.classList.remove('on');
+  };
 
   /* Наглядный ответ на вопрос «а точно ли это считается лучами»: показываем
      ТОЛЬКО вклад трассировки, без исходной картинки. Видно и что посчитано,
@@ -919,6 +934,20 @@ function loop() {
   if (paused) return;
   const dt = Math.min(0.05, clock.getDelta());
   renderer.info.reset();          // за кадр целиком, а не за последний проход
+
+  /* Путь выводит кадр сам, поэтому обычная отрисовка пропускается целиком.
+     Сдвиг камеры сбрасывает накопление: считается новый ракурс. */
+  if (pt.active) {
+    if (!camera.position.equals(_ptPrev)) {
+      _ptPrev.copy(camera.position);
+      pathCameraMoved();
+    }
+    pathStep();
+    $('traceInfo').textContent = pathLabel();
+    $('traceInfo').classList.add('show');
+    if (pt.error) $('bPath').classList.remove('on');
+    return;
+  }
 
   if (trace.active) {
     const done = traceStep();
