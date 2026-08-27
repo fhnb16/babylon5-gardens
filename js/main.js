@@ -8,9 +8,10 @@ import { buildStructures, structMats, updateStructures,
   liftSeat, liftCount2, setLiftInside } from './structures.js';
 import { ctl, isMobile, initControls, updateControls, syncFromCamera, resetStick, stationUp } from './controls.js';
 import { audio, startAudio, updateAudio, setVolume, setEnabled, suspendAudio } from './audio.js';
-import { pt, startPath, pathStep, stopPath, pathLabel, pathCameraMoved } from './pathtrace.js';
+import { pt, startPath, pathStep, stopPath, pathLabel, pathCameraMoved,
+  setPaused } from './pathtrace.js';
 import { trace, startTrace, traceStep, stopTrace,
-  setPost, setSunScreen, resizePost, renderFrame,
+  setPost, setSunScreen, resizePost, renderFrame, composite, setDenoise,
   setTraceDebug, DEBUG_NAMES, setAmbientShare, setHullRef } from './photo.js';
 
 const $ = id => document.getElementById(id);
@@ -523,8 +524,10 @@ function saveCanvas(w, h) {
 }
 
 function grabShot() {
-  /* Во время трассировки кадр уже накоплен в увеличенном масштабе —
-     пересобирать его нельзя, просто ужимаем. */
+  /* Накопленный кадр — хоть путём, хоть экранными лучами — пересобирать
+     нельзя: перерисовка стёрла бы всё накопленное. Просто ужимаем то, что
+     уже на канвасе. */
+  if (pt.active) { saveCanvas(renderer.domElement.width, renderer.domElement.height); return; }
   if (trace.active) {
     saveCanvas(Math.round(renderer.domElement.width / CONFIG.SHOT.scale),
       Math.round(renderer.domElement.height / CONFIG.SHOT.scale));
@@ -579,6 +582,18 @@ function initUI() {
   /* Полная трассировка пути: считает настоящий путь света по дереву обхода
      всей геометрии, без экранных ограничений. Библиотека грузится по первому
      включению — она весит больше самого проекта. */
+  /* Пауза с очисткой: накопление останавливается, кадр проходит через
+     шумоподавитель. Деталей, которых ещё нет, он не создаст, но зерно уберёт
+     и снимок можно делать раньше. Повторное нажатие возвращает расчёт. */
+  const bPause = $('bPause');
+  bPause.onclick = () => {
+    const on = !pt.paused && !traceHeld;
+    if (pt.active) setPaused(on);
+    traceHeld = pt.active ? false : on;
+    setDenoise(on);
+    bPause.classList.toggle('on', on);
+  };
+
   const bPath = $('bPath');
   bPath.onclick = async () => {
     if (pt.active || pt.error) { stopPath(); bPath.classList.remove('on'); return; }
@@ -593,7 +608,13 @@ function initUI() {
     showTrace('загрузка библиотеки…');
     /* станцию и ветер уже остановил фото-режим — сцена статична */
     const okStart = await startPath(renderer, scene, camera, windU.uWind, isMobile,
-      showTrace, structMats.sun, hemi);
+      showTrace, structMats.sun, hemi,
+      /* Результат пути идёт через ту же постобработку, что и обычный кадр:
+         библиотека рисует прямо в канвас и минует свечение, лучи от оси и
+         всё сглаживание. */
+      texture => composite(renderer, texture, renderer.toneMappingExposure),
+      worldMats.hull, worldMats.waterRough,
+      hullU.uCityGlow.value > 0.2 ? 0xffd9a0 : 0xcfe0ff);
     if (!okStart) {
       bPath.classList.remove('on');
       showTrace(pathLabel());
@@ -915,7 +936,7 @@ let dprIndex = 0, dprCap = 0, paused = false, frames = 0, winT = 0, upT = 0, wor
 const capForQuality = () => Math.min(CONFIG.QUALITY[currentQuality()].dpr, isMobile ? 3 : 4);
 const startDpr = () => quality === 'AUTO' && isMobile ? Math.min(2, capForQuality()) : capForQuality();
 let ssaa = 1, shotBoost = 1, aaLabel = 'MSAA', windBase = 1;
-let hullAlbedoTex = null, mirrorOn = 0;
+let hullAlbedoTex = null, mirrorOn = 0, traceHeld = false;
 let glowOn = false, raysOn = false, trafficOn = true;
 /* Множитель суперсэмплинга применяется ПОВЕРХ плотности экрана. Раньше здесь
    стоял min(devicePixelRatio, шаг) — на обычном мониторе 1× он намертво
@@ -962,6 +983,10 @@ function loop() {
     }
     pathStep();
     showTrace(pathLabel());
+    /* Затвор обязан работать и здесь. Раньше ветка возвращалась раньше его
+       обработки, и снимок во время трассировки не делался вовсе — это
+       выглядело как «интерфейс заблокирован нагрузкой», хотя поток свободен. */
+    if (shotPending) { shotPending = false; grabShot(); }
     return;
   }
   /* Отказ показывается и после того, как трассировка снялась: иначе нажатие
@@ -972,7 +997,7 @@ function loop() {
   }
 
   if (trace.active) {
-    const done = traceStep();
+    const done = traceHeld ? 1 : traceStep();
     /* Показываем не только проценты, но и оставшийся шум: по нему видно,
        что именно ещё уточняется, а проценты сами по себе ни о чём не говорят. */
     const noise = 100 / Math.sqrt(Math.max(1, trace.sample) * trace.rays);

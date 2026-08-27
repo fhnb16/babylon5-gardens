@@ -24,6 +24,9 @@ export const pt = {
   ready: false,       // дерево построено, идут выборки
   build: 0,           // 0 — дерево строится, 1 — построено
   buildMs: 0,         // сколько заняла постройка
+  threaded: false,    // дерево собрано в отдельном потоке
+  worker: null,       // сам поток, чтобы закрыть его при выходе
+  paused: false,      // накопление остановлено, показывается очищенный кадр
   samples: 0,         // накоплено выборок
   error: null         // текст отказа, если не запустилось
 };
@@ -35,14 +38,126 @@ const nextFrame = () => new Promise(r => {
 });
 
 let tracer = null, lib = null, R = null, S = null, C = null;
+let WebGLPathTracer = null;
 let savedWind = 1, windU = null, hidden = [];
 let expanded = [], clones = [], swapped = [];
-let prevEnv = null, envTex = null;
+let starting = false;   // замок от повторного нажатия во время сборки
+const geoCache = new Map(), matCache = new Map();
+let normalized = [];
+let prevEnv = null, envTex = null, waterSaved = null, emitSaved = [], rimAdded = [];
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ПОСТРОЙКА ДЕРЕВА В ОТДЕЛЬНОМ ПОТОКЕ
+
+   Дерево обхода считается на процессоре и занимает секунды. В главном потоке
+   это замораживает интерфейс целиком: кнопки не отвечают, снимок не сделать.
+
+   Штатный worker библиотеки не подходит: worker НЕ наследует карту импортов
+   страницы, и `import 'three'` внутри него не разрешится. Поэтому собираем
+   свой — из строки, с АБСОЛЮТНЫМИ адресами тех же сборок, взятыми прямо из
+   карты импортов страницы. Интерфейс от него нужен ровно один: метод
+   generate(geometry), возвращающий обещание с готовым деревом.
+
+   Выборки пути в поток выносить незачем: вызов renderSample уходит на GPU за
+   микросекунды, поток при этом свободен. Вязкость там от загруженной
+   видеокарты, а не от занятого потока.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/** Абсолютный адрес модуля из карты импортов страницы */
+function resolveUrl(name) {
+  try {
+    return new URL(import.meta.resolve(name), location.href).href;
+  } catch {
+    return null;
+  }
+}
+
+const workerSource = (threeUrl, bvhUrl) => `
+import { BufferGeometry, BufferAttribute } from '${threeUrl}';
+import { MeshBVH } from '${bvhUrl}';
+
+self.onmessage = e => {
+  const { position, index, options } = e.data;
+  try {
+    const geo = new BufferGeometry();
+    geo.setAttribute('position', new BufferAttribute(position, 3));
+    if (index) geo.setIndex(new BufferAttribute(index, 1));
+    const bvh = new MeshBVH(geo, options || {});
+    const packed = MeshBVH.serialize(bvh, { cloneBuffers: false });
+    const move = [packed.index.buffer, ...packed.roots];
+    self.postMessage({ ok: true, packed }, move);
+  } catch (err) {
+    self.postMessage({ ok: false, error: String((err && err.message) || err) });
+  }
+};
+`;
+
+/** Настройки трассировщика. Отдельной функцией, потому что при откате на
+    синхронную сборку он создаётся заново и настройки нужны те же. */
+function applyTracerSettings(t, mobile, onComposite) {
+  const P = CONFIG.PATH;
+  t.renderScale = mobile ? P.mobileScale : P.scale;
+  t.tiles.set(mobile ? P.mobileTiles : P.tiles, 1);
+  t.bounces = mobile ? P.mobileBounces : P.bounces;
+  t.minSamples = 1;
+  t.renderDelay = 0;
+  t.fadeDuration = 0;
+  t.dynamicLowRes = false;
+  t.textureSize.set(P.texSize, P.texSize);
+
+  /* Перехватываем вывод: библиотека рисует результат прямо в канвас и минует
+     всю нашу постобработку — ни свечения, ни лучей от оси, ни сглаживания.
+     Отдаём её цель в общую цепочку, и всё это возвращается. */
+  t.renderToCanvasCallback = (target, renderer2, quad) => {
+    if (onComposite && onComposite(target.texture)) return;
+    const auto = renderer2.autoClear;
+    renderer2.autoClear = false;
+    quad.render(renderer2);
+    renderer2.autoClear = auto;
+  };
+}
+
+/** Обёртка с тем интерфейсом, который ждёт библиотека: generate(geometry) */
+function makeBvhWorker(MeshBVHClass) {
+  const threeUrl = resolveUrl('three');
+  const bvhUrl = resolveUrl('three-mesh-bvh');
+  if (!threeUrl || !bvhUrl || typeof Worker === 'undefined') return null;
+
+  const blob = new Blob([workerSource(threeUrl, bvhUrl)], { type: 'text/javascript' });
+  const url = URL.createObjectURL(blob);
+  const worker = new Worker(url, { type: 'module' });
+  URL.revokeObjectURL(url);
+
+  return {
+    running: false,
+    generate(geometry, options = {}) {
+      this.running = true;
+      return new Promise((resolve, reject) => {
+        worker.onmessage = ev => {
+          this.running = false;
+          if (!ev.data.ok) { reject(new Error(ev.data.error)); return; }
+          /* дерево возвращается упакованным — разворачиваем на месте */
+          resolve(MeshBVHClass.deserialize(ev.data.packed, geometry, { setIndex: true }));
+        };
+        worker.onerror = err => { this.running = false; reject(err); };
+
+        /* буферы уходят В worker без копирования: у нас их сотни мегабайт */
+        const pos = geometry.attributes.position.array;
+        const idx = geometry.index ? geometry.index.array : null;
+        worker.postMessage({ position: pos, index: idx, options }, [pos.buffer,
+          ...(idx ? [idx.buffer] : [])]);
+      });
+    },
+    terminate() { worker.terminate(); }
+  };
+}
 
 /** Подгрузить библиотеку. Отдельной функцией, чтобы отказ был обрабатываем. */
+let GradientTex = null;
 async function load() {
   if (lib) return lib;
   lib = await import('three-gpu-pathtracer');
+  GradientTex = lib.GradientEquirectTexture;
   return lib;
 }
 
@@ -72,6 +187,49 @@ function restoreHidden() {
    значит, что все 3800 деревьев схлопываются в одно в начале координат: в
    дерево обхода попадало 3.76% сцены, оно строилось за 0.2 с, а кадр выходил
    пустым. Разворачиваем инстансы в обычные меши на время съёмки. */
+/* Сборщик сливает все геометрии в один буфер, и разнобой в атрибутах его
+   ломает: «Invalid typed array length». В сцене четыре разных набора — с
+   цветом вершин и без, с индексом и без. Приводим к одному: позиция,
+   нормаль, UV, с индексом. Цвет вершин при этом теряется, но он у нас даёт
+   лишь мелкое подкрашивание граней, а цвет экземпляра всё равно переезжает
+   в материал. */
+const NEEDED = ['position', 'normal', 'uv'];
+function normalizeGeo(geo) {
+  let g = geoCache.get(geo.uuid);
+  if (g) return g;
+  const extra = Object.keys(geo.attributes).filter(a => !NEEDED.includes(a));
+  const needIndex = !geo.index;
+  if (!extra.length && !needIndex) { geoCache.set(geo.uuid, geo); return geo; }
+
+  g = geo.clone();
+  for (const a of extra) g.deleteAttribute(a);
+  if (!g.attributes.uv) {
+    const n = g.attributes.position.count;
+    g.setAttribute('uv', new THREE.BufferAttribute(new Float32Array(n * 2), 2));
+  }
+  if (!g.index) {
+    const n = g.attributes.position.count;
+    const idx = new Uint32Array(n);
+    for (let k = 0; k < n; k++) idx[k] = k;
+    g.setIndex(new THREE.BufferAttribute(idx, 1));
+  }
+  geoCache.set(geo.uuid, g);
+  return g;
+}
+
+/** Материал без вершинных цветов: атрибут мы убрали, флаг должен уйти с ним */
+function flatMat(mat) {
+  if (!mat.vertexColors) return mat;
+  let m = matCache.get(mat.uuid);
+  if (!m) {
+    m = mat.clone();
+    m.vertexColors = false;
+    matCache.set(mat.uuid, m);
+    clones.push(m);
+  }
+  return m;
+}
+
 function expandInstances(scene) {
   const src = [];
   scene.traverse(o => { if (o.isInstancedMesh && o.visible && o.count > 0) src.push(o); });
@@ -84,7 +242,7 @@ function expandInstances(scene) {
     holder.matrixAutoUpdate = false;
     for (let k = 0; k < im.count; k++) {
       im.getMatrixAt(k, m);
-      const mesh = new THREE.Mesh(im.geometry, im.material);
+      const mesh = new THREE.Mesh(normalizeGeo(im.geometry), flatMat(im.material));
       mesh.matrixAutoUpdate = false;
       mesh.matrix.copy(m);
       /* Цвет экземпляра переносим в материал, иначе вся роща выйдет одного
@@ -97,7 +255,8 @@ function expandInstances(scene) {
         const key = col.getHex();
         let mat = byColor.get(im.material.uuid + ':' + key);
         if (!mat) {
-          mat = im.material.clone();
+          mat = flatMat(im.material).clone();
+          mat.vertexColors = false;
           mat.color.copy(col);
           byColor.set(im.material.uuid + ':' + key, mat);
           clones.push(mat);
@@ -114,12 +273,34 @@ function expandInstances(scene) {
   }
 }
 
+/** Привести к единому виду и одиночные меши: разнобой ломает сборку так же */
+function normalizeSolids(scene) {
+  normalized = [];
+  scene.traverse(o => {
+    if (!o.isMesh || o.isInstancedMesh || !o.visible) return;
+    const g = normalizeGeo(o.geometry);
+    const m = flatMat(o.material);
+    if (g !== o.geometry || m !== o.material) {
+      normalized.push({ mesh: o, geo: o.geometry, mat: o.material });
+      o.geometry = g;
+      o.material = m;
+    }
+  });
+}
+
+function restoreSolids() {
+  for (const n of normalized) { n.mesh.geometry = n.geo; n.mesh.material = n.mat; }
+  normalized = [];
+}
+
 function collapseInstances() {
   for (const e of expanded) {
     e.holder.parent?.remove(e.holder);
     e.im.visible = e.wasVisible;
   }
   for (const mm of clones) mm.dispose();
+  for (const g of geoCache.values()) if (g.userData.__clone) g.dispose();
+  geoCache.clear(); matCache.clear();
   expanded = []; clones = [];
 }
 
@@ -135,7 +316,37 @@ function collapseInstances() {
    просто окрашен: базовый материал не участвует в переносе света. На время
    съёмки труба получает светящийся материал, и именно он становится главным
    источником, как и должно быть. */
+/** Вода: подсовываем корпусу карту шероховатости и усиливаем рельеф.
+    Волны из патча шейдера трассировщику недоступны, но карта нормалей у
+    корпуса уже есть — поднимаем её вклад, чтобы рябь читалась. */
+function waterForPath(hullMat, roughMap) {
+  if (!hullMat) return;
+  waterSaved = {
+    mat: hullMat,
+    rough: hullMat.roughnessMap,
+    roughVal: hullMat.roughness,
+    metal: hullMat.metalness,
+    scale: hullMat.normalScale ? hullMat.normalScale.clone() : null
+  };
+  if (roughMap) { hullMat.roughnessMap = roughMap; hullMat.roughness = 1; }
+  hullMat.metalness = CONFIG.PATH.waterMetal;
+  hullMat.normalScale?.multiplyScalar(CONFIG.PATH.normalBoost);
+  hullMat.needsUpdate = true;
+}
+
+function restoreWater() {
+  const s = waterSaved;
+  if (!s) return;
+  s.mat.roughnessMap = s.rough;
+  s.mat.roughness = s.roughVal;
+  s.mat.metalness = s.metal;
+  if (s.scale) s.mat.normalScale.copy(s.scale);
+  s.mat.needsUpdate = true;
+  waterSaved = null;
+}
+
 function lightForPath(scene, sunMat, hemi) {
+  if (!GradientTex) return;
   swapped = [];
 
   if (sunMat) {
@@ -143,7 +354,8 @@ function lightForPath(scene, sunMat, hemi) {
       color: 0x000000,
       emissive: sunMat.color.clone(),
       emissiveIntensity: CONFIG.PATH.sunEmit,
-      side: THREE.DoubleSide
+      /* непрозрачный: прозрачное со сцены снимается, а источник должен остаться */
+      transparent: false, side: THREE.DoubleSide
     });
     clones.push(lit);
     scene.traverse(o => {
@@ -156,16 +368,87 @@ function lightForPath(scene, sunMat, hemi) {
 
   prevEnv = scene.environment;
   if (hemi) {
-    const c = new THREE.Color().copy(hemi.color).lerp(hemi.groundColor, 0.4)
-      .multiplyScalar(hemi.intensity * CONFIG.PATH.envScale);
-    /* однопиксельная равноугольная карта: ровная подсветка со всех сторон */
-    const tex = new THREE.DataTexture(
-      new Float32Array([c.r, c.g, c.b, 1]), 1, 1, THREE.RGBAFormat, THREE.FloatType);
-    tex.mapping = THREE.EquirectangularReflectionMapping;
-    tex.needsUpdate = true;
+    /* Берём штатный генератор библиотеки, а не самодельную карту.
+       Самодельная была 1×1, и three писал в шейдер `CUBEUV_TEXEL_WIDTH` как
+       1/ширина = 1 — целое там, где GLSL ждёт float, и фрагментный шейдер
+       переставал компилироваться. Заодно градиент «небо-земля» точнее
+       передаёт полусферный источник, чем один усреднённый цвет. */
+    const k = hemi.intensity * CONFIG.PATH.envScale;
+    const tex = new GradientTex(CONFIG.PATH.envRes);
+    tex.topColor.copy(hemi.color).multiplyScalar(k);
+    tex.bottomColor.copy(hemi.groundColor).multiplyScalar(k);
+    tex.exponent = 1.4;
+    tex.update();
     envTex = tex;
     scene.environment = tex;
   }
+}
+
+/** Поднять эмиссию всем светящимся материалам сцены.
+
+    Трассировщик находит источник, только если луч в него случайно попал.
+    Окно — несколько пикселей текстуры, фара — и того меньше: шанс попадания
+    ничтожен, и они не освещают ничего. Поднимаем силу эмиссии на время
+    съёмки: редкие попадания начинают давать заметный вклад. */
+function boostEmissive(scene) {
+  const k = CONFIG.PATH.emitBoost;
+  const seen = new Set();
+  scene.traverse(o => {
+    const list = Array.isArray(o.material) ? o.material : (o.material ? [o.material] : []);
+    for (const m of list) {
+      if (!m || seen.has(m.uuid)) continue;
+      seen.add(m.uuid);
+      if (m.emissiveIntensity > 0.001) {
+        emitSaved.push({ mat: m, v: m.emissiveIntensity });
+        m.emissiveIntensity *= k;
+      } else if (m.isMeshBasicMaterial && !m.transparent) {
+        /* базовые материалы ламп в переносе света не участвуют вовсе —
+           подменяем их светящимися, иначе фары просто окрашены */
+        const lit = new THREE.MeshStandardMaterial({
+          color: 0x000000, emissive: 0xffffff,
+          emissiveIntensity: CONFIG.PATH.lampEmit,
+          vertexColors: m.vertexColors, side: m.side
+        });
+        clones.push(lit);
+        scene.traverse(o2 => {
+          if (o2.isMesh && o2.material === m) {
+            swapped.push({ mesh: o2, prev: m });
+            o2.material = lit;
+          }
+        });
+      }
+    }
+  });
+}
+
+/** Кольцевая подсветка у торцов и вдоль земли.
+
+    Она нарисована в текстурах как эмиссия, и трассировщик находит её только
+    случайным лучом — то есть практически никогда. Настоящие точечные
+    источники он выбирает явно, поэтому на время съёмки добавляем кольцо у
+    каждого торца. Они снимаются при выходе и в обычном кадре не участвуют. */
+function addRimLights(scene, palette) {
+  const P = CONFIG.PATH;
+  const R = CONFIG.R - 3, HL = CONFIG.L / 2;
+  for (const sign of [-1, 1]) {
+    for (let k = 0; k < P.rimLights; k++) {
+      const a = (k / P.rimLights) * Math.PI * 2;
+      const l = new THREE.PointLight(palette.rim, P.rimPower, P.rimRange, 1.4);
+      l.position.set(Math.sin(a) * R, Math.cos(a) * R, sign * (HL - P.rimInset));
+      scene.add(l);
+      rimAdded.push(l);
+    }
+  }
+}
+
+function removeRimLights() {
+  for (const l of rimAdded) l.parent?.remove(l);
+  rimAdded = [];
+}
+
+function restoreEmissive() {
+  for (const e of emitSaved) e.mat.emissiveIntensity = e.v;
+  emitSaved = [];
 }
 
 function restoreLight(scene) {
@@ -177,34 +460,46 @@ function restoreLight(scene) {
 }
 
 /** Запустить трассировку. Возвращает false, если устройство не потянуло. */
-export async function startPath(renderer, scene, camera, wind, mobile, onPhase, sunMat, hemi) {
-  if (pt.active) return true;
+export async function startPath(renderer, scene, camera, wind, mobile, onPhase, sunMat, hemi, onComposite, hullMat, roughMap, rimColor) {
+  /* Два замка. Первый — от повторного нажатия: сборка дерева длится секунды,
+     и второй запуск застаёт генератор занятым, отвечая «BVH is already
+     building asynchronously». */
+  if (pt.active || starting) return true;
+  starting = true;
   R = renderer; S = scene; C = camera; windU = wind;
   pt.error = null; pt.build = 0; pt.samples = 0; pt.ready = false;
 
   try {
-    const { WebGLPathTracer } = await load();
+    ({ WebGLPathTracer } = await load());
     onPhase?.('строится дерево обхода, это займёт время…');
 
     /* Ветер останавливаем: дерево описывает геометрию в покое, а кроны
        смещает вершинный шейдер — трассировщик этого смещения не увидит. */
+    /* Сперва отдаём браузеру два кадра — он успевает отрисовать надпись и
+       ОБЫЧНУЮ сцену. Подменять материалы до этого нельзя: замерший кадр
+       остался бы с погашенным солнцем и снятой дымкой, что и выглядело
+       «плоско, без эффектов». */
+    await nextFrame();
+    await nextFrame();
+
     savedWind = windU.value;
     windU.value = 0;
+
+    /* Порядок обязателен. Труба-солнце помечена прозрачной — она гаснет в
+       тумане, — и hideNonSolid убрал бы её вместе с дымкой: главный источник
+       просто исчезал из сцены. Сперва меняем ей материал на непрозрачный
+       светящийся, и только потом прячем всё остальное прозрачное. */
+    lightForPath(scene, sunMat, hemi);
+    boostEmissive(scene);
+    addRimLights(scene, { rim: rimColor || 0xffd9a0 });
+    waterForPath(hullMat, roughMap);
     hideNonSolid(scene);
     expandInstances(scene);
-    lightForPath(scene, sunMat, hemi);
+    normalizeSolids(scene);
     scene.updateMatrixWorld(true);
 
     tracer = new WebGLPathTracer(renderer);
-    const P = CONFIG.PATH;
-    tracer.renderScale = mobile ? P.mobileScale : P.scale;
-    tracer.tiles.set(mobile ? P.mobileTiles : P.tiles, 1);
-    tracer.bounces = mobile ? P.mobileBounces : P.bounces;
-    tracer.minSamples = 1;
-    tracer.renderDelay = 0;
-    tracer.fadeDuration = 0;
-    tracer.dynamicLowRes = false;
-    tracer.textureSize.set(P.texSize, P.texSize);
+    applyTracerSettings(tracer, mobile, onComposite);
 
     pt.active = true;
 
@@ -215,16 +510,50 @@ export async function startPath(renderer, scene, camera, wind, mobile, onPhase, 
 
        Перед постройкой отдаём кадр браузеру, иначе предупреждение не успеет
        отрисоваться и пауза будет выглядеть зависанием. */
-    await nextFrame();
-    await nextFrame();
     const t0 = (typeof performance !== 'undefined' ? performance : Date).now();
-    tracer.setScene(scene, camera);
+
+    /* Пробуем построить дерево в отдельном потоке: тогда интерфейс остаётся
+       живым и снимок можно сделать в любой момент. Если поток не поднялся
+       (нет Worker, не разрешились адреса, отказ при сборке) — считаем в
+       главном, как раньше: медленнее по ощущению, но работает всегда. */
+    /* Worker ставим ПУБЛИЧНЫМ методом. Раньше я лез в приватное поле —
+       `tracer._generator?.setBVHWorker?.(...)`, — и оператор ?. молча глотал
+       промах: worker не устанавливался, сборка падала на «setBVHWorker must
+       be called», а начатая ею генерация продолжала держать генератор. Отсюда
+       и «BVH is already building» на ПЕРВОМ же запуске. */
+    let threaded = false;
+    const mesh = await load();
+    const bvhWorker = typeof tracer.setBVHWorker === 'function'
+      ? makeBvhWorker(mesh.MeshBVH || (await import('three-mesh-bvh')).MeshBVH)
+      : null;
+
+    if (bvhWorker) {
+      pt.worker = bvhWorker;
+      tracer.setBVHWorker(bvhWorker);
+      try {
+        /* setSceneAsync сбрасывает свой внутренний флаг синхронно и
+           возвращает обещание — его обязательно дожидаться. */
+        await tracer.setSceneAsync(scene, camera, { onProgress: v => { pt.build = v; } });
+        threaded = true;
+      } catch (e) {
+        console.warn('[трассировка пути] дерево в потоке не собралось, считаю в главном', e);
+        /* Генератор остался занят начатой сборкой: продолжать через него
+           нельзя, берём чистый трассировщик. */
+        try { tracer.dispose?.(); } catch { /* нечего освобождать */ }
+        tracer = new WebGLPathTracer(renderer);
+        applyTracerSettings(tracer, mobile, onComposite);
+      }
+    }
+    if (!threaded) tracer.setScene(scene, camera);
+    pt.threaded = threaded;
     pt.buildMs = ((typeof performance !== 'undefined' ? performance : Date).now() - t0) | 0;
 
     pt.build = 1;
     pt.ready = true;
+    starting = false;
     return true;
   } catch (e) {
+    starting = false;
     /* Отказ нельзя проглатывать. Раньше здесь вызывался stopPath(), он снимал
        pt.active — а сообщение показывалось только пока флаг взведён. Итог:
        нажатие не давало ни картинки, ни ошибки, ни следа в консоли. */
@@ -256,10 +585,12 @@ export function pathCameraMoved() {
     незачем — путь стоит на порядок дороже обычной отрисовки. */
 export function pathStep() {
   if (!pt.active || !pt.ready) return 0;
+  if (pt.paused) return Math.min(1, pt.samples / CONFIG.PATH.samples);
   const done = Math.min(1, pt.samples / CONFIG.PATH.samples);
   if (done >= 1) return 1;
   try {
     tracer.renderSample();
+    /* при нескольких полосах счётчик дробный: кадр набирается по частям */
     pt.samples = tracer.samples;
   } catch (e) {
     fail(e);
@@ -271,8 +602,13 @@ export function pathStep() {
 /** Вернуть сцену в исходное состояние. Отдельно от stopPath, потому что при
     отказе состояние вернуть надо, а сообщение — сохранить. */
 function cleanup() {
+  if (pt.worker) { try { pt.worker.terminate(); } catch { /* уже закрыт */ } pt.worker = null; }
   if (windU) windU.value = savedWind;
   restoreLight(S);
+  restoreEmissive();
+  removeRimLights();
+  restoreWater();
+  restoreSolids();
   collapseInstances();
   restoreHidden();
   if (tracer) {
@@ -282,10 +618,26 @@ function cleanup() {
   R = S = C = null;
 }
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   ПАУЗА И ОЧИСТКА
+
+   Накопление можно остановить и пропустить кадр через шумоподавитель: он
+   сглаживает зерно, оставляя кромки. Это не замена выборкам — картинка
+   становится чище, но детали, которых ещё нет, не появятся. Зато снимок
+   можно делать раньше, не дожидаясь полного схождения.
+   ═══════════════════════════════════════════════════════════════════════════ */
+export function setPaused(on) {
+  pt.paused = !!on;
+  if (tracer) tracer.renderToCanvas = true;
+  return pt.paused;
+}
+
+export function pathPaused() { return pt.paused; }
+
 export function stopPath() {
   cleanup();
   pt.active = false; pt.ready = false; pt.build = 0; pt.samples = 0;
-  pt.buildMs = 0; pt.error = null;
+  pt.buildMs = 0; pt.error = null; pt.paused = false; starting = false;
 }
 
 /** Сообщение для индикатора: постройка дерева и накопление — разные фазы,
@@ -294,10 +646,16 @@ export function pathLabel() {
   if (pt.error) return `путь недоступен · ${pt.error}`;
   /* Постройка дерева блокирует поток: честно предупреждаем, что это надолго,
      а не рисуем прогресс, которого у синхронной сборки нет. */
-  if (!pt.ready) return 'строится дерево обхода, это займёт время…';
+  if (!pt.ready) {
+    return pt.threaded || pt.build > 0
+      ? `дерево обхода · ${(pt.build * 100) | 0}%`
+      : 'строится дерево обхода, это займёт время…';
+  }
   const done = Math.min(1, pt.samples / CONFIG.PATH.samples);
-  const built = pt.buildMs ? ` · дерево ${(pt.buildMs / 1000).toFixed(1)} с` : '';
+  if (pt.paused) return `пауза · выборок ${pt.samples | 0} · картинка очищена`;
+  const built = pt.buildMs
+    ? ` · дерево ${(pt.buildMs / 1000).toFixed(1)} с${pt.threaded ? ' в потоке' : ''}` : '';
   return done >= 1
-    ? `готово · ${pt.samples} выборок пути${built}`
-    : `путь · ${(done * 100) | 0}% · выборок ${pt.samples}${built}`;
+    ? `готово · ${pt.samples | 0} выборок пути${built}`
+    : `путь · ${(done * 100) | 0}% · выборок ${pt.samples | 0}${built}`;
 }

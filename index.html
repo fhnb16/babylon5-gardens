@@ -67,21 +67,25 @@
   <div id="rideBar"><span>ПОЕЗДКА НА МОНОРЕЛЬСЕ</span><i id="bRideExit">ВЫЙТИ</i></div>
   <div id="traceInfo"></div>
   <div id="photobar">
-    <div class="btn glass" id="bShot" aria-label="Снимок">
-      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.6"/><circle cx="12" cy="12" r="4.2"/></svg>
+    <div class="pbtn" id="bPath" title="Трассировка пути">
+      <i><svg viewBox="0 0 24 24"><path d="M3.6 20.4 20.4 3.6"/><path d="M20.4 3.6 12 7.2l1.9 4.9 4.9 1.9z"/><circle cx="5.4" cy="18.6" r="2.1"/></svg></i><span>Трассировка пути</span>
     </div>
-    <div class="btn glass" id="bTrace" title="Трассировка" aria-label="Трассировка">
-      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.4v3.2M12 18.4v3.2M2.4 12h3.2M18.4 12h3.2M5.2 5.2l2.3 2.3M16.5 16.5l2.3 2.3M18.8 5.2l-2.3 2.3M7.5 16.5l-2.3 2.3"/></svg>
+    <div class="pbtn" id="bTrace" title="Экранные лучи">
+      <i><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.2"/><path d="M12 2.4v3.2M12 18.4v3.2M2.4 12h3.2M18.4 12h3.2M5.2 5.2l2.3 2.3M16.5 16.5l2.3 2.3M18.8 5.2l-2.3 2.3M7.5 16.5l-2.3 2.3"/></svg></i><span>Экранные лучи</span>
     </div>
-    <div class="btn glass" id="bPath" title="Полная трассировка пути" aria-label="Полная трассировка пути">
-      <svg viewBox="0 0 24 24"><path d="M3.6 20.4 20.4 3.6"/><path d="M20.4 3.6 12 7.2l1.9 4.9 4.9 1.9z"/><circle cx="5.4" cy="18.6" r="2.1"/></svg>
+    <div class="pbtn" id="bPause" title="Пауза и очистка">
+      <i><svg viewBox="0 0 24 24"><path d="M9 5.4v13.2M15 5.4v13.2"/></svg></i><span>Пауза и очистка</span>
     </div>
-    <div class="btn glass" id="bDebug" title="Показать вклад лучей" aria-label="Показать вклад лучей">
-      <svg viewBox="0 0 24 24"><path d="M3.4 12a8.6 8.6 0 0 1 17.2 0"/><path d="M12 3.4v17.2"/><circle cx="12" cy="12" r="3"/></svg>
+    <div class="pbtn" id="bDebug" title="Показать вклад">
+      <i><svg viewBox="0 0 24 24"><path d="M3.4 12a8.6 8.6 0 0 1 17.2 0"/><path d="M12 3.4v17.2"/><circle cx="12" cy="12" r="3"/></svg></i><span>Показать вклад</span>
     </div>
-    <div class="btn glass" id="bPhotoExit" aria-label="Выйти из фото-режима">
-      <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+    <div class="pbtn" id="bShot" title="Снимок">
+      <i><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.6"/><circle cx="12" cy="12" r="4.2"/></svg></i><span>Снимок</span>
     </div>
+    <div class="pbtn" id="bPhotoExit" title="Выйти">
+      <i><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></i><span>Выйти</span>
+    </div>
+  </div>
   </div>
 
   <div id="stickBase"></div>

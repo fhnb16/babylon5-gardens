@@ -89,13 +89,14 @@ canvas{display:block;width:100%;height:100%;touch-action:none;outline:none}
 
 /* ── фото-режим ── */
 body.clean #topbar,body.clean #brand,body.clean #pad,body.clean #fps{display:none}
+/* Панель фото-режима: столбик кнопок слева. Прячется, пока фото-режим
+   не включён, иначе она наезжает на весь остальной интерфейс. */
 #photobar{
-  position:absolute;left:50%;transform:translateX(-50%);
-  bottom:calc(20px + var(--sab));display:none;gap:14px;
+  position:absolute;left:calc(12px + var(--sal));top:50%;transform:translateY(-50%);
+  display:none;flex-direction:column;gap:8px;z-index:6;
 }
 body.clean #photobar{display:flex}
-#photobar .btn{width:56px;height:56px;border-radius:50%}
-#photobar .btn.on{background:rgba(255,217,160,.22);color:var(--accent)}
+
 #rideBar{
   position:absolute;left:50%;transform:translateX(-50%);
   bottom:calc(20px + var(--sab));display:none;align-items:center;gap:14px;
@@ -112,6 +113,38 @@ body.clean #photobar{display:flex}
 #rideBar i:hover{background:rgba(255,217,160,.26)}
 body.clean #rideBar{display:none}
 
+/* ── Панель фото-режима ──
+   Иконки столбиком слева, подписи справа от них: без подписей понять, что
+   делает каждая, невозможно. Полупрозрачный фон с размытием — чтобы панель
+   читалась поверх любой картинки и не закрывала её. */
+
+.pbtn{
+  display:flex;align-items:center;gap:11px;cursor:pointer;
+  padding:9px 15px 9px 9px;border-radius:14px;
+  background:rgba(14,22,36,.44);border:1px solid rgba(180,214,255,.16);
+  backdrop-filter:blur(14px) saturate(140%);
+  -webkit-backdrop-filter:blur(14px) saturate(140%);
+  color:var(--dim);font:600 10px/1 ui-sans-serif,system-ui;letter-spacing:.1em;
+  white-space:nowrap;transition:background .16s,border-color .16s,color .16s;
+}
+.pbtn:hover{background:rgba(20,32,50,.62)}
+.pbtn i{
+  flex:0 0 auto;display:grid;place-items:center;width:34px;height:34px;
+  border-radius:10px;background:rgba(255,255,255,.05);
+}
+.pbtn svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.7;
+  stroke-linecap:round;stroke-linejoin:round}
+.pbtn.on{
+  background:rgba(255,217,160,.18);border-color:rgba(255,217,160,.34);color:var(--accent);
+}
+.pbtn.on i{background:rgba(255,217,160,.16)}
+
+@media (orientation:landscape) and (max-height:560px){
+  .pbtn{padding:6px 12px 6px 6px;gap:8px}
+  .pbtn i{width:28px;height:28px}
+  .pbtn span{font-size:9px}
+}
+
 #traceInfo{
   position:absolute;left:50%;transform:translateX(-50%);
   bottom:calc(94px + var(--sab));display:none;pointer-events:none;
@@ -120,8 +153,6 @@ body.clean #rideBar{display:none}
   font:12px/1.3 ui-monospace,SFMono-Regular,Menlo,monospace;letter-spacing:.06em;
 }
 #traceInfo.show{display:block}
-#photobar #bShot{width:66px;height:66px}
-#photobar #bShot svg{width:30px;height:30px}
 .tp.tour{margin-bottom:10px;border-color:rgba(255,217,160,.3);background:rgba(255,217,160,.08)}
 .tp.tour.on{background:rgba(255,217,160,.2);color:var(--accent)}
 
@@ -287,10 +318,7 @@ body.clean #rideBar{display:none}
   .tabbtn{padding:7px 2px;font-size:8px}
   .row{padding:6px 2px}
 
-  #photobar{bottom:calc(10px + var(--sab));gap:10px}
-  #photobar .btn{width:46px;height:46px;min-width:46px;min-height:46px}
-  #photobar #bShot{width:54px;height:54px}
-  #rideBar{
+        #rideBar{
   position:absolute;left:50%;transform:translateX(-50%);
   bottom:calc(20px + var(--sab));display:none;align-items:center;gap:14px;
   padding:9px 10px 9px 17px;border-radius:14px;white-space:nowrap;
@@ -305,6 +333,36 @@ body.clean #rideBar{display:none}
 }
 #rideBar i:hover{background:rgba(255,217,160,.26)}
 body.clean #rideBar{display:none}
+
+/* ── Панель фото-режима: иконка слева, подпись справа ──
+   Без подписей понять, что делает каждая кнопка, невозможно. Полупрозрачный
+   фон с размытием — чтобы панель читалась поверх любой картинки. */
+.pbtn{
+  display:flex;align-items:center;gap:11px;cursor:pointer;
+  padding:9px 15px 9px 9px;border-radius:14px;
+  background:rgba(14,22,36,.44);border:1px solid rgba(180,214,255,.16);
+  backdrop-filter:blur(14px) saturate(140%);
+  -webkit-backdrop-filter:blur(14px) saturate(140%);
+  color:var(--dim);font:600 10px/1 ui-sans-serif,system-ui;letter-spacing:.1em;
+  white-space:nowrap;transition:background .16s,border-color .16s,color .16s;
+}
+.pbtn:hover{background:rgba(20,32,50,.62)}
+.pbtn i{
+  flex:0 0 auto;display:grid;place-items:center;width:34px;height:34px;
+  border-radius:10px;background:rgba(255,255,255,.05);
+}
+.pbtn svg{width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.7;
+  stroke-linecap:round;stroke-linejoin:round}
+.pbtn.on{
+  background:rgba(255,217,160,.18);border-color:rgba(255,217,160,.34);color:var(--accent);
+}
+.pbtn.on i{background:rgba(255,217,160,.16)}
+
+@media (orientation:landscape) and (max-height:560px){
+  .pbtn{padding:6px 12px 6px 6px;gap:8px}
+  .pbtn i{width:28px;height:28px}
+  .pbtn span{font-size:9px}
+}
 
 #traceInfo{bottom:calc(70px + var(--sab))}
   #caption{bottom:calc(74px + var(--sab))}

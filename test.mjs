@@ -1267,7 +1267,9 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
      'preserveDrawingBuffer не включён — снимок берётся сразу после отрисовки');
   ok(msrc.lastIndexOf('if (shotPending)') > msrc.indexOf('renderer.render(scene, camera);'),
      'Захват стоит после render, иначе буфер уже очищен');
-  ok(msrc.indexOf('if (shotPending)') > msrc.indexOf('traceStep()'),
+  /* Захватов теперь два — в ветке пути и в ветке экранных лучей; проверяем
+     тот, что относится к экранной трассировке. */
+  ok(msrc.indexOf('if (shotPending)', msrc.indexOf('traceStep()')) > msrc.indexOf('traceStep()'),
      'В режиме трассировки захват идёт после показа накопленного');
   ok(/body\.clean #topbar/.test(css), 'В фото-режиме HUD скрывается');
   ok(html.includes('id="bShot"') && html.includes('id="bPhotoExit"'), 'Есть затвор и выход');
@@ -1730,8 +1732,9 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   const h = rows * 42 + (rows - 1) * 6;
   ok(h + 50 + 24 < 320, `Два столбца — ${h}px, вместе с нижним блоком влезает в экран 320px`);
 
-  ok(/#photobar\{bottom/.test(land) && /#traceInfo\{bottom/.test(land),
-     'Панель съёмки и индикатор тоже разведены по высоте');
+  /* панель съёмки уехала в столбик слева — по высоте её разводить не с чем */
+  ok(/\.pbtn\{padding/.test(land) && /#traceInfo\{bottom/.test(land),
+     'В ландшафте панель съёмки ужимается, индикатор разведён по высоте');
 
   /* Трассировка должна быть ВИДНА: при десяти лучах первый кадр давал 32%
      шума — почти готовую картинку, и проценты считали пустоту. */
@@ -2669,10 +2672,46 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   /* Асинхронная сборка требует worker'а, а worker не наследует карту
      импортов страницы: ему пришлось бы разрешать 'three' и 'three-mesh-bvh'
      самому. Синхронная сборка проще и не требует ничего. */
-  ok(/tracer\.setScene\(scene, camera\)/.test(src), 'Дерево строится синхронно, без worker\'а');
-  ok(!/setSceneAsync/.test(src), 'Асинхронного пути не осталось: он падал на отсутствии worker\'а');
+  /* Дерево считается на процессоре и занимает секунды: в главном потоке это
+     замораживает интерфейс, снимок не сделать. Штатный worker библиотеки не
+     годится — worker не наследует карту импортов страницы. Собираем свой из
+     строки с абсолютными адресами. */
+  ok(/function makeBvhWorker/.test(src), 'Дерево строится в отдельном потоке');
+  ok(/import\.meta\.resolve\(name\)/.test(src),
+     'Адреса берутся из карты импортов страницы, а не пишутся руками второй раз');
+  ok(/new Worker\(url, \{ type: 'module' \}\)/.test(src), 'Поток модульный');
+  ok(/\[pos\.buffer,/.test(src),
+     'Буферы уходят в поток без копирования: их сотни мегабайт');
+  ok(/MeshBVH\.serialize\(bvh, \{ cloneBuffers: false \}\)/.test(src),
+     'И возвращаются упакованными, тоже без копий');
+  ok(/if \(!threaded\) tracer\.setScene\(scene, camera\);/.test(src),
+     'Не поднялся поток — считаем в главном: медленнее по ощущению, но работает всегда');
+  ok(/catch \(e\) \{[\s\S]{0,500}tracer = new WebGLPathTracer\(renderer\)/.test(src),
+     'При отказе берётся НОВЫЙ трассировщик: генератор старого остался занят начатой сборкой');
+  ok(/if \(pt\.active \|\| starting\) return true;/.test(src),
+     'Замок от повторного нажатия: второй запуск заставал генератор занятым');
+
+  /* Worker ставится ПУБЛИЧНЫМ методом. Через приватное поле оператор ?.
+     молча глотал промах: worker не устанавливался, сборка падала, а начатая
+     ею генерация продолжала держать генератор — «BVH is already building»
+     вылезало на первом же запуске. */
+  ok(/tracer\.setBVHWorker\(bvhWorker\)/.test(src),
+     'Worker ставится публичным методом трассировщика');
+  ok(!/tracer\._generator\?\./.test(src.replace(/\/\*[\s\S]*?\*\//g, '')),
+     'Обращений к приватным полям библиотеки не осталось');
+  ok(/typeof tracer\.setBVHWorker === 'function'/.test(src),
+     'Наличие метода проверяется явно, а не глотается оператором ?.');
+  ok(/await tracer\.setSceneAsync/.test(src),
+     'Обещание сборки дожидается: setSceneAsync сбрасывает свой флаг синхронно');
+  ok(/pt\.worker\) \{ try \{ pt\.worker\.terminate/.test(src), 'Поток закрывается при выходе');
+  /* Кадр отдаётся ДО подмены материалов: иначе замерший кадр останется с
+     погашенным солнцем и снятой дымкой — «плоско, без эффектов». */
+  const iYield = src.indexOf('await nextFrame();');
+  const iSwap = src.indexOf('lightForPath(scene, sunMat, hemi);');
+  ok(iYield > 0 && iYield < iSwap,
+     'Браузер получает кадр до подмены материалов, а не после');
   ok(/await nextFrame\(\);\s*\n\s*await nextFrame\(\);/.test(src),
-     'Перед постройкой браузеру отдаётся кадр — иначе предупреждение не успеет отрисоваться');
+     'Два кадра: одного не хватает, чтобы надпись успела отрисоваться');
   ok(/onPhase\?\.\('строится дерево обхода/.test(src),
      'Фаза постройки объявляется до блокировки потока');
   ok(/pt\.buildMs = /.test(src), 'Время постройки замеряется и показывается');
@@ -2708,7 +2747,15 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   /* свет: полусферу библиотека не знает, базовый материал не светит */
   ok(/scene\.environment = tex/.test(src),
      'Полусферный свет заменяется окружением: в списке библиотеки его нет вовсе');
-  ok(/EquirectangularReflectionMapping/.test(src), 'Окружение — равноугольная карта');
+  /* Самодельная карта 1×1 ломала шейдер: three пишет CUBEUV_TEXEL_WIDTH как
+     1/ширина, при ширине 1 это целое там, где GLSL ждёт float. */
+  ok(/new GradientTex\(CONFIG\.PATH\.envRes\)/.test(src),
+     'Окружение строит штатный генератор библиотеки, а не самоделка');
+  ok(CONFIG.PATH.envRes > 1 && 1 / CONFIG.PATH.envRes !== Math.floor(1 / CONFIG.PATH.envRes),
+     `Сторона карты ${CONFIG.PATH.envRes}: 1/${CONFIG.PATH.envRes} = ${1 / CONFIG.PATH.envRes} — дробное, GLSL примет`);
+  ok(/tex\.topColor\.copy\(hemi\.color\)/.test(src) && /tex\.bottomColor\.copy\(hemi\.groundColor\)/.test(src),
+     'Градиент «небо-земля» передаёт полусферный источник точнее усреднённого цвета');
+  ok(/GradientTex = lib\.GradientEquirectTexture/.test(src), 'Генератор берётся из библиотеки');
   ok(/emissive: sunMat\.color\.clone\(\)/.test(src),
      'Труба получает светящийся материал: базовый в переносе света не участвует');
   ok(/emissiveIntensity: CONFIG\.PATH\.sunEmit/.test(src), 'Яркость трубы задаётся отдельно');
@@ -2716,6 +2763,24 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   ok(/function restoreLight/.test(src), 'Материалы и окружение возвращаются на место');
   ok(/scene\.updateMatrixWorld\(true\)/.test(src),
      'Мировые матрицы пересчитываются до постройки: развёрнутые меши иначе окажутся в начале координат');
+
+  /* Сборщик сливает геометрии в один буфер, и разнобой в атрибутах его
+     ломает: «Invalid typed array length». В сцене четыре разных набора. */
+  ok(/const NEEDED = \['position', 'normal', 'uv'\]/.test(src),
+     'Геометрии приводятся к единому набору атрибутов');
+  ok(/g\.deleteAttribute\(a\)/.test(src), 'Лишние атрибуты снимаются');
+  ok(/if \(!g\.index\)/.test(src), 'Геометрии без индекса получают индекс');
+  ok(/function flatMat/.test(src) && /m\.vertexColors = false/.test(src),
+     'Флаг вершинных цветов уходит вместе с атрибутом');
+  ok(/function restoreSolids/.test(src), 'Исходные геометрии и материалы возвращаются');
+
+  /* порядок: труба помечена прозрачной, её нельзя убрать раньше подмены */
+  const iLight = src.indexOf('lightForPath(scene, sunMat, hemi);');
+  const iHide = src.indexOf('hideNonSolid(scene);', iLight - 400);
+  ok(iLight > 0 && iLight < src.indexOf('hideNonSolid(scene);\n    expandInstances'),
+     'Свет подменяется ДО скрытия прозрачного: труба помечена прозрачной и исчезала вместе с дымкой');
+  ok(/transparent: false, side: THREE\.DoubleSide/.test(src),
+     'Светящийся материал трубы непрозрачен — иначе его снимут вместе с остальным');
 
   /* точки и прозрачное дерево обхода не описывает */
   ok(/hideNonSolid/.test(src),
@@ -2728,8 +2793,16 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   ok(/export function pathCameraMoved/.test(src) && /tracer\.updateCamera\(\)/.test(src),
      'Сдвиг камеры сбрасывает накопление');
   ok(/if \(!camera\.position\.equals\(_ptPrev\)\)/.test(msrc), 'Движение отслеживается в цикле');
-  ok(/pathStep\(\);[\s\S]{0,200}return;/.test(msrc),
+  ok(/pathStep\(\);[\s\S]{0,400}return;/.test(msrc),
      'Путь выводит кадр сам, обычная отрисовка пропускается целиком');
+  /* Ветка возвращалась раньше обработки затвора: снимок во время трассировки
+     не делался вовсе, и это выглядело как заблокированный интерфейс. */
+  const iStep = msrc.indexOf('pathStep();');
+  const iShot = msrc.indexOf('if (shotPending)', iStep);
+  const iRet = msrc.indexOf('return;', iStep);
+  ok(iShot > 0 && iShot < iRet, 'Затвор обрабатывается до выхода из ветки пути');
+  ok(/if \(pt\.active\) \{ saveCanvas\(renderer\.domElement\.width/.test(msrc),
+     'Накопленный путём кадр не перерисовывается, а ужимается: перерисовка стёрла бы накопленное');
 
   /* настройки по устройству */
   const P = CONFIG.PATH;
@@ -2739,6 +2812,84 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
      `Полос больше (${P.mobileTiles}): короче каждый вызов, браузер не считает вкладку зависшей`);
   ok(P.samples >= 100, `Выборок пути до готовности: ${P.samples}`);
   ok(html.includes('id="bPath"'), 'Кнопка пути есть в фото-режиме');
+}
+
+/* ══ 3h30. Панель съёмки, пауза, свет и вода в пути ════════════════════ */
+{
+  const html = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
+  const css = readFileSync(new URL('./style.css', import.meta.url), 'utf8');
+  const src = readFileSync(new URL('./js/pathtrace.js', import.meta.url), 'utf8');
+  const psrc = readFileSync(new URL('./js/photo.js', import.meta.url), 'utf8');
+  const msrc = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+
+  /* панель: иконка слева, подпись справа, полупрозрачная с размытием */
+  const barStart = html.indexOf('id="photobar"');
+  const bar = html.slice(barStart, html.indexOf('id="rideBar"', barStart) > 0
+    ? html.indexOf('id="rideBar"', barStart) : barStart + 3000);
+  const btns = [...bar.matchAll(/class="pbtn" id="(b\w+)"/g)].map(m => m[1]);
+  ok(btns.length >= 5, `Кнопок в панели съёмки: ${btns.length}`);
+  const labels = [...bar.matchAll(/<span>([^<]+)<\/span>/g)].map(m => m[1]);
+  ok(labels.length === btns.length, 'У каждой кнопки есть подпись');
+  ok(labels.every(l => l.length > 3), `Подписи осмысленные: ${labels.join(', ')}`);
+  ok(/\.pbtn\{[^}]*flex-direction|#photobar\{[^}]*flex-direction:column/.test(css),
+     'Кнопки идут столбиком');
+  ok(/#photobar\{[^}]*left:/.test(css), 'Панель слева');
+
+  /* Панель обязана быть скрыта вне фото-режима: правило потерялось при
+     правке соседнего блока, и все кнопки развернулись поверх интерфейса. */
+  ok(/#photobar\{[^}]*display:none/.test(css), 'Вне фото-режима панель скрыта');
+  ok(/body\.clean #photobar\{display:flex\}/.test(css), 'И показывается только в нём');
+  ok(/#photobar\{[^}]*position:absolute/.test(css),
+     'Панель позиционирована: без этого кнопки растягиваются на всю ширину');
+
+  /* каждый блок, который прячется в фото-режиме, должен иметь и своё
+     собственное правило — иначе селектор body.clean остаётся единственным */
+  for (const id of ['rideBar', 'photobar', 'traceInfo']) {
+    ok(new RegExp(`(^|\\n)#${id}\\{`).test(css),
+       `#${id} объявлен собственным правилом, а не только через body.clean`);
+  }
+  ok(/backdrop-filter:blur/.test(css), 'Фон полупрозрачный с размытием');
+  ok(/#traceInfo\{[^}]*bottom:/.test(css), 'Строка состояния осталась снизу');
+
+  /* пауза с очисткой */
+  ok(html.includes('id="bPause"'), 'Кнопка паузы есть');
+  ok(/export function setPaused/.test(src), 'Накопление можно остановить');
+  ok(/if \(pt\.paused\) return Math\.min/.test(src), 'На паузе выборки не считаются');
+  ok(/const DENOISE_FRAG/.test(psrc), 'Шумоподавитель есть');
+  ok(/float wc = exp\( -dc \/ max/.test(psrc),
+     'Фильтр двусторонний: вес по близости цвета, поэтому кромки переживают');
+  ok(/Очистка идёт первой, до тонмаппинга/.test(psrc),
+     'Очистка до тонмаппинга: шум живёт в линейных значениях');
+  ok(/export function setDenoise/.test(psrc), 'Очистку можно включить отдельно');
+  ok(/traceHeld \? 1 : traceStep\(\)/.test(msrc), 'Пауза работает и для экранных лучей');
+
+  /* путь идёт через нашу постобработку — иначе ни свечения, ни сглаживания */
+  ok(/t\.renderToCanvasCallback = \(target, renderer2, quad\)/.test(src),
+     'Вывод пути перехватывается');
+  ok(/onComposite\(target\.texture\)/.test(src), 'И уходит в общую цепочку');
+  ok(/composite\(renderer, texture, renderer\.toneMappingExposure\)/.test(msrc),
+     'Свечение, лучи от оси и сглаживание работают и в режиме пути');
+
+  /* вода */
+  ok(/export function makeWaterRoughness/.test(
+    readFileSync(new URL('./js/textures.js', import.meta.url), 'utf8')),
+     'Карта шероховатости воды строится из канала глубины');
+  ok(/function waterForPath/.test(src), 'И подставляется корпусу на время съёмки');
+  ok(/hullMat\.normalScale\?\.multiplyScalar/.test(src),
+     'Рельеф усиливается: рябь из патча шейдера трассировщику не видна');
+  ok(/function restoreWater/.test(src), 'После съёмки материал возвращается');
+  ok(CONFIG.PATH.waterMetal > 0, `Металличность воды ${CONFIG.PATH.waterMetal}`);
+
+  /* свет от окон и периметра */
+  ok(/function boostEmissive/.test(src),
+     'Эмиссия усиливается: луч попадает в окно редко, и оно ничего не освещает');
+  ok(/m\.isMeshBasicMaterial && !m\.transparent/.test(src),
+     'Базовые материалы ламп подменяются светящимися — в переносе света они не участвуют');
+  ok(/function addRimLights/.test(src),
+     'Кольцевая подсветка торцов становится настоящими источниками');
+  ok(CONFIG.PATH.rimLights >= 6, `Источников по кольцу: ${CONFIG.PATH.rimLights} × 2 торца`);
+  ok(/function removeRimLights/.test(src), 'И снимаются при выходе');
+  ok(CONFIG.PATH.emitBoost > 1, `Усиление эмиссии ×${CONFIG.PATH.emitBoost}`);
 }
 
 /* ══ 3i. Звук реагирует на то, где находится камера ════════════════════ */

@@ -609,6 +609,30 @@ export function makeFootprintTexture() {
 
 /** Полоса окон на кузове машины. UV коробки идут 0…1 на каждую грань,
     поэтому одна горизонтальная полоса даёт остекление по всем бортам. */
+/** Карта шероховатости корпуса из канала глубины воды.
+
+    Трассировщик пути читает только стандартные свойства материала: наши
+    волны и зеркало живут в патче шейдера, и он их не видит. У корпуса
+    шероховатость 0.95 на всё, включая реку, — вода выходила матовым пятном.
+    Здесь тот же канал маски превращается в карту: где вода, там гладко. */
+export function makeWaterRoughness(mask, size) {
+  const { c, g } = cv(size, size);
+  g.drawImage(mask.image || mask, 0, 0, size, size);
+  const d = g.getImageData(0, 0, size, size);
+  const px = d.data;
+  for (let i = 0; i < px.length; i += 4) {
+    const water = px[i] / 255;                    // R — глубина воды
+    /* шероховатость в зелёном канале: three читает её оттуда */
+    const rough = 0.95 - water * 0.9;
+    px[i] = 0;
+    px[i + 1] = Math.round(rough * 255);
+    px[i + 2] = 0;
+    px[i + 3] = 255;
+  }
+  g.putImageData(d, 0, 0);
+  return tex(c, { srgb: false, wrap: true });
+}
+
 export function makeCarWindows() {
   const S = 32, { c, g } = cv(S, S);
   g.fillStyle = '#000'; g.fillRect(0, 0, S, S);

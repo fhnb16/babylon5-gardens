@@ -562,6 +562,44 @@ export function traceStep() {
    трассировки. Сглаживать нужно именно экранные значения: по линейному HDR
    контраст яркости считается неверно.
    ═══════════════════════════════════════════════════════════════════════════ */
+/* ═══════════════════════════════════════════════════════════════════════════
+   ШУМОПОДАВИТЕЛЬ
+
+   Двусторонний фильтр: усредняет соседей, но взвешивает их по близости
+   ЦВЕТА. Зерно, у которого соседи похожи, сглаживается; кромка, где соседи
+   резко отличаются, остаётся. Обычное размытие стёрло бы и то и другое.
+
+   Это не замена выборкам: деталей, которых ещё нет, он не создаст. Зато
+   картинка становится чище, и снимок можно делать раньше.
+   ═══════════════════════════════════════════════════════════════════════════ */
+const DENOISE_FRAG = `
+  precision highp float;
+  varying vec2 vUv;
+  uniform sampler2D tSrc;
+  uniform vec2 uRes;
+  uniform float uSigma, uRadius;
+
+  void main() {
+    vec3 c0 = texture2D( tSrc, vUv ).rgb;
+    vec3 sum = vec3( 0.0 );
+    float wsum = 0.0;
+    for ( int y = -DENOISE_R; y <= DENOISE_R; y ++ ) {
+      for ( int x = -DENOISE_R; x <= DENOISE_R; x ++ ) {
+        vec2 off = vec2( float( x ), float( y ) ) * uRadius / uRes;
+        vec3 c = texture2D( tSrc, vUv + off ).rgb;
+        /* вес по расстоянию и по близости цвета: кромки переживают */
+        float dc = dot( c - c0, c - c0 );
+        float wd = exp( -float( x * x + y * y ) * 0.08 );
+        float wc = exp( -dc / max( 1e-5, uSigma ) );
+        float w = wd * wc;
+        sum += c * w;
+        wsum += w;
+      }
+    }
+    gl_FragColor = vec4( sum / max( 1e-5, wsum ), 1.0 );
+  }
+`;
+
 const FXAA_FRAG = `
   precision highp float;
   varying vec2 vUv;
@@ -848,7 +886,8 @@ export function setSunScreen(camera, worldGroup) {
 }
 
 function disposeFxaa() {
-  for (const t of [fxRT, brRT, blRT, rayRT, ...taaRT, ...smaaRT]) t?.dispose();
+  for (const t of [fxRT, brRT, blRT, rayRT, dnRT, ...taaRT, ...smaaRT]) t?.dispose();
+  dnMat?.dispose(); dnMat = null; dnRT = null;
   for (const mm of smaaMat) mm.dispose();
   for (const tx of smaaTex) tx.dispose();
   smaaMat = []; smaaTex = []; smaaRT = [];
@@ -933,6 +972,23 @@ export function resizePost(renderer) {
     for (const mm of smaaMat) mm.uniforms.resolution.value.set(1 / s.x, 1 / s.y);
   }
 
+  /* Буфер очистки: заводится вместе с цепочкой, но проход выполняется
+     только когда очистка включена. */
+  dnRT?.dispose();
+  dnRT = new THREE.WebGLRenderTarget(s.x, s.y, {
+    type: THREE.HalfFloatType, depthBuffer: false,
+    minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter
+  });
+  dnMat = dnMat || new THREE.ShaderMaterial({
+    defines: { DENOISE_R: CONFIG.POST.denoiseR },
+    vertexShader: VERT, fragmentShader: DENOISE_FRAG,
+    uniforms: {
+      tSrc: { value: null }, uRes: { value: new THREE.Vector2(1, 1) },
+      uSigma: { value: CONFIG.POST.denoiseSigma },
+      uRadius: { value: CONFIG.POST.denoiseRadius }
+    }
+  });
+
   for (const t of taaRT) t?.dispose();
   taaRT = [];
   if (taaOn) {
@@ -954,6 +1010,12 @@ export function resizePost(renderer) {
     taaHas = 0;
   }
 }
+
+let dnMat = null, dnRT = null, dnOn = false;
+
+/** Включить очистку кадра перед выводом */
+export function setDenoise(on) { dnOn = !!on; }
+export const denoiseOn = () => dnOn;
 
 /** Обычный кадр: напрямую или через FXAA */
 export function renderFrame(renderer, scene, camera, worldRotZ = 0) {
@@ -1029,11 +1091,20 @@ export function composite(renderer, srcTexture, exposure) {
     renderer.setRenderTarget(target);
     renderer.render(fxScene, fxCam);
   };
-  fxMat.uniforms.tScene.value = srcTexture;
+  /* Очистка идёт первой, до тонмаппинга: шум живёт в линейных значениях,
+     и давить его после сжатия яркости поздно. */
+  let src = srcTexture;
+  if (dnOn && dnMat && dnRT) {
+    dnMat.uniforms.tSrc.value = srcTexture;
+    dnMat.uniforms.uRes.value.set(dnRT.width, dnRT.height);
+    pass(dnMat, dnRT);
+    src = dnRT.texture;
+  }
+  fxMat.uniforms.tScene.value = src;
 
   if ((glowOn || raysOn) && blRT) {
     /* яркая выборка — общая для свечения и лучей */
-    brMat.uniforms.tScene.value = srcTexture;
+    brMat.uniforms.tScene.value = src;
     brMat.uniforms.uExposure.value = exposure;
     pass(brMat, blRT);
 

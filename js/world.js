@@ -5,7 +5,8 @@ import {
 } from './util.js';
 import {
   makeHullMaps, makeDetailTexture, makeFacade, makePanelTexture, makeSoftSprite,
-  makeBlobTexture, makeFootprintTexture, heightToNormal, makeCarWindows
+  makeBlobTexture, makeFootprintTexture, heightToNormal, makeCarWindows,
+  makeWaterRoughness
 } from './textures.js';
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -354,6 +355,7 @@ function buildingGeo(type) {
    СБОРКА МИРА
    ═══════════════════════════════════════════════════════════════════════════ */
 export const worldMats = { bld: [], nav: null, blob: null, print: null,
+  hull: null, waterRough: null,
   trafficBody: null, trafficLamp: null, trafficMesh: null };
 let sceneParts = [];
 let traffic = null;
@@ -416,6 +418,10 @@ export function buildWorld(group, renderer, quality) {
   });
   patchHullMaterial(hullMat, arms.length, CONFIG.AXIS.spars.length);
   patchRoughnessAlpha(hullMat);
+  worldMats.hull = hullMat;
+  /* карта шероховатости воды — только для трассировки пути, в обычном
+     кадре рябь и зеркало считает патч шейдера */
+  worldMats.waterRough = makeWaterRoughness(mask, Math.min(1024, Q.mask));
   add(new THREE.Mesh(hullGeo, hullMat));
   hullMat.userData.extra = [mask, detail];   // чтобы освободить при пересборке
 
@@ -912,7 +918,8 @@ export function buildWorld(group, renderer, quality) {
   });
   add(new THREE.Points(ng, worldMats.nav));
 
-  return { panel, panelNormal, albedo, drawn: sceneParts.length };
+  return { panel, panelNormal, albedo, hullMat: worldMats.hull,
+    waterRough: worldMats.waterRough, drawn: sceneParts.length };
 }
 
 /** Самотест ориентации UV: сверяем реальные UV геометрии с мировым θ */
