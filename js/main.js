@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { CONFIG } from './config.js';
+import { VERSION } from './version.js';
 import { mulberry32, clamp, lerp, easeInOut, tpVec, aimAt, fadeByFog,
   turnToward, clampPitch, TAU } from './util.js';
 import { makeSoftSprite, makeGlowTexture } from './textures.js';
@@ -960,6 +961,10 @@ function initUI() {
     });
   }
 
+  /* версия видна пользователю: по ней он сообщит, что именно у него */
+  const vEl = $('ver');
+  if (vEl) vEl.textContent = 'v' + VERSION;
+
   $('go').onclick = () => {
     $('intro').classList.add('hide');
     setTimeout(() => { $('intro').style.display = 'none'; }, 700);
@@ -1156,7 +1161,9 @@ try {
 
   /* PWA: worker нужен только для критерия устанавливаемости, кеша в нём нет */
   if ('serviceWorker' in navigator && location.protocol !== 'file:') {
-    addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(() => {}));
+    /* воркер импортирует версию, значит регистрируется как модуль */
+    addEventListener('load', () => navigator.serviceWorker
+      .register('sw.js', { type: 'module' }).catch(() => {}));
   }
 
   loop();

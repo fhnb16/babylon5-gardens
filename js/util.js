@@ -93,10 +93,46 @@ export function rod(w, h, d, x, y, z, rx = 0, ry = 0, rz = 0) {
     По вертикали — доля от высоты здания (v берётся прямо из координаты),
     чтобы парапет из верхних процентов текстуры всегда оказывался наверху
     стены, на какой бы высоте эта деталь ни находилась. */
+/** Развёртка фасада: V берётся из высоты вершины, чтобы этажи не
+    растягивались при любой высоте дома. Горизонтальные грани получают свою
+    развёртку отдельно — см. roofUV в world.js. */
 export function facadeUV(geo, uScale) {
   const uv = geo.attributes.uv, p = geo.attributes.position;
   for (let k = 0; k < uv.count; k++) uv.setXY(k, uv.getX(k) * uScale, p.getY(k));
   uv.needsUpdate = true;
+  return geo;
+}
+
+/** Разделить геометрию на две группы: горизонтальные грани и все остальные.
+
+    Слияние брусьев теряет исходные группы, а крыше нужен свой материал:
+    фасадная текстура с окнами на горизонтальной плоскости выглядит вывернутым
+    домом. Группы расставляются по направлению нормали треугольника. */
+export function splitRoofGroups(geo) {
+  const n = geo.attributes.normal;
+  const idx = geo.index;
+  const count = idx ? idx.count : geo.attributes.position.count;
+  const get = k => (idx ? idx.getX(k) : k);
+
+  /* собираем номера треугольников по принадлежности */
+  const walls = [], roofs = [];
+  for (let t = 0; t < count; t += 3) {
+    const ny = Math.abs(n.getY(get(t))) + Math.abs(n.getY(get(t + 1))) + Math.abs(n.getY(get(t + 2)));
+    (ny / 3 > 0.7 ? roofs : walls).push(t);
+  }
+  if (!roofs.length || !walls.length) return geo;
+
+  /* переставляем индексы так, чтобы каждая группа шла подряд */
+  const order = new Uint32Array(count);
+  let w = 0;
+  for (const t of walls) { order[w++] = get(t); order[w++] = get(t + 1); order[w++] = get(t + 2); }
+  const wallCount = w;
+  for (const t of roofs) { order[w++] = get(t); order[w++] = get(t + 1); order[w++] = get(t + 2); }
+
+  geo.setIndex(new THREE.BufferAttribute(order, 1));
+  geo.clearGroups();
+  geo.addGroup(0, wallCount, 0);            // стены
+  geo.addGroup(wallCount, count - wallCount, 1);   // крыша
   return geo;
 }
 

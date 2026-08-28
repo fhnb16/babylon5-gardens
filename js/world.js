@@ -1,12 +1,14 @@
 import * as THREE from 'three';
 import { CONFIG } from './config.js';
 import {
-  mulberry32, D2R, TAU, clamp, pick, zoneAt, surfaceQuat, surfacePos, mergeGeos, rod, facadeUV, natural, cityBlock, cityCenter, cellInfo, cellUsable, pickFloors, deepDispose
+  mulberry32, D2R, TAU, clamp, pick, zoneAt, surfaceQuat, surfacePos, mergeGeos,
+  rod, facadeUV, splitRoofGroups, natural, cityBlock, cityCenter, cellInfo,
+  cellUsable, pickFloors, deepDispose
 } from './util.js';
 import {
   makeHullMaps, makeDetailTexture, makeFacade, makePanelTexture, makeSoftSprite,
   makeBlobTexture, makeFootprintTexture, heightToNormal, makeCarWindows,
-  makeWaterRoughness, makeWaterNormal
+  makeWaterRoughness, makeWaterNormal, makeRoofTexture
 } from './textures.js';
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -299,13 +301,16 @@ function foliageGeo(detail, rnd, wobble, dither) {
     иначе крыша здания оказывается оклеена окнами — и сверху это читается
     как непонятная решётчатая плита. Работает и для боксов, и для торцов
     цилиндров: критерий — нормаль вдоль ±Y. */
-function roofUV(geo, band = 0.88) {
+/** Развёртка кровли. Раньше она уводилась в узкую полосу фасадной текстуры:
+    по одной оси растягивалась на всю ширину дома, по другой ужималась в
+    двенадцать процентов высоты — отсюда и растянутый нелепый вид. Теперь у
+    крыши свой материал, и развёртка обычная: по горизонтальным координатам,
+    с постоянной плотностью, одинаковой у домов любого размера. */
+function roofUV(geo, tile = CONFIG.ROOF_TILE) {
   const p = geo.attributes.position, n = geo.attributes.normal, uv = geo.attributes.uv;
   for (let k = 0; k < p.count; k++) {
-    if (Math.abs(n.getY(k)) < 0.9) continue;
-    uv.setXY(k,
-      clamp(p.getX(k) + 0.5, 0, 1),
-      band + clamp(p.getZ(k) + 0.5, 0, 1) * (1 - band));
+    if (Math.abs(n.getY(k)) < 0.7) continue;
+    uv.setXY(k, (p.getX(k) + 0.5) * tile, (p.getZ(k) + 0.5) * tile);
   }
   uv.needsUpdate = true;
   return geo;
@@ -346,7 +351,9 @@ function buildingGeo(type) {
     parts.push(cyl(0.62, 0.07, 0.56, 18));
     parts.push(cyl(0.24, 0.37, 0.63, 12));
   }
-  const g = mergeGeos(parts);
+  /* Стены и крыша расходятся по материалам: слияние брусьев теряет исходные
+     группы, поэтому расставляем их заново по направлению нормали. */
+  const g = splitRoofGroups(mergeGeos(parts));
   g.translate(0, -0.5, 0);    // база в y = -0.5, чтобы масштаб (w,h,d) работал
   return roofUV(g);
 }
@@ -424,6 +431,13 @@ export function buildWorld(group, renderer, quality) {
   worldMats.waterRough = makeWaterRoughness(mask, Math.min(1024, Q.mask));
   /* карта ряби: волны считает патч шейдера, а трассировщик его не видит */
   worldMats.waterNormal = makeWaterNormal(mask, Math.min(1024, Q.mask), CONFIG.NORMALS.water);
+  /* Каждая карта в three несёт СВОЮ матрицу развёртки. Альбедо корпуса
+     зеркалится (смотрим изнутри цилиндра), и карты, созданные без этого
+     зеркала, ложатся в противофазе: вода в них оказывается там, где на самом
+     деле трава. Отсюда и «зеркало не работает». */
+  for (const tx of [worldMats.waterRough, worldMats.waterNormal]) {
+    if (tx && flip) { tx.repeat.x = -1; tx.offset.x = 0.5; }
+  }
   add(new THREE.Mesh(hullGeo, hullMat));
   hullMat.userData.extra = [mask, detail];   // чтобы освободить при пересборке
 
@@ -549,6 +563,14 @@ export function buildWorld(group, renderer, quality) {
 
   /* ─────────── ЗДАНИЯ: 4 силуэта × свой фасад ─────────── */
   const tints = [0x9fb0c4, 0xb6c2cf, 0x8c9db2, 0xc3ccd6, 0x7f90a5, 0xc9b7a4];
+  /* Кровля одна на все типы: она не различает этажность, а фасадная текстура
+     с окнами на горизонтальной плоскости выглядела вывернутым домом. */
+  const roofMap = makeRoofTexture(mulberry32(CONFIG.SEED + 77));
+  roofMap.wrapS = roofMap.wrapT = THREE.RepeatWrapping;
+  roofMap.anisotropy = Math.min(4, maxAniso);
+  const roofNrm = Q.normals
+    ? heightToNormal(roofMap.image, CONFIG.NORMALS.roof, 256) : null;
+  if (roofNrm) roofNrm.wrapS = roofNrm.wrapT = THREE.RepeatWrapping;
   for (let v = 0; v < 4; v++) {
     const { map, emis, canvas: facCanvas } = makeFacade(mulberry32(CONFIG.SEED + 31 * (v + 1)), v);
     /* Оконные ниши и пилястры дают глубину проёмов — на закате в них ложится тень */
@@ -557,13 +579,22 @@ export function buildWorld(group, renderer, quality) {
       if (tx) tx.wrapS = tx.wrapT = THREE.RepeatWrapping;
     }
     map.anisotropy = Math.min(4, maxAniso);
-    const mat = new THREE.MeshStandardMaterial({
+    const wallMat = new THREE.MeshStandardMaterial({
       map, emissiveMap: emis, emissive: 0xffffff, emissiveIntensity: 0,
       normalMap: nrm, normalScale: new THREE.Vector2(1, 1),
       roughness: 0.68, metalness: 0.1
     });
-    patchRoughnessAlpha(mat);
-    worldMats.bld.push(mat);
+    /* Крыше — свой материал. Фасадная текстура с окнами на горизонтальной
+       плоскости выглядит вывернутым домом; кровля шершавее стен и почти не
+       металлическая: это рубероид, а не панель. */
+    const roofMat = new THREE.MeshStandardMaterial({
+      map: roofMap, normalMap: roofNrm, normalScale: new THREE.Vector2(0.8, 0.8),
+      roughness: 0.92, metalness: 0.04
+    });
+    const mat = [wallMat, roofMat];
+    patchRoughnessAlpha(wallMat);
+    patchRoughnessAlpha(roofMat);
+    worldMats.bld.push(wallMat);
     instance(buildingGeo(v), mat, plots[v], (k, t, z, im, info) => {
       const s = CONFIG.BLD[v];
       /* среднее двух равномерных даёт треугольное распределение: края

@@ -519,7 +519,8 @@ export function makeEndCapTexture(size, rnd) {
         const rr = r0 + (r1 - r0) * (0.2 + rnd() * 0.6);
         const aa = a0 + (a1 - a0) * (0.15 + rnd() * 0.7);
         const bw = (r1 - r0) * (0.12 + rnd() * 0.3);
-        const ba = (a1 - a0) * (0.12 + rnd() * 0.4);
+        /* ширина блока тоже от радиуса, иначе у края они растягиваются */
+        const ba = Math.min((a1 - a0) * 0.7, bw * (0.7 + rnd() * 1.4) / Math.max(1, rr));
         a.g.fillStyle = rnd() < 0.5 ? 'rgba(48,54,62,.5)' : 'rgba(206,214,224,.34)';
         a.g.beginPath();
         a.g.arc(C, C, rr + bw, aa, aa + ba);
@@ -528,14 +529,17 @@ export function makeEndCapTexture(size, rnd) {
         a.g.fill();
       }
 
-      /* светящиеся иллюминаторы: редкие, но именно они оживляют торец */
+      /* Светящиеся иллюминаторы. Угловой размер обязан считаться ОТ радиуса:
+         постоянный угол даёт дугу, растущую вместе с радиусом, и у края окна
+         вытягивались впятеро против тех, что у ступицы. */
       if (rnd() < 0.1) {
         const rr = r0 + (r1 - r0) * 0.5;
-        const ba = (a1 - a0) * 0.4;
-        const aa = a0 + (a1 - a0) * 0.3;
+        const side = (r1 - r0) * 0.34;            // сторона окна в пикселях
+        const ba = Math.min((a1 - a0) * 0.8, side / Math.max(1, rr));
+        const aa = a0 + (a1 - a0) * 0.5 - ba / 2;
         b.g.fillStyle = pick(rnd, ['#ffe6b4', '#cfe0f2', '#ffd08a']);
         b.g.beginPath();
-        b.g.arc(C, C, rr + (r1 - r0) * 0.16, aa, aa + ba);
+        b.g.arc(C, C, rr + side, aa, aa + ba);
         b.g.arc(C, C, rr, aa + ba, aa, true);
         b.g.closePath();
         b.g.fill();
@@ -756,6 +760,72 @@ export function makeWaterNormal(mask, size, strength) {
   }
   g.putImageData(out, 0, 0);
   return heightToNormal(c, strength, size);
+}
+
+/** Кровля: рубероид, вентиляция, парапет, разводы от воды.
+
+    Раньше на крышу шла та же текстура, что на стены, — окна ложились на
+    горизонтальную плоскость, и дом выглядел вывернутым. Кровля устроена
+    иначе: сплошное покрытие, техника блоками, парапет по краю. */
+export function makeRoofTexture(rnd) {
+  const S = 256, { c, g } = cv(S, S);
+  const base = 52 + Math.floor(rnd() * 16);
+  g.fillStyle = `rgb(${base},${base + 3},${base + 6})`;
+  g.fillRect(0, 0, S, S);
+
+  /* полосы рубероида внахлёст */
+  for (let y = 0; y < S; y += 26) {
+    const v = base + 6 + Math.floor(rnd() * 12);
+    g.fillStyle = `rgb(${v},${v + 3},${v + 6})`;
+    g.fillRect(0, y, S, 24);
+    g.fillStyle = 'rgba(20,24,30,.35)';
+    g.fillRect(0, y + 24, S, 2);
+  }
+
+  /* разводы от стоячей воды — по ним крыша и читается крышей */
+  for (let i = 0; i < 26; i++) {
+    const x = rnd() * S, y = rnd() * S, r = 8 + rnd() * 34;
+    const gr = g.createRadialGradient(x, y, 0, x, y, r);
+    gr.addColorStop(0, 'rgba(28,34,42,.30)');
+    gr.addColorStop(1, 'rgba(28,34,42,0)');
+    g.fillStyle = gr;
+    g.beginPath(); g.arc(x, y, r, 0, TAU_2D); g.fill();
+  }
+
+  /* вентиляция, короба, люки */
+  for (let i = 0; i < 22; i++) {
+    const w = 8 + rnd() * 26, h = 8 + rnd() * 22;
+    const x = rnd() * (S - w), y = rnd() * (S - h);
+    const v = 96 + Math.floor(rnd() * 46);
+    g.fillStyle = `rgb(${v},${v + 4},${v + 10})`;
+    g.fillRect(x, y, w, h);
+    g.fillStyle = 'rgba(255,255,255,.14)';
+    g.fillRect(x, y, w, 1.5);
+    g.fillStyle = 'rgba(16,20,26,.45)';
+    g.fillRect(x, y + h - 2, w, 2);
+    /* решётка на крупных коробах */
+    if (w > 18) {
+      g.fillStyle = 'rgba(18,22,28,.45)';
+      for (let k = 3; k < w - 2; k += 4) g.fillRect(x + k, y + 3, 1.5, h - 7);
+    }
+  }
+
+  /* трубы и кабельные лотки */
+  g.strokeStyle = 'rgba(120,128,138,.55)';
+  g.lineWidth = 2.5;
+  for (let i = 0; i < 7; i++) {
+    g.beginPath();
+    const y = rnd() * S;
+    g.moveTo(0, y);
+    g.lineTo(S, y + (rnd() - 0.5) * 26);
+    g.stroke();
+  }
+
+  /* парапет по краю плитки: крыша не сливается со стеной на стыке */
+  g.strokeStyle = 'rgba(150,158,168,.6)';
+  g.lineWidth = 5;
+  g.strokeRect(2.5, 2.5, S - 5, S - 5);
+  return tex(c, { wrap: true });
 }
 
 export function makeCarWindows() {

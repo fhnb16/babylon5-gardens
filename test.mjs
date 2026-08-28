@@ -31,6 +31,13 @@ const forEachInstance = (arr, fn) => {
 
 const smaaTexNearest = s => /smaaTex\[1\]\.minFilter = THREE\.NearestFilter/.test(s);
 
+
+/* Дом — инстанс с массивом материалов: стены и кровля. Искать его по
+   одиночному material.emissiveMap больше нельзя. */
+const isBuilding = o => o.isInstancedMesh && Array.isArray(o.material)
+  && !!o.material[0]?.emissiveMap;
+const wallMatOf = o => (Array.isArray(o.material) ? o.material[0] : o.material);
+
 let fails = 0;
 const ok = (c, m) => { console.log((c ? '  ok  ' : '  FAIL') + '  ' + m); if (!c) fails++; };
 const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
@@ -259,17 +266,35 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   ok(overlaps === 0,
      `Здания и эстакады не прорастают друг сквозь друга (пересечений ${overlaps} на ${boxes.length})`);
 
-  /* крыши переведены в кровельную полосу текстуры, а не оклеены окнами */
-  const bld = insts.find(o => o.material?.emissiveMap);
+  /* У крыши свой материал и своя развёртка. Раньше она уводилась в узкую
+     полосу фасадной текстуры: по одной оси растягивалась на всю ширину дома,
+     по другой ужималась в двенадцать процентов высоты. */
+  const bld = insts.find(o => Array.isArray(o.material)
+    ? o.material[0]?.emissiveMap : o.material?.emissiveMap);
+  ok(Array.isArray(bld.material) && bld.material.length === 2,
+     'У дома два материала: стены и кровля');
+  ok(bld.geometry.groups.length === 2, 'И две группы граней');
+  const roofMat = bld.material[1];
+  ok(!roofMat.emissiveMap, 'На кровле нет окон');
+  ok(roofMat.roughness > bld.material[0].roughness,
+     `Кровля шершавее стен: ${roofMat.roughness} против ${bld.material[0].roughness}`);
+  ok(roofMat.metalness < bld.material[0].metalness,
+     `И менее металлическая: ${roofMat.metalness} против ${bld.material[0].metalness}`);
+
+  /* развёртка кровли обязана быть равномерной по обеим осям */
   const uv = bld.geometry.attributes.uv, nn = bld.geometry.attributes.normal;
-  let flat = 0, inBand = 0;
+  let flat = 0, uMin = 9, uMax = -9, vMin = 9, vMax = -9;
   for (let k = 0; k < uv.count; k++) {
-    if (Math.abs(nn.getY(k)) < 0.9) continue;
+    if (Math.abs(nn.getY(k)) < 0.7) continue;
     flat++;
-    if (uv.getY(k) >= 0.87) inBand++;
+    uMin = Math.min(uMin, uv.getX(k)); uMax = Math.max(uMax, uv.getX(k));
+    vMin = Math.min(vMin, uv.getY(k)); vMax = Math.max(vMax, uv.getY(k));
   }
-  ok(flat > 0 && flat === inBand,
-     `Все ${flat} горизонтальных вершин смотрят в кровельную полосу, не в окна`);
+  ok(flat > 0, `Горизонтальных вершин: ${flat}`);
+  const uSpan = uMax - uMin, vSpan = vMax - vMin;
+  ok(uSpan > 0.5 && vSpan > 0.5, `Развёртка кровли занимает ${uSpan.toFixed(1)}×${vSpan.toFixed(1)}`);
+  ok(Math.abs(uSpan - vSpan) / Math.max(uSpan, vSpan) < 0.25,
+     `И равномерна по осям: ${uSpan.toFixed(2)} против ${vSpan.toFixed(2)} — не растянута`);
 
 }
 
@@ -334,7 +359,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   ok(swallowed === 0, `Холмы не наезжают на застройку (проглоченных зданий ${swallowed})`);
 
   /* дерево на склоне должно стоять НА земле: сравниваем с профилем купола */
-  const trunkC2 = chunksOf({children: insts}, o => o.material.isMeshStandardMaterial && !o.material.map && !o.material.emissiveMap
+  const trunkC2 = chunksOf({children: insts}, o => !Array.isArray(o.material) && o.material.isMeshStandardMaterial && !o.material.map && !o.material.emissiveMap
     && !o.material.flatShading && o.material.vertexColors && !o.instanceColor);
   const trunks = trunkC2[0];
   const reliefAt = (t, z) => {
@@ -365,7 +390,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   const shot = q => {
     const g = new THREE.Group();
     buildWorld(g, fakeRenderer, q);
-    const im = g.children.find(o => o.isInstancedMesh && o.material.emissiveMap);
+    const im = g.children.find(isBuilding);
     const m = new THREE.Matrix4(), out = [];
     for (let k = 0; k < im.count; k++) { im.getMatrixAt(k, m); out.push(m.elements[12].toFixed(4)); }
     return out.join('|');
@@ -385,14 +410,16 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
 {
   const group = new THREE.Group();
   buildWorld(group, fakeRenderer, 'LOW');
-  const bldMats = [...new Set(group.children
-    .filter(o => o.isInstancedMesh && o.material?.emissiveMap && o.material.map)
-    .map(o => o.material))];
-  const bld = bldMats.map(mm => chunksOf(group, o => o.material === mm)[0]);
-  ok(bldMats.length === 4, 'Четыре типа зданий со своими фасадами');
+  /* у дома массив из двух материалов: стены и кровля */
+  const wallMats = [...new Set(group.children
+    .filter(o => o.isInstancedMesh && Array.isArray(o.material) && o.material[0]?.emissiveMap)
+    .map(o => o.material[0]))];
+  const bld = wallMats.map(mm =>
+    chunksOf(group, o => Array.isArray(o.material) && o.material[0] === mm)[0]);
+  ok(wallMats.length === 4, 'Четыре типа зданий со своими фасадами');
 
-  bld.forEach((im, v) => {
-    ok(im.material.map.wrapS === THREE.RepeatWrapping && im.material.map.wrapT === THREE.RepeatWrapping,
+  wallMats.forEach((mm, v) => {
+    ok(mm.map.wrapS === THREE.RepeatWrapping && mm.map.wrapT === THREE.RepeatWrapping,
        `Тип ${v}: фасад тайлится, а не растягивается один раз на всю деталь`);
   });
 
@@ -480,7 +507,8 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
 {
   const g = new THREE.Group();
   buildWorld(g, fakeRenderer, 'HIGH');
-  const bld = g.children.filter(o => o.isInstancedMesh && o.material?.emissiveMap && o.material.map);
+  /* только дома: у машин тоже есть карта окон, но материал у них один */
+  const bld = g.children.filter(isBuilding);
   const B = cityBlock(), C = CONFIG.CITY;
   const m = new THREE.Matrix4(), p = new THREE.Vector3(), s = new THREE.Vector3(), q = new THREE.Quaternion();
 
@@ -674,7 +702,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   const g = new THREE.Group();
   buildWorld(g, fakeRenderer, 'HIGH');
   const ins = g.children.filter(o => o.isInstancedMesh);
-  const trunkC = chunksOf({children: ins}, o => o.material.isMeshStandardMaterial && !o.material.map && !o.material.emissiveMap
+  const trunkC = chunksOf({children: ins}, o => !Array.isArray(o.material) && o.material.isMeshStandardMaterial && !o.material.map && !o.material.emissiveMap
     && !o.material.flatShading && o.material.vertexColors && !o.instanceColor);
   const trunk = trunkC[0];
   ok(!!trunk, 'Стволы деревьев найдены');
@@ -876,7 +904,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   /* численно: низ ствола заметно темнее верха */
   const g = new THREE.Group();
   buildWorld(g, fakeRenderer, 'HIGH');
-  const trunk = chunksOf(g, o => o.material.isMeshStandardMaterial && !o.material.map && !o.material.emissiveMap
+  const trunk = chunksOf(g, o => !Array.isArray(o.material) && o.material.isMeshStandardMaterial && !o.material.map && !o.material.emissiveMap
     && !o.material.flatShading && o.material.vertexColors && !o.instanceColor)[0];
   const tp = trunk.geometry.attributes.position, tc = trunk.geometry.attributes.color;
   let low = 9, high = 0;
@@ -901,7 +929,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   const ins = g.children.filter(o => o.isInstancedMesh);
   const m = new THREE.Matrix4(), p = new THREE.Vector3(), s = new THREE.Vector3(), q = new THREE.Quaternion();
 
-  const trunkC = chunksOf({children: ins}, o => o.material.isMeshStandardMaterial && !o.material.map && !o.material.emissiveMap
+  const trunkC = chunksOf({children: ins}, o => !Array.isArray(o.material) && o.material.isMeshStandardMaterial && !o.material.map && !o.material.emissiveMap
     && !o.material.flatShading && o.material.vertexColors && !o.instanceColor);
   const trunk = trunkC[0];
   const foliageMats = [...new Set(ins.filter(o => o.material?.flatShading
@@ -1642,8 +1670,9 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   buildWorld(hi, fakeRenderer, 'HIGH');
   const hullHi = hi.children.find(o => o.material?.side === THREE.BackSide);
   ok(!!hullHi.material.normalMap, 'На высоком — с картой');
-  const bldHi = hi.children.filter(o => o.isInstancedMesh && o.material?.emissiveMap && o.material.map);
-  ok(bldHi.every(o => o.material.normalMap), 'У всех типов домов есть рельеф оконных ниш');
+  const bldHi = hi.children.filter(isBuilding);
+  ok(bldHi.every(o => wallMatOf(o).normalMap), 'У всех типов домов есть рельеф оконных ниш');
+  ok(bldHi.every(o => o.material[1].normalMap), 'И у кровли свой рельеф');
 }
 
 /* ══ 3h6. Свечение, лучи, трафик, машины, трава ════════════════════════ */
@@ -2866,6 +2895,22 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   ok(/if \(pt\.paused\) \{/.test(src) && /composeOut\(tracer\.target\.texture\)/.test(src),
      'На паузе выборки не считаются, но кадр проходит через цепочку заново — иначе очистке негде выполниться');
   ok(/const DENOISE_FRAG/.test(psrc), 'Шумоподавитель есть');
+
+  /* Один проход с малым окном оставляет крупнозернистый узор: соседние
+     пиксели он усредняет, а пятна в несколько пикселей не видит вовсе. */
+  ok(CONFIG.POST.denoisePasses >= 3, `Проходов шумоподавителя: ${CONFIG.POST.denoisePasses}`);
+  ok(/step \*= 2;/.test(psrc), 'Шаг удваивается от прохода к проходу');
+  ok(/dnMat\.uniforms\.uSigma\.value = CONFIG\.POST\.denoiseSigma \/ \(1 \+ k \* 0\.9\)/.test(psrc),
+     'С ростом шага допуск по цвету сужается — иначе дальние проходы мылят');
+  ok(/dnRT\[\(k - 1\) % 2\]/.test(psrc), 'Проходы идут по очереди между двумя буферами');
+  {
+    let step = 1, reach = 0;
+    for (let k = 0; k < CONFIG.POST.denoisePasses; k++) { reach = CONFIG.POST.denoiseR * step; step *= 2; }
+    const cheap = CONFIG.POST.denoisePasses * Math.pow(2 * CONFIG.POST.denoiseR + 1, 2);
+    const naive = Math.pow(2 * reach + 1, 2);
+    ok(cheap < naive / 4,
+       `Охват ±${reach} пикселей за ${cheap} выборок вместо ${naive} одним проходом`);
+  }
   ok(/float wc = exp\( -dc \/ max/.test(psrc),
      'Фильтр двусторонний: вес по близости цвета, поэтому кромки переживают');
   ok(/Очистка идёт первой, до тонмаппинга/.test(psrc),
@@ -2955,7 +3000,29 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   ok(/const seg = Math\.max\(6, Math\.round\(i \* 2\.6\)\)/.test(capBody),
      'Число секций растёт к краю: длина дуги остаётся соизмеримой');
   ok(/мелкие блоки внутри секции/.test(capBody), 'В секциях есть мелкие блоки');
-  ok(/светящиеся иллюминаторы/.test(capBody), 'И редкие светящиеся окна');
+  ok(/иллюминаторы/.test(capBody), 'И редкие светящиеся окна');
+
+  /* Постоянный угол даёт дугу, растущую вместе с радиусом: у края окна
+     вытягивались впятеро против тех, что у ступицы. */
+  ok(/side \/ Math\.max\( ?1, rr ?\)/.test(capBody.replace(/\s+/g, ' ')) ||
+     /side \/ Math\.max\(1, rr\)/.test(capBody),
+     'Угловой размер окна считается ОТ радиуса — окна квадратные на любом радиусе');
+  ok(/bw \* \(0\.7 \+ rnd\(\) \* 1\.4\) \/ Math\.max\(1, rr\)/.test(capBody),
+     'И блоки внутри секций тоже');
+  {
+    /* численно: сторона окна одинакова у ступицы и у края */
+    const C2 = 240, rings = 22;
+    const at = rel => {
+      const i = Math.round(rel * rings);
+      const r1 = C2 * (i / rings), r0 = C2 * ((i - 1) / rings);
+      const rr = r0 + (r1 - r0) * 0.5, side = (r1 - r0) * 0.34;
+      const ba = Math.min((r1 - r0) * 0.8, side / Math.max(1, rr));
+      return { w: rr * ba, h: side };
+    };
+    const near = at(0.2), far = at(1);
+    ok(Math.abs(near.w / near.h - 1) < 0.2 && Math.abs(far.w / far.h - 1) < 0.2,
+       `Окна квадратные и у ступицы (${near.w.toFixed(1)}×${near.h.toFixed(1)}), и у края (${far.w.toFixed(1)}×${far.h.toFixed(1)})`);
+  }
   ok(/шесть силовых спиц/.test(capBody), 'Спицы нарисованы поверх поясов');
   ok(/rings = 22/.test(capBody), 'Поясов достаточно, чтобы читалась конструкция');
 
@@ -2972,7 +3039,52 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
      'Карта ряби строится отдельно: волны живут в патче шейдера, которого трассировщик не видит');
   ok(/if \(normalMap\) hullMat\.normalMap = normalMap;/.test(psrc2),
      'И подставляется корпусу на время съёмки');
+
+  /* У каждой карты в three СВОЯ матрица развёртки. Альбедо корпуса зеркалится
+     (смотрим изнутри цилиндра), и карты без этого зеркала ложатся в
+     противофазе: вода в них оказывается там, где на самом деле трава. */
+  const g2 = new THREE.Group();
+  buildWorld(g2, fakeRenderer, 'HIGH');
+  const hm = worldMats.hull;
+  for (const [name, tx] of [['шероховатость воды', worldMats.waterRough],
+    ['рябь', worldMats.waterNormal], ['рельеф', hm.normalMap]]) {
+    if (!tx) continue;
+    ok(tx.repeat.x === hm.map.repeat.x && tx.offset.x === hm.map.offset.x,
+       `Развёртка «${name}» совпадает с альбедо корпуса (${tx.repeat.x}, ${tx.offset.x})`);
+  }
   ok(/s\.mat\.normalMap = s\.normal;/.test(psrc2), 'Исходный рельеф возвращается');
+}
+
+/* ══ 3h32. Версия проекта ══════════════════════════════════════════════ */
+{
+  const vsrc = readFileSync(new URL('./js/version.js', import.meta.url), 'utf8');
+  const sw = readFileSync(new URL('./sw.js', import.meta.url), 'utf8');
+  const readme = readFileSync(new URL('./README.md', import.meta.url), 'utf8');
+  const msrc = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+  const html = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
+
+  const ver = (vsrc.match(/VERSION = '([\d.]+)'/) || [])[1];
+  ok(/^\d+\.\d+\.\d+$/.test(ver || ''), `Версия задана в формате мажор.минор.правка: ${ver}`);
+
+  /* Номер живёт в одном месте: три копии однажды разойдутся. */
+  ok(/import \{ VERSION \} from '\.\/js\/version\.js'/.test(sw),
+     'Сервис-воркер импортирует версию, а не дублирует её');
+  ok(!new RegExp(`'${ver.replace(/\./g, '\\.')}'`).test(sw.replace(/import[^\n]*/, '')),
+     'И не содержит номера строкой');
+  ok(/type: 'module'/.test(msrc),
+     'Воркер регистрируется модулем: без этого импорт внутри него не разрешится');
+  ok(readme.includes(ver), 'README называет ту же версию');
+  ok(html.includes('id="ver"') && /VERSION/.test(msrc), 'Версия видна пользователю');
+
+  /* история должна заканчиваться текущей версией */
+  const hist = [...vsrc.matchAll(/\['(\d+\.\d+\.\d+)',/g)].map(m => m[1]);
+  ok(hist.length >= 8, `Записей в истории: ${hist.length}`);
+  ok(hist[hist.length - 1] === ver, 'Последняя запись истории — текущая версия');
+  const cmp = (a, b) => {
+    const x = a.split('.').map(Number), y = b.split('.').map(Number);
+    return x[0] - y[0] || x[1] - y[1] || x[2] - y[2];
+  };
+  ok(hist.every((v, i) => i === 0 || cmp(v, hist[i - 1]) > 0), 'История возрастает');
 }
 
 /* ══ 3i. Звук реагирует на то, где находится камера ════════════════════ */
@@ -3048,7 +3160,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   buildWorld(probe, fakeRenderer, 'LOW');
   /* по одному представителю на тип: инстансы разрезаны на секторы */
   const silMats = [...new Set(probe.children
-    .filter(o => o.isInstancedMesh && o.material.emissiveMap && o.material.map).map(o => o.material))];
+    .filter(o => isBuilding(o)).map(o => o.material))];
   let worstH = 0;
   silMats.forEach((mm, v) => {
     const im = probe.children.find(o => o.material === mm);

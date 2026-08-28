@@ -66,6 +66,7 @@ canvas{display:block;width:100%;height:100%;touch-action:none;outline:none}
   pointer-events:none;font-size:11px;letter-spacing:.28em;text-transform:uppercase;
   color:rgba(219,232,247,.6);text-shadow:0 1px 8px rgba(0,0,0,.7);
 }
+#brand i{font-style:normal;margin-left:8px;opacity:.5;font-size:9px;letter-spacing:.1em}
 #brand b{display:block;font-size:15px;letter-spacing:.12em;color:#fff;font-weight:600}
 #fps{
   position:absolute;left:calc(14px + var(--sal));bottom:calc(12px + var(--sab));
@@ -308,7 +309,8 @@ body.clean #rideBar{display:none}
   #pad .btn{width:50px;height:50px;min-width:50px;min-height:50px}
 
   #brand{font-size:9px;letter-spacing:.2em}
-  #brand b{font-size:12px}
+  #brand i{font-style:normal;margin-left:8px;opacity:.5;font-size:9px;letter-spacing:.1em}
+#brand b{font-size:12px}
 
   .sheet{max-height:88vh;max-height:88dvh;padding-top:12px}
   .sheet h2{margin-bottom:8px}

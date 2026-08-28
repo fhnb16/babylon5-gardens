@@ -901,8 +901,8 @@ export function setSunScreen(camera, worldGroup) {
 }
 
 function disposeFxaa() {
-  for (const t of [fxRT, brRT, blRT, rayRT, dnRT, ...taaRT, ...smaaRT]) t?.dispose();
-  dnMat?.dispose(); dnMat = null; dnRT = null;
+  for (const t of [fxRT, brRT, blRT, rayRT, ...dnRT, ...taaRT, ...smaaRT]) t?.dispose();
+  dnMat?.dispose(); dnMat = null; dnRT = [];
   for (const mm of smaaMat) mm.dispose();
   for (const tx of smaaTex) tx.dispose();
   smaaMat = []; smaaTex = []; smaaRT = [];
@@ -989,11 +989,12 @@ export function resizePost(renderer) {
 
   /* Буфер очистки: заводится вместе с цепочкой, но проход выполняется
      только когда очистка включена. */
-  dnRT?.dispose();
-  dnRT = new THREE.WebGLRenderTarget(s.x, s.y, {
+  for (const t of dnRT) t?.dispose();
+  /* два буфера: проходы идут по очереди, читая один и записывая другой */
+  dnRT = [0, 1].map(() => new THREE.WebGLRenderTarget(s.x, s.y, {
     type: THREE.HalfFloatType, depthBuffer: false,
     minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter
-  });
+  }));
   dnMat = dnMat || new THREE.ShaderMaterial({
     defines: { DENOISE_R: CONFIG.POST.denoiseR },
     vertexShader: VERT, fragmentShader: DENOISE_FRAG,
@@ -1026,7 +1027,7 @@ export function resizePost(renderer) {
   }
 }
 
-let dnMat = null, dnRT = null, dnOn = false;
+let dnMat = null, dnRT = [], dnOn = false;
 
 /** Включить очистку кадра перед выводом */
 export function setDenoise(on) { dnOn = !!on; }
@@ -1109,11 +1110,27 @@ export function composite(renderer, srcTexture, exposure) {
   /* Очистка идёт первой, до тонмаппинга: шум живёт в линейных значениях,
      и давить его после сжатия яркости поздно. */
   let src = srcTexture;
-  if (dnOn && dnMat && dnRT) {
-    dnMat.uniforms.tSrc.value = srcTexture;
-    dnMat.uniforms.uRes.value.set(dnRT.width, dnRT.height);
-    pass(dnMat, dnRT);
-    src = dnRT.texture;
+  if (dnOn && dnMat && dnRT.length) {
+    /* Несколько проходов с растущим шагом — «à-trous». Один проход с малым
+       окном оставляет крупнозернистый узор: соседние пиксели он усредняет, а
+       пятна размером в несколько пикселей не видит вовсе. Расширять окно в
+       один проход дорого: цена растёт квадратом. Вместо этого шаг удваивается
+       от прохода к проходу — окно охватывает всё более далёких соседей при
+       той же цене каждого прохода. */
+    let step = 1;
+    for (let k = 0; k < CONFIG.POST.denoisePasses; k++) {
+      const from = k === 0 ? srcTexture : dnRT[(k - 1) % 2].texture;
+      const to = dnRT[k % 2];
+      dnMat.uniforms.tSrc.value = from;
+      dnMat.uniforms.uRes.value.set(to.width, to.height);
+      dnMat.uniforms.uRadius.value = CONFIG.POST.denoiseRadius * step;
+      /* с ростом шага допуск по цвету сужается: иначе далёкие проходы
+         начинают смешивать разные предметы и картинка мылится */
+      dnMat.uniforms.uSigma.value = CONFIG.POST.denoiseSigma / (1 + k * 0.9);
+      pass(dnMat, to);
+      src = to.texture;
+      step *= 2;
+    }
   }
   fxMat.uniforms.tScene.value = src;
 
