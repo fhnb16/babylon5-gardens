@@ -8,7 +8,7 @@ import {
 import {
   makeHullMaps, makeDetailTexture, makeFacade, makePanelTexture, makeSoftSprite,
   makeBlobTexture, makeFootprintTexture, heightToNormal, makeCarWindows,
-  makeWaterRoughness, makeWaterNormal, makeRoofTexture
+  makeWaterRoughness, makeWaterNormal, makeRoofTexture, makeLeafTexture
 } from './textures.js';
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -358,6 +358,94 @@ function buildingGeo(type) {
   return roofUV(g);
 }
 
+/** Сфера сектора по его деревьям: отсечение по кадру должно работать
+    независимо от того, сколько деревьев сейчас на этом уровне детализации. */
+function sectorSphere(list, R) {
+  const c = new THREE.Vector3();
+  const v = new THREE.Vector3();
+  for (const [t, z] of list) { surfacePos(t, R, z, v); c.add(v); }
+  c.multiplyScalar(1 / Math.max(1, list.length));
+  let rad = 0;
+  for (const [t, z] of list) {
+    surfacePos(t, R, z, v);
+    rad = Math.max(rad, c.distanceTo(v));
+  }
+  return new THREE.Sphere(c, rad + 4);
+}
+
+/** Крест из двух плоскостей: дальний уровень кроны.
+
+    Билборд, разворачивающийся к камере, здесь дороже, чем экономит: мир
+    вращается, и тысячи плоскостей пришлось бы переориентировать каждый кадр.
+    С расстояния, где работает этот уровень, разницы между крестом и
+    билбордом не видно. */
+function crossQuadGeo() {
+  const parts = [];
+  for (let k = 0; k < 2; k++) {
+    const g = new THREE.PlaneGeometry(2, 2);
+    g.rotateY(k * Math.PI / 2);
+    parts.push(g);          // индексированная: mergeGeos другой не принимает
+  }
+  const merged = mergeGeos(parts);
+  /* белый вершинный цвет: оттенок придёт из instanceColor, как у крон */
+  const n = merged.attributes.position.count;
+  merged.setAttribute('color', new THREE.BufferAttribute(new Float32Array(n * 3).fill(1), 3));
+  return merged;
+}
+
+let treeLod = null;
+
+/** Разложить деревья по уровням детализации.
+
+    Считается не каждый кадр: пять тысяч расстояний — не та работа, ради
+    которой стоит будить процессор шестьдесят раз в секунду. Пересчёт идёт,
+    только когда камера заметно сдвинулась.
+
+    Раскладка меняет ТОЛЬКО счётчики мешей: матрицы у всех трёх уровней уже
+    записаны и совпадают, поэтому переписывать нечего. */
+export function updateTreeLod(camWorld, worldGroup, force) {
+  if (!treeLod || !treeLod.length) return false;
+  if (!force && camWorld.distanceToSquared(_lodPrev) < CONFIG.TREE_LOD.step ** 2) return false;
+  _lodPrev.copy(camWorld);
+
+  /* камеру переводим в систему мира: точки деревьев записаны в ней */
+  worldGroup.worldToLocal(_lodLocal.copy(camWorld));
+  const near2 = CONFIG.TREE_LOD.near ** 2, mid2 = CONFIG.TREE_LOD.mid ** 2;
+  const cx = _lodLocal.x, cy = _lodLocal.y, cz = _lodLocal.z;
+
+  for (const grp of treeLod) {
+    const { trio, mats16, cols, pts, n } = grp;
+    let a = 0, b = 0, c = 0;                    // счётчики трёх уровней
+    const mA = trio[0].instanceMatrix.array, mB = trio[1].instanceMatrix.array,
+      mC = trio[2].instanceMatrix.array;
+    const cA = trio[0].instanceColor.array, cB = trio[1].instanceColor.array,
+      cC = trio[2].instanceColor.array;
+
+    for (let k = 0; k < n; k++) {
+      const dx = pts[k * 3] - cx, dy = pts[k * 3 + 1] - cy, dz = pts[k * 3 + 2] - cz;
+      const d2 = dx * dx + dy * dy + dz * dz;
+      const src = k * 16, srcC = k * 3;
+      let dst, dstC, arr, arrC;
+      if (d2 < near2) { dst = a * 16; dstC = a * 3; arr = mA; arrC = cA; a++; }
+      else if (d2 < mid2) { dst = b * 16; dstC = b * 3; arr = mB; arrC = cB; b++; }
+      else { dst = c * 16; dstC = c * 3; arr = mC; arrC = cC; c++; }
+      for (let j = 0; j < 16; j++) arr[dst + j] = mats16[src + j];
+      arrC[dstC] = cols[srcC];
+      arrC[dstC + 1] = cols[srcC + 1];
+      arrC[dstC + 2] = cols[srcC + 2];
+    }
+
+    const counts = [a, b, c];
+    for (let li = 0; li < 3; li++) {
+      trio[li].count = counts[li];
+      trio[li].instanceMatrix.needsUpdate = true;
+      trio[li].instanceColor.needsUpdate = true;
+      trio[li].visible = counts[li] > 0;
+    }
+  }
+  return true;
+}
+
 /** Продавить корпус холмами.
 
     Список холмов тот же, что раньше расставлял отдельные меши: место, радиус
@@ -375,12 +463,29 @@ export function displaceHills(geo, R, L, rnd) {
      обязана остаться ровной, иначе они встанут на склон, а река потечёт в
      гору. Проверяем ВЕСЬ угловой размах с мелким шагом — русло узкое и
      проскакивало между тремя контрольными точками. */
-  const clearOf = (t, rad) => {
+  const A = CONFIG.AXIS;
+  /* Пятки силовых опор: двенадцать точек, где колонна упирается в корпус.
+     Продавленный под ними холм оторвал бы стилобат от поверхности, а залитая
+     низина поставила бы опору в воду. */
+  const feet = [];
+  for (const sz of A.spars) {
+    for (let k = 0; k < A.sparArms; k++) {
+      feet.push({ t: (k / A.sparArms) * TAU + A.sparAngle * Math.PI / 180, z: sz });
+    }
+  }
+  const footClear = A.baseR + H.footGap;
+
+  const clearOf = (t, z, rad) => {
     const half = rad / R;
     for (let d = -half; d <= half + 1e-6; d += half / 8) {
       const deg = (((t + d) / TAU * 360) % 360 + 360) % 360;
       const zone = zoneAt(deg);
       if (zone === 'river' || zone === 'city') return false;
+    }
+    /* и не задеть ни одну пятку: расстояние считаем по поверхности */
+    for (const f of feet) {
+      const dt = ((t - f.t + Math.PI) % TAU + TAU) % TAU - Math.PI;
+      if (Math.hypot(dt * R, z - f.z) < rad + footClear) return false;
     }
     return true;
   };
@@ -390,7 +495,7 @@ export function displaceHills(geo, R, L, rnd) {
     const t = rnd() * TAU;
     /* с запасом от торцов: продавленный край не должен упереться в диск */
     const z = (rnd() - 0.5) * (L - rad * 4 - H.endGap * 2);
-    if (!clearOf(t, rad)) continue;
+    if (!clearOf(t, z, rad)) continue;
     hills.push({
       t, z, r: rad,
       h: rad * (H.rise[0] + rnd() * (H.rise[1] - H.rise[0])),
@@ -438,6 +543,7 @@ export function displaceHills(geo, R, L, rnd) {
 export const worldMats = { bld: [], nav: null, blob: null, print: null,
   hull: null, waterRough: null, waterNormal: null,
   trafficBody: null, trafficLamp: null, trafficMesh: null };
+const _lodPrev = new THREE.Vector3(1e9, 1e9, 1e9), _lodLocal = new THREE.Vector3();
 let sceneParts = [];
 let traffic = null;
 
@@ -784,8 +890,13 @@ export function buildWorld(group, renderer, quality) {
     const u = Math.pow((rnd() + rnd()) / 2, TR.bias);    // чаще невысокие
     return TR.h[0] + u * (TR.h[1] - TR.h[0]);
   };
-  const treePts = sample(W_TREE, Math.round(CONFIG.COUNT.trees[i] * Q.trees * CONFIG.GREEN_K),
-    () => treeH() * TR.crown * TR.spacing, true);
+  /* Шаг между деревьями падает как корень из плотности: при пятикратной с
+     прежним шагом они просто не разместились бы, и лес вышел бы лысыми
+     пятнами вместо ровного полога. */
+  const density = CONFIG.GREEN_K;
+  const spaceK = 1 / Math.sqrt(Math.max(0.2, density));
+  const treePts = sample(W_TREE, Math.round(CONFIG.COUNT.trees[i] * Q.trees * density),
+    () => treeH() * TR.crown * TR.spacing * spaceK, true);
   const SZ = CONFIG.SEASONS[CONFIG.SEASON] || CONFIG.SEASONS.summer;
   /* Данные дерева кладём В САМ элемент списка, а не в параллельный массив по
      индексу: инстансы режутся на секторы, и колбэк получает номер ВНУТРИ
@@ -823,20 +934,102 @@ export function buildWorld(group, renderer, quality) {
     });
 
   const FOL = CONFIG.FOLIAGE, det = Q.foliage;
+  /* Одна текстура на всё: силуэт для дальнего уровня и фактура листьев
+     для ближних — рисунок не зависит от того, на что он натянут. */
+  const leafMap = makeLeafTexture(mulberry32(CONFIG.SEED + 61));
+  const leafNrm = Q.normals ? heightToNormal(leafMap.image, CONFIG.NORMALS.leaf, 256) : null;
   const crownMat = new THREE.MeshStandardMaterial({
-    roughness: 0.9, flatShading: true, vertexColors: true
+    roughness: 0.9, flatShading: true, vertexColors: true,
+    /* фактура листьев: без неё крона читается гранёным камнем */
+    normalMap: leafNrm, normalScale: new THREE.Vector2(1.1, 1.1)
   });
   patchWindMaterial(crownMat);
-  instance(foliageGeo(det, mulberry32(CONFIG.SEED + 5), FOL.wobble, FOL.dither),
-    crownMat, treePts, (k, t, z, im, o) => {
-    surfaceQuat(t, q).multiply(qs.setFromAxisAngle(UP, o.spin));
-    m4.compose(surfacePos(t, R - o.up - (o.th + o.tr * 0.55), z, v3), q,
-      sc.set(o.tr, o.tr * o.squash, o.tr));
-    im.setMatrixAt(k, m4);
-    const pal = o.fall ? SZ.accents : SZ.greens;
-    im.setColorAt(k, natural(pal[(o.tint * pal.length) | 0], CONFIG.SATURATION, new THREE.Color()));
-    shadows.push([t, z, { r: o.tr * 1.5, up: o.up }]);
+  /* ─────────── КРОНЫ: три уровня детализации ───────────
+     Пятикратная плотность без них дала бы одиннадцать миллионов граней. С
+     ними — два: вблизи полная крона с ветром, поодаль упрощённая без него,
+     вдали крест из двух плоскостей с текстурой листвы.
+
+     Крест, а не билборд к камере: мир вращается, и разворачивать тысячи
+     плоскостей каждый кадр дороже, чем сэкономлено. С расстояния, где
+     работает этот уровень, разницы не видно.
+
+     Все три меша строятся сразу и полными, а раскладку по уровням делает
+     updateTreeLod: он переписывает только счётчики. */
+  const crownFar = new THREE.MeshStandardMaterial({
+    map: leafMap, alphaMap: leafMap, alphaTest: 0.42,
+    roughness: 0.95, side: THREE.DoubleSide, vertexColors: true
   });
+  const crownMid = crownMat.clone();
+  crownMid.normalMap = leafNrm;
+
+  const geos = [
+    foliageGeo(det, mulberry32(CONFIG.SEED + 5), FOL.wobble, FOL.dither),
+    foliageGeo(Math.max(0, det - 1), mulberry32(CONFIG.SEED + 5), FOL.wobble, FOL.dither),
+    crossQuadGeo()
+  ];
+  const mats = [crownMat, crownMid, crownFar];
+
+  /* Раскладка идёт ПО КАЖДОМУ ДЕРЕВУ, а не по сектору. Сектор охватывает всю
+     длину станции, камера всегда внутри его сферы — по секторам отсекалось
+     полтора десятка процентов вместо восьмидесяти.
+
+     Матрицы и цвета считаются один раз и лежат готовыми; раскладка только
+     раскладывает их по трём мешам и правит счётчики. Секторное деление
+     остаётся: без него теряется отсечение по кадру. */
+  {
+    const buckets = Array.from({ length: CH }, () => []);
+    for (const item of treePts) {
+      const t = ((item[0] % TAU) + TAU) % TAU;
+      buckets[Math.min(CH - 1, (t / TAU * CH) | 0)].push(item);
+    }
+
+    treeLod = [];
+    for (const b of buckets) {
+      if (!b.length) continue;
+      /* заготовленные матрицы, цвета и точки — общие на все три уровня */
+      const mats16 = new Float32Array(b.length * 16);
+      const cols = new Float32Array(b.length * 3);
+      const pts = new Float32Array(b.length * 3);
+      const col = new THREE.Color();
+      for (let k = 0; k < b.length; k++) {
+        const [t, z, o] = b[k];
+        surfaceQuat(t, q).multiply(qs.setFromAxisAngle(UP, o.spin));
+        surfacePos(t, R - o.up - (o.th + o.tr * 0.55), z, v3);
+        m4.compose(v3, q, sc.set(o.tr, o.tr * o.squash, o.tr));
+        m4.toArray(mats16, k * 16);
+        pts[k * 3] = v3.x; pts[k * 3 + 1] = v3.y; pts[k * 3 + 2] = v3.z;
+        const pal = o.fall ? SZ.accents : SZ.greens;
+        natural(pal[(o.tint * pal.length) | 0], CONFIG.SATURATION, col);
+        cols[k * 3] = col.r; cols[k * 3 + 1] = col.g; cols[k * 3 + 2] = col.b;
+        shadows.push([t, z, { r: o.tr * 1.5, up: o.up }]);
+      }
+
+      const trio = [];
+      for (let li = 0; li < 3; li++) {
+        const im = new THREE.InstancedMesh(geos[li], mats[li], b.length);
+        im.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(b.length * 3), 3);
+        /* Ёмкость на весь сектор, но счётчик выставит раскладка. До неё меш
+           пуст, поэтому сразу после сборки она вызывается принудительно. */
+        im.count = 0;
+        /* Отсечение по кадру оставляем: сфера считается по ёмкости сектора и
+           не зависит от того, сколько деревьев в нём сейчас на этом уровне. */
+        im.boundingSphere = sectorSphere(b, R);
+        im.frustumCulled = true;
+        trio.push(add(im));
+      }
+      treeLod.push({ trio, mats16, cols, pts, n: b.length });
+
+      /* До первой раскладки мир должен быть целым сам по себе: складываем всё
+         на ближний уровень. Иначе собранная сцена без вызова раскладки —
+         пустые меши, и это ловушка для любого, кто соберёт мир отдельно. */
+      const im0 = trio[0];
+      im0.instanceMatrix.array.set(mats16);
+      im0.instanceColor.array.set(cols);
+      im0.count = b.length;
+      im0.instanceMatrix.needsUpdate = true;
+      im0.instanceColor.needsUpdate = true;
+    }
+  }
 
   /* ─────────── ТРАВА У КОМЛЕЙ ───────────
      Кольцо мелких травинок вокруг ствола: именно оно продаёт контакт с

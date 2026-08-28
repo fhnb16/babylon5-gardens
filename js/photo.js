@@ -623,6 +623,47 @@ const DENOISE_FRAG = `
   }
 `;
 
+/* ═══════════════════════════════════════════════════════════════════════════
+   РЕЗКОСТЬ ПРИ РАСТЯЖЕНИИ
+
+   Считать путь в доле разрешения дёшево, но растянутая картинка мылится.
+   Темпоральный апскейл тут не поможет: он берёт данные из предыдущих кадров
+   со смещённой выборкой, а трассировка уже делает ровно это — четыреста
+   выборок с дрожанием внутри пикселя. Новой информации взять неоткуда.
+
+   Потерянные высокие частоты не вернуть, но оставшиеся можно подчеркнуть.
+   Контрастно-адаптивная резкость поднимает перепад там, где он есть, и не
+   трогает ровные места: там подъём дал бы только шум.
+   ═══════════════════════════════════════════════════════════════════════════ */
+const SHARP_FRAG = `
+  precision highp float;
+  varying vec2 vUv;
+  uniform sampler2D tSrc;
+  uniform vec2 uRes;
+  uniform float uAmount;
+
+  float lum( vec3 c ) { return dot( c, vec3( 0.2126, 0.7152, 0.0722 ) ); }
+
+  void main() {
+    vec2 px = 1.0 / uRes;
+    vec3 c = texture2D( tSrc, vUv ).rgb;
+    vec3 n = texture2D( tSrc, vUv + vec2( 0.0, -px.y ) ).rgb;
+    vec3 s = texture2D( tSrc, vUv + vec2( 0.0,  px.y ) ).rgb;
+    vec3 w = texture2D( tSrc, vUv + vec2( -px.x, 0.0 ) ).rgb;
+    vec3 e = texture2D( tSrc, vUv + vec2(  px.x, 0.0 ) ).rgb;
+
+    /* Насколько окрестность вообще контрастна. На ровном месте размах близок
+       к нулю, и подъём там только вытащил бы зерно. */
+    float mn = min( lum( c ), min( min( lum( n ), lum( s ) ), min( lum( w ), lum( e ) ) ) );
+    float mx = max( lum( c ), max( max( lum( n ), lum( s ) ), max( lum( w ), lum( e ) ) ) );
+    float contrast = clamp( ( mx - mn ) * 4.0, 0.0, 1.0 );
+
+    vec3 blur = ( n + s + w + e ) * 0.25;
+    /* классическая нерезкая маска, но сила следует контрасту */
+    gl_FragColor = vec4( c + ( c - blur ) * uAmount * contrast, 1.0 );
+  }
+`;
+
 /* glslSmartDeNoise — тот, что лежит в самой библиотеке трассировщика.
    Работает только по цвету: направляющих не знает, поэтому детали мылит, но
    на вид мягче и стоит один проход. Оставлен как выбор: на гладких сценах
@@ -982,8 +1023,8 @@ export function setSunScreen(camera, worldGroup) {
 
 function disposeFxaa() {
   for (const t of [fxRT, brRT, blRT, rayRT, ...dnRT, ...taaRT, ...smaaRT]) t?.dispose();
-  for (const mm of [dnMat, smartMat, emaMat]) mm?.dispose();
-  dnMat = smartMat = emaMat = null; dnRT = [];
+  for (const mm of [dnMat, smartMat, emaMat, sharpMat]) mm?.dispose();
+  dnMat = smartMat = emaMat = sharpMat = null; dnRT = [];
   guideRT?.dispose(); guideRT = null;
   guideMat?.dispose(); guideMat = null;
   for (const mm of smaaMat) mm.dispose();
@@ -1101,6 +1142,13 @@ export function resizePost(renderer) {
       uThreshold: { value: D.smartThreshold }
     }
   });
+  sharpMat = sharpMat || new THREE.ShaderMaterial({
+    vertexShader: VERT, fragmentShader: SHARP_FRAG,
+    uniforms: {
+      tSrc: { value: null }, uRes: { value: new THREE.Vector2(1, 1) },
+      uAmount: { value: D.sharpen }
+    }
+  });
   emaMat = emaMat || new THREE.ShaderMaterial({
     vertexShader: VERT, fragmentShader: EMA_FRAG,
     uniforms: {
@@ -1131,8 +1179,9 @@ export function resizePost(renderer) {
   }
 }
 
-let dnMat = null, smartMat = null, emaMat = null;
-let dnRT = [], dnOn = false, dnMode = 'atrous', emaHas = false;
+let dnMat = null, smartMat = null, emaMat = null, sharpMat = null;
+let sharpOn = 0;
+let dnRT = [], dnOn = false, dnMode = 'cross', emaHas = false;
 let brightScale = 1;
 
 /** Поднять порог яркой выборки. В трассировке пути эмиссия усилена в девять
@@ -1145,7 +1194,10 @@ export function setBrightScale(k) { brightScale = k > 0 ? k : 1; }
 export function setDenoise(on) { dnOn = !!on; emaHas = false; }
 
 /** Способ очистки: у каждого своя цена и своя слабость */
-export function setDenoiseMode(mode) { dnMode = mode || 'atrous'; emaHas = false; }
+export function setDenoiseMode(mode) { dnMode = mode || 'cross'; emaHas = false; }
+
+/** Сила резкости при растяжении. Ноль — растягивать как есть. */
+export function setSharpen(k) { sharpOn = k > 0 ? k : 0; }
 
 let guideRT = null, guideMat = null;
 
@@ -1324,6 +1376,18 @@ export function composite(renderer, srcTexture, exposure) {
       src = to.texture;
       step *= 2;
     }
+  }
+  /* Резкость идёт последней среди буферных проходов: подчёркивать надо уже
+     очищенную картинку, иначе поднимется и зерно. */
+  if (sharpOn > 0 && sharpMat && dnRT.length) {
+    /* Пишем в тот буфер, из которого НЕ читаем. Сравнение буфера с текстурой
+       всегда ложно, и проход мог читать и писать одно и то же. */
+    const to = src === dnRT[0].texture ? dnRT[1] : dnRT[0];
+    sharpMat.uniforms.tSrc.value = src;
+    sharpMat.uniforms.uRes.value.set(to.width, to.height);
+    sharpMat.uniforms.uAmount.value = sharpOn;
+    pass(sharpMat, to);
+    src = to.texture;
   }
   fxMat.uniforms.tScene.value = src;
 

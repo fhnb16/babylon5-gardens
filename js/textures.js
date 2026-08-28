@@ -371,40 +371,43 @@ export function makeHullMaps(size, maskSize, rnd, ponds = []) {
   return { albedo, mask, canvas: A.c };
   /* ─── ПРУДЫ ───
      Низины корпуса заливаются водой. Канал тот же, что у рек, поэтому им
-     достаётся весь водный шейдер даром: глубина, кайма, отражение. Разница
-     одна — течения нет, и рисуются они не полосой, а пятном по форме низины. */
+     достаётся весь водный шейдер даром: глубина, кайма, отражение. Течения
+     нет — оно привязано к руслам.
+
+     Рисуем ровно как реки: обычной заливкой, а не сложением. Сложение
+     оставляло зелёный канал на месте, и трава ложилась поверх воды — озера
+     не было видно вовсе. */
   for (const p of ponds) {
-    const rx = p.r / (TAU_2D * CONFIG.R) * M.c.width;
-    const ry = p.r / CONFIG.L * M.c.width;
-    const big = Math.max(rx, ry);
-    /* тем же пятном и в альбедо, и в маску: иначе вода встанет не там */
-    for (const [g2, size2, col] of [[m, M.c.width, '0,0,255'], [a, W, '32,74,96']]) {
-      const px = ((p.t / TAU_2D) % 1 + 1) % 1 * size2;
-      const py = (p.z / CONFIG.L + 0.5) * size2;
-      const kx = rx / big * (size2 / M.c.width), ky = ry / big * (size2 / M.c.width);
-      g2.save();
-      g2.translate(px, py);
-      g2.scale(kx, ky);
-      const grd = g2.createRadialGradient(0, 0, 0, 0, 0, big);
-      /* глубина спадает к берегу — кайма получается сама */
-      if (g2 === m) {
-        grd.addColorStop(0, 'rgba(255,0,0,1)');
-        grd.addColorStop(0.72, 'rgba(255,0,0,.92)');
-        grd.addColorStop(1, 'rgba(255,0,0,0)');
-      } else {
-        grd.addColorStop(0, `rgba(${col},1)`);
-        grd.addColorStop(0.8, `rgba(${col},.9)`);
-        grd.addColorStop(1, `rgba(${col},0)`);
-      }
-      g2.fillStyle = grd;
-      g2.globalCompositeOperation = g2 === m ? 'lighter' : 'source-over';
-      g2.beginPath();
-      g2.arc(0, 0, big, 0, TAU_2D);
-      g2.fill();
-      g2.globalCompositeOperation = 'source-over';
-      g2.restore();
-    }
+    const u = ((p.t / TAU_2D) % 1 + 1) % 1;
+    const v = p.z / CONFIG.L + 0.5;
+    /* радиус в пикселях считается отдельно по осям: по дуге и по длине
+       масштабы разные */
+    const ellipse = (ctx, size, rr, fill) => {
+      const rxp = p.r * rr / (TAU_2D * CONFIG.R) * size;
+      const ryp = p.r * rr / CONFIG.L * size;
+      ctx.save();
+      ctx.translate(u * size, v * size);
+      ctx.scale(rxp / Math.max(rxp, ryp), ryp / Math.max(rxp, ryp));
+      ctx.fillStyle = fill;
+      ctx.beginPath();
+      ctx.arc(0, 0, Math.max(rxp, ryp), 0, TAU_2D);
+      ctx.fill();
+      ctx.restore();
+    };
+
+    /* альбедо: берег, отмель, глубина — теми же цветами, что у рек */
+    ellipse(a, W, 1.18, '#a8a173');
+    ellipse(a, W, 1.06, '#7f9a55');
+    ellipse(a, W, 1.0, '#3a5c47');
+    ellipse(a, W, 0.82, '#2c4c5e');
+    ellipse(a, W, 0.55, '#20384a');
+
+    /* маска: R растёт к середине — та же глубина, что у русла */
+    ellipse(m, M.c.width, 1.0, '#330000');
+    ellipse(m, M.c.width, 0.78, '#990000');
+    ellipse(m, M.c.width, 0.5, '#ff0000');
   }
+
 
 }
 
@@ -863,6 +866,49 @@ export function makeRoofTexture(rnd) {
   g.lineWidth = 5;
   g.strokeRect(2.5, 2.5, S - 5, S - 5);
   return tex(c, { wrap: true });
+}
+
+/** Листва: силуэт кроны с прозрачным фоном для дальнего уровня и карта
+    фактуры для ближних. Одна и та же — рисунок листьев не зависит от того,
+    натянут он на плоскость или на многогранник. */
+export function makeLeafTexture(rnd) {
+  const S = 256, { c, g } = cv(S, S);
+  g.clearRect(0, 0, S, S);
+
+  /* силуэт: несколько перекрывающихся куп, чтобы край не читался кругом */
+  const blobs = [];
+  for (let i = 0; i < 9; i++) {
+    const a = (i / 9) * TAU_2D + rnd() * 0.5;
+    const rr = S * (0.16 + rnd() * 0.14);
+    blobs.push([S / 2 + Math.cos(a) * S * 0.2 * rnd(),
+      S * 0.42 + Math.sin(a) * S * 0.18 * rnd(), rr]);
+  }
+  g.fillStyle = '#5c8a3a';
+  for (const [x, y, rr] of blobs) {
+    g.beginPath(); g.arc(x, y, rr, 0, TAU_2D); g.fill();
+  }
+
+  /* отдельные листья: мазки поперёк, они и дают фактуру вблизи */
+  for (let i = 0; i < 900; i++) {
+    const b = blobs[(rnd() * blobs.length) | 0];
+    const a = rnd() * TAU_2D, d = rnd() * b[2];
+    const x = b[0] + Math.cos(a) * d, y = b[1] + Math.sin(a) * d;
+    const v = 60 + rnd() * 90;
+    g.fillStyle = `rgba(${(v * 0.55) | 0},${v},${(v * 0.42) | 0},.75)`;
+    g.save();
+    g.translate(x, y);
+    g.rotate(rnd() * TAU_2D);
+    g.beginPath();
+    g.ellipse(0, 0, 2 + rnd() * 5, 1 + rnd() * 2.4, 0, 0, TAU_2D);
+    g.fill();
+    g.restore();
+  }
+
+  /* ствол под кроной: без него крест висит в воздухе */
+  g.fillStyle = '#6b5236';
+  g.fillRect(S / 2 - S * 0.022, S * 0.55, S * 0.044, S * 0.42);
+
+  return tex(c, { wrap: false });
 }
 
 export function makeCarWindows() {

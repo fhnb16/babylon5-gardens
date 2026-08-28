@@ -8,7 +8,8 @@ import { CONFIG } from './js/config.js';
 import { D2R, TAU, zoneAt, mulberry32, clamp as clampNum, tpVec, aimAt, natural,
   cityBlock, cityCenter, cellInfo, cellUsable, pickFloors, turnToward, clampPitch,
   surfacePos, mergeGeos, rod } from './js/util.js';
-import { buildWorld, worldMats, hullU, uvSelfTest, patchAllRoughness } from './js/world.js';
+import { buildWorld, worldMats, hullU, uvSelfTest, patchAllRoughness,
+  updateTreeLod } from './js/world.js';
 import { buildStructures, structMats, updateStructures,
   liftSeat, liftCount2, setLiftInside } from './js/structures.js';
 import { fieldAt, waterLevel, windLevel, humLevel, birdLevel } from './js/audio.js';
@@ -131,7 +132,10 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   ok(lo < 200000, `Треугольников в LOW: ${(lo / 1000) | 0}k (лимит 200k) — мобильный бюджет`);
   ok(ul < 1600000, `Треугольников в ULTRA: ${(ul / 1000) | 0}k (лимит 1.6M)`);
   ok(lo < hi * 0.45 && hi < ul * 0.6, 'Каждый пресет заметно тяжелее предыдущего по геометрии, а не только по разрешению');
-  ok(emptyInst === 0, 'Ни один InstancedMesh не пустой');
+  /* Заготовки уровней детализации пусты до раскладки — так они и устроены:
+     ёмкость на весь сектор, счётчик выставляется по расстоянию до камеры. */
+  ok(emptyInst <= 2 * CONFIG.QUALITY.HIGH.chunks,
+     `Пустых InstancedMesh ${emptyInst} — только заготовки уровней`);
 
   /* --- контактные тени: по одной на дерево, куст и здание --- */
   buildWorld(group, fakeRenderer, 'LOW');          // вернуть мир после замеров бюджета
@@ -326,6 +330,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   /* Отдельных мешей-холмов больше нет: корпус продавлен по тому же списку.
      Раньше холм был сферой на земле — своя кромка, свой цвет, резкий стык. */
   const hillMesh = insts.find(o => o.material?.flatShading && !o.material.map
+    && !o.instanceColor && o.count > 0
     && o.count <= CONFIG.COUNT.hills[0] && o.geometry.attributes.position.count < 200);
   ok(!hillMesh, 'Отдельных мешей-холмов нет — рельеф несёт сам корпус');
 
@@ -938,7 +943,10 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   const foliageMats = [...new Set(ins.filter(o => o.material?.flatShading
     && o.material.vertexColors).map(o => o.material))];
   const foliage = foliageMats.map(mm => chunksOf({ children: ins }, o => o.material === mm)[0]);
-  ok(foliageMats.length === 2, 'Кроны и кусты — отдельные материалы с вершинными цветами');
+  /* Материалов стало больше: у кроны их три — по одному на уровень
+     детализации, — плюс материал кустов. */
+  ok(foliageMats.length >= 2,
+     `Кроны и кусты — отдельные материалы с вершинными цветами (${foliageMats.length})`);
 
   /* какой из них куст: у него нет парного ствола, берём меньший по габариту */
   const size = im => { im.geometry.computeBoundingBox(); return im.geometry.boundingBox.max.y; };
@@ -2000,7 +2008,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
      `Мобильная ультра ${(um / 1000) | 0}k против ${(u / 1000) | 0}k — вдвое легче при тех же возможностях`);
 
   /* рычаги */
-  ok(CONFIG.GREEN.length >= 3 && CONFIG.GREEN[0] === 1,
+  ok(CONFIG.GREEN.length >= 3 && CONFIG.GREEN[0] >= 3,
      `Плотность зелени: ${CONFIG.GREEN.map(v => (v * 100) + '%').join(', ')}`);
   ok(CONFIG.DRAW_FAR.every((v, i, a) => i === 0 || v < a[i - 1]),
      `Дальность прорисовки: ${CONFIG.DRAW_FAR.map(v => (v / 100).toFixed(1) + ' км').join(', ')}`);
@@ -3229,8 +3237,12 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
      'Угол считается в КОНЕЧНОЙ системе: после поворота он становится 180° минус исходный');
   ok(/const f = \(1 - u \* u\) \* \(1 - u \* u\)/.test(wsrc),
      'Гладкий колокол: у края производная нулевая, стыка не видно');
-  ok(/if \(!clearOf\(t, rad\)\) continue;/.test(wsrc),
+  ok(/if \(!clearOf\(t, z, rad\)\) continue;/.test(wsrc),
      'Холм не садится на город и русло: там поверхность обязана остаться ровной');
+  /* И не задевает пятки опор: продавленный под колонной холм оторвал бы
+     стилобат, а залитая низина поставила бы её в воду. */
+  ok(/for \(const f of feet\)/.test(wsrc), 'Пятки опор тоже обходятся');
+  ok(CONFIG.HILL.footGap > 0, `Запас вокруг пятки ${CONFIG.HILL.footGap} юнитов`);
   for (const q of ['LOW', 'HIGH', 'ULTRAM', 'ULTRA']) {
     ok(CONFIG.QUALITY[q].rings > 0, `${q}: колец корпуса ${CONFIG.QUALITY[q].rings}`);
   }
@@ -3243,13 +3255,180 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
      'Пруды стоят в низинах, а не где придётся');
   const tsrc = readFileSync(new URL('./js/textures.js', import.meta.url), 'utf8');
   ok(/─── ПРУДЫ ───/.test(tsrc), 'Пруд рисуется в тот же канал маски, что и река');
-  ok(/rgba\(255,0,0,1\)/.test(tsrc.slice(tsrc.indexOf('─── ПРУДЫ ───'))),
-     'В канал воды: весь водный шейдер достаётся ему даром');
+  const pondBlock = tsrc.slice(tsrc.indexOf('─── ПРУДЫ ───'));
+  ok(/ellipse\(m, M\.c\.width, 0\.5, '#ff0000'\)/.test(pondBlock),
+     'В канал воды: весь водный шейдер достаётся пруду даром');
+  /* Сложение оставляло зелёный канал на месте, и трава ложилась поверх
+     воды — озера не было видно вовсе. */
+  ok(!/globalCompositeOperation/.test(pondBlock.slice(0, pondBlock.indexOf('\n  }\n'))),
+     'Пруд заливается как река, а не складывается с фоном');
+  ok(/ellipse\(m, M\.c\.width, 1\.0, '#330000'\)/.test(pondBlock),
+     'Глубина растёт к середине — тремя проходами, как у русла');
 
   /* и вода в низине действительно появляется */
   const g3 = new THREE.Group();
   const r3 = buildWorld(g3, fakeRenderer, 'HIGH');
   ok(!!r3.waterRough, 'Карта шероховатости воды собрана уже с прудами');
+}
+
+/* ══ 3h36. Уровни детализации деревьев и резкость ══════════════════════ */
+{
+  const wsrc = readFileSync(new URL('./js/world.js', import.meta.url), 'utf8');
+  const psrc = readFileSync(new URL('./js/photo.js', import.meta.url), 'utf8');
+  const tsrc = readFileSync(new URL('./js/textures.js', import.meta.url), 'utf8');
+
+  /* плотность до пятикратной — без уровней это одиннадцать миллионов граней */
+  ok(CONFIG.GREEN[0] >= 5, `Верхняя плотность зелени: ${CONFIG.GREEN[0] * 100}%`);
+  ok(CONFIG.GREEN.every((v, i) => i === 0 || v < CONFIG.GREEN[i - 1]), 'Ступени убывают');
+  ok(/const spaceK = 1 \/ Math\.sqrt/.test(wsrc),
+     'Шаг между деревьями падает как корень из плотности: иначе лес выйдет лысыми пятнами');
+
+  /* три уровня */
+  const L = CONFIG.TREE_LOD;
+  ok(L.near > 0 && L.mid > L.near, `Границы уровней: ${L.near} и ${L.mid} юнитов`);
+  ok(L.step > 0, `Пересчёт при сдвиге камеры на ${L.step} юнитов`);
+  ok(/function crossQuadGeo/.test(wsrc), 'Дальний уровень — крест из двух плоскостей');
+  ok(/Билборд, разворачивающийся к камере, здесь дороже/.test(wsrc),
+     'Крест вместо билборда: мир вращается, разворачивать тысячи плоскостей дороже');
+  ok(/export function updateTreeLod/.test(wsrc), 'Раскладка есть');
+  ok(/Раскладка идёт ПО КАЖДОМУ ДЕРЕВУ/.test(wsrc),
+     'Раскладка по деревьям, а не по секторам: сфера сектора охватывает всю длину станции');
+  ok(/im\.boundingSphere = sectorSphere\(b, R\)/.test(wsrc),
+     'Отсечение по кадру сохранено: сфера считается по ёмкости сектора');
+
+  /* мир целый и без раскладки */
+  const g4 = new THREE.Group();
+  buildWorld(g4, fakeRenderer, 'HIGH');
+  const crowns = g4.children.filter(o => o.isInstancedMesh && o.material?.flatShading
+    && o.instanceColor);
+  ok(crowns.some(o => o.count > 0),
+     'До первой раскладки мир целый: всё лежит на ближнем уровне');
+
+  /* и раскладка действительно снимает нагрузку */
+  const world = new THREE.Group();
+  world.add(g4);
+  world.updateMatrixWorld(true);
+  const tris = () => {
+    let n = 0;
+    g4.traverse(o => {
+      if (!o.isMesh) return;
+      const ix = o.geometry.index ? o.geometry.index.count : o.geometry.attributes.position.count;
+      n += (ix / 3) * (o.isInstancedMesh ? o.count : 1);
+    });
+    return n;
+  };
+  const before = tris();
+  updateTreeLod(new THREE.Vector3(0, CONFIG.R - 8, 0), world, true);
+  const after = tris();
+  ok(after < before * 0.75,
+     `Раскладка снимает ${(100 - after / before * 100) | 0}% геометрии: ${(before / 1000) | 0}k → ${(after / 1000) | 0}k`);
+
+  /* фактура листвы */
+  ok(/export function makeLeafTexture/.test(tsrc), 'Текстура листвы есть');
+  ok(/отдельные листья: мазки поперёк/.test(tsrc), 'В ней прорисованы отдельные листья');
+  ok(CONFIG.NORMALS.leaf > 0, `Рельеф листвы ${CONFIG.NORMALS.leaf}: без него крона — гранёный камень`);
+
+  /* резкость при растяжении */
+  ok(/const SHARP_FRAG/.test(psrc), 'Резкость при растяжении есть');
+  ok(/float contrast = clamp\( \( mx - mn \) \* 4\.0/.test(psrc),
+     'Сила следует контрасту: на ровном месте подъём вытащил бы только зерно');
+  ok(/export function setSharpen/.test(psrc), 'И настраивается');
+  const msrc2 = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+  ok(/setSharpen\(v < 0\.999 \? CONFIG\.POST\.sharpen \* \(1 - v\)/.test(msrc2),
+     'Тем сильнее, чем меньше доля разрешения');
+}
+
+/* ══ 3h37. Умолчания и вызов всех шумоподавителей ══════════════════════ */
+{
+  const psrc = readFileSync(new URL('./js/photo.js', import.meta.url), 'utf8');
+  const msrc = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+
+  /* каждый способ обязан иметь свою ветку — иначе выбор в настройках
+     переключал бы подпись, а работал бы один и тот же фильтр */
+  for (const [id, mark] of [
+    ['smart', "dnMode === 'smart' && smartMat"],
+    ['temporal', "dnMode === 'temporal' && emaMat"],
+    ['cross', "dnMode === 'cross' \\? 1 :"]
+  ]) {
+    ok(new RegExp(mark).test(psrc), `Способ «${id}» действительно вызывается`);
+  }
+  ok(/} else if \(dnOn && dnMat && dnRT\.length\) \{/.test(psrc),
+     'À-Trous — последняя ветка, она же по умолчанию для неизвестного значения');
+
+  /* резкость не должна читать и писать один буфер */
+  ok(/const to = src === dnRT\[0\]\.texture \? dnRT\[1\] : dnRT\[0\];/.test(psrc),
+     'Резкость пишет в буфер, из которого не читает: сравнение буфера с текстурой всегда ложно');
+
+  /* умолчания */
+  ok(/prefs\.get\('denoiser', 'cross'\)/.test(msrc), 'По умолчанию кросс-билатеральный');
+  ok(/dnMode = 'cross'/.test(psrc), 'И в самом модуле тоже');
+  ok(/prefs\.get\('ptScale', 0\.5\)/.test(msrc), 'Доля трассировки по умолчанию ½');
+  ok(/prefs\.get\('aaMsaa', 0\)/.test(msrc), 'MSAA по умолчанию выключен');
+  ok(/prefs\.get\('aaFilter', 'taa'\)/.test(msrc), 'Фильтр по умолчанию TAA');
+  ok(/prefs\.get\('aaScale', 1\)/.test(msrc), 'Масштаб рендера по умолчанию ×1');
+  ok(/prefs\.get\('green', 2\)/.test(msrc), 'Плотность зелени по умолчанию — третья ступень');
+  ok(CONFIG.GREEN[2] === 2.5, `Третья ступень — ${CONFIG.GREEN[2] * 100}%`);
+}
+
+/* ══ 3h38. Ничто не используется без импорта ═══════════════════════════ */
+{
+  /* Именно этот класс ошибки уронил страницу: функция была объявлена и
+     экспортирована, вызов стоял на месте, а строка импорта потерялась при
+     правке. Синтаксис при этом верный, и `node --check` молчит — ошибка
+     всплывает только в браузере, сотнями раз в секунду из цикла отрисовки. */
+  const files = ['config', 'util', 'textures', 'world', 'structures',
+    'controls', 'photo', 'pathtrace', 'audio', 'main', 'version'];
+  const src = {};
+  for (const f of files) {
+    src[f] = readFileSync(new URL(`./js/${f}.js`, import.meta.url), 'utf8');
+  }
+
+  /* что каждый модуль отдаёт наружу */
+  const exportsOf = {};
+  for (const f of files) {
+    const names = new Set();
+    for (const m of src[f].matchAll(/export\s+(?:async\s+)?function\s+(\w+)/g)) names.add(m[1]);
+    for (const m of src[f].matchAll(/export\s+(?:const|let|class)\s+(\w+)/g)) names.add(m[1]);
+    exportsOf[f] = names;
+  }
+
+  /* что каждый модуль забирает себе */
+  const importsOf = {};
+  for (const f of files) {
+    const names = new Set();
+    for (const m of src[f].matchAll(/import\s*\{([^}]*)\}\s*from/g)) {
+      for (const part of m[1].split(',')) {
+        const n = part.trim().split(/\s+as\s+/).pop().trim();
+        if (n) names.add(n);
+      }
+    }
+    for (const m of src[f].matchAll(/import\s+\*\s+as\s+(\w+)/g)) names.add(m[1]);
+    importsOf[f] = names;
+  }
+
+  /* Шейдеры лежат в тех же файлах обратными кавычками, и в GLSL полно имён,
+     совпадающих с нашими: clamp, mix, texture. Вырезаем их, иначе проверка
+     ловит несуществующее. */
+  const stripGlsl = s => s.replace(/`[^`]*`/g, '``');
+
+  let missing = [];
+  for (const f of files) {
+    /* имена, объявленные в самом файле, — не в счёт */
+    const own = new Set(exportsOf[f]);
+    for (const m of src[f].matchAll(/(?:function|const|let|var|class)\s+(\w+)/g)) own.add(m[1]);
+
+    for (const other of files) {
+      if (other === f) continue;
+      for (const name of exportsOf[other]) {
+        if (own.has(name) || importsOf[f].has(name)) continue;
+        /* ищем настоящее обращение, а не совпадение внутри слова или строки */
+        const used = new RegExp(`(^|[^\\w.'"])${name}\\s*\\(`, 'm').test(stripGlsl(src[f]));
+        if (used) missing.push(`${f}.js → ${name} (из ${other}.js)`);
+      }
+    }
+  }
+  ok(missing.length === 0,
+     `Всё используемое импортировано${missing.length ? ': ' + missing.join(', ') : ''}`);
 }
 
 /* ══ 3i. Звук реагирует на то, где находится камера ════════════════════ */

@@ -4,7 +4,8 @@ import { VERSION } from './version.js';
 import { mulberry32, clamp, lerp, easeInOut, tpVec, aimAt, fadeByFog,
   turnToward, clampPitch, TAU } from './util.js';
 import { makeSoftSprite, makeGlowTexture } from './textures.js';
-import { buildWorld, worldMats, hullU, windU, updateTraffic, trafficMeshes } from './world.js';
+import { buildWorld, worldMats, hullU, windU, updateTraffic, trafficMeshes,
+  patchAllRoughness, updateTreeLod } from './world.js';
 import { buildStructures, structMats, updateStructures,
   liftSeat, liftCount2, setLiftInside } from './structures.js';
 import { ctl, isMobile, initControls, updateControls, syncFromCamera, resetStick, stationUp } from './controls.js';
@@ -13,7 +14,7 @@ import { pt, startPath, pathStep, stopPath, pathLabel, pathCameraMoved,
   setPaused, setPathScale } from './pathtrace.js';
 import { trace, startTrace, traceStep, stopTrace,
   setPost, setSunScreen, resizePost, renderFrame, composite, setDenoise, forcePost,
-  setBrightScale, setDenoiseGuide, renderGuide, setDenoiseMode,
+  setBrightScale, setDenoiseGuide, renderGuide, setDenoiseMode, setSharpen,
   setTraceDebug, DEBUG_NAMES, setAmbientShare, setHullRef } from './photo.js';
 
 const $ = id => document.getElementById(id);
@@ -171,6 +172,13 @@ function rebuild() {
   panel = res.panel;
   hullAlbedoTex = res.albedo || null;
   buildStructures(worldGroup, renderer, q, panel, res.panelNormal);
+  /* Шероховатость в альфу — всем непрозрачным материалам сцены разом, а не
+     выборочно: пропущенный оставляет там непрозрачность, и трассировка
+     принимает поверхность за зеркальную. */
+  patchAllRoughness(worldGroup);
+  /* Раскладку деревьев зовём сразу: до неё меши уровней пусты. */
+  worldGroup.updateMatrixWorld(true);
+  updateTreeLod(camera.position, worldGroup, true);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -764,7 +772,7 @@ function initUI() {
     op.value = it.id; op.textContent = it.label.toUpperCase();
     sDn.appendChild(op);
   }
-  sDn.value = prefs.get('denoiser', 'atrous');
+  sDn.value = prefs.get('denoiser', 'cross');
   const showDn = () => {
     const it = CONFIG.POST.DENOISERS.find(x => x.id === sDn.value);
     $('sDnV').textContent = it ? `${it.label} · ${it.hint}` : '';
@@ -786,18 +794,21 @@ function initUI() {
     op.value = String(it.v); op.textContent = it.label.toUpperCase();
     sPt.appendChild(op);
   }
-  sPt.value = String(prefs.get('ptScale', 1));
+  sPt.value = String(prefs.get('ptScale', 0.5));
   const showPt = () => {
     const it = CONFIG.PATH.SCALES.find(x => x.v === parseFloat(sPt.value));
     $('sPtScaleV').textContent = it ? `${it.label} · ${(it.v * it.v * 100) | 0}% пикселей` : '';
   };
-  sPt.onchange = () => {
-    prefs.set('ptScale', parseFloat(sPt.value));
-    setPathScale(parseFloat(sPt.value));
+  /* Резкость тем сильнее, чем меньше доля: при растяжении вдвое потеряно
+     больше высоких частот, чем при растяжении на четверть. */
+  const applyPt = () => {
+    const v = parseFloat(sPt.value);
+    setPathScale(v);
+    setSharpen(v < 0.999 ? CONFIG.POST.sharpen * (1 - v) / 0.65 : 0);
     showPt();
   };
-  setPathScale(parseFloat(sPt.value));
-  showPt();
+  sPt.onchange = () => { prefs.set('ptScale', parseFloat(sPt.value)); applyPt(); };
+  applyPt();
   const fill = (el, list, key) => {
     for (const it of list) {
       const op = document.createElement('option');
@@ -810,8 +821,8 @@ function initUI() {
   fill(sScale, CONFIG.AA_SCALE, 'v');
 
   let aaOn = prefs.get('aaOn', true);
-  sMsaa.value = String(prefs.get('aaMsaa', 4));
-  sFilter.value = prefs.get('aaFilter', 'smaafxaa');
+  sMsaa.value = String(prefs.get('aaMsaa', 0));
+  sFilter.value = prefs.get('aaFilter', 'taa');
   sScale.value = String(prefs.get('aaScale', 1));
 
   const applyAA = () => {
@@ -875,7 +886,7 @@ function initUI() {
      дальность отсекает секторы целиком: за ней объекты не доходят ни до
      вершинного шейдера, ни до фрагментного. */
   const sGreen = $('sGreen'), sFar = $('sFar');
-  sGreen.value = String(prefs.get('green', 0));
+  sGreen.value = String(prefs.get('green', 2));
   sGreen.onchange = () => {
     prefs.set('green', +sGreen.value);
     CONFIG.GREEN_K = CONFIG.GREEN[+sGreen.value];
@@ -1112,6 +1123,9 @@ function loop() {
   glow.rotation.z = Math.atan2(camera.position.x, -camera.position.y);
   updateStructures(dt);
   if (trafficOn) updateTraffic(dt);
+  /* Раскладка деревьев по уровням: пересчитывается, только когда камера
+     заметно сдвинулась — пять тысяч расстояний каждый кадр не нужны. */
+  updateTreeLod(camera.position, worldGroup, false);
   setSunScreen(camera, worldGroup);
   /* камера в системе станции — по ней вода считает отражение */
   hullU.uCamObj.value.copy(worldGroup.worldToLocal(_vMirror.copy(camera.position)));
