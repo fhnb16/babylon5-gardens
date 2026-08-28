@@ -793,9 +793,24 @@ let brMat = null, blurMat = null, rayMat = null;
 const sunUV = new THREE.Vector2(0.5, 0.5);
 let sunVisible = false;
 
+/** Заставить цепочку существовать независимо от настроек.
+
+    Трассировка пути отдаёт свой результат в composite, а тот молча
+    возвращает false, если цепочка не создана. При выключенном сглаживании и
+    выключенных эффектах она и не создавалась — и в режиме пути не работали
+    ни очистка, ни свечение, ни лучи. */
+let forced = false;
+export function forcePost(renderer, on) {
+  forced = !!on;
+  setPost(renderer, lastPost);
+}
+
+let lastPost = {};
+
 /** Свечение, лучи и любое сглаживание, кроме «выкл», живут на одном буфере.
     Без режима и без эффектов буфер не создаётся вовсе — прямой рендер в канвас. */
 export function setPost(renderer, { mode = null, glow = false, rays = false } = {}) {
+  lastPost = { mode, glow, rays };
   glowOn = !!glow; raysOn = !!rays;
   aaMode = mode;
   samples = mode ? mode.samples : 0;
@@ -806,7 +821,7 @@ export function setPost(renderer, { mode = null, glow = false, rays = false } = 
   fxaaFilter = f.includes('fxaa');
   taaOn = f.includes('taa');
   smaaOn = f.includes('smaa');
-  setFxaa(renderer, !!mode || glowOn || raysOn, fxaaFilter);
+  setFxaa(renderer, !!mode || glowOn || raysOn || forced, fxaaFilter);
 }
 
 let fxaaFilter = false, aaMode = null, samples = 0, taaOn = false;

@@ -11,7 +11,7 @@ import { audio, startAudio, updateAudio, setVolume, setEnabled, suspendAudio } f
 import { pt, startPath, pathStep, stopPath, pathLabel, pathCameraMoved,
   setPaused } from './pathtrace.js';
 import { trace, startTrace, traceStep, stopTrace,
-  setPost, setSunScreen, resizePost, renderFrame, composite, setDenoise,
+  setPost, setSunScreen, resizePost, renderFrame, composite, setDenoise, forcePost,
   setTraceDebug, DEBUG_NAMES, setAmbientShare, setHullRef } from './photo.js';
 
 const $ = id => document.getElementById(id);
@@ -472,14 +472,44 @@ function setClean(on) {
     omega = 0;
   } else {
     omega = omegaSaved;
-    setTraceDebug(0); $('bDebug').classList.remove('on'); setTrace(false);
+    /* Выход обязан снять ВСЁ, что включает фото-режим, иначе трассировка
+       продолжает считать в фоне, цепочка постобработки висит поднятой, а на
+       экране остаётся последний её кадр. */
+    exitPhotoModes();
   }
+}
+
+/** Снять все режимы съёмки разом. Раньше выход гасил только экранные лучи:
+    трассировка пути оставалась активной, а её результат — на канвасе. */
+function exitPhotoModes() {
+  setTraceDebug(0);
+  setTrace(false);
+  stopPath();
+  forcePost(renderer, false);
+  setDenoise(false);
+  traceHeld = false;
+  for (const id of ['bDebug', 'bPath', 'bPause', 'bTrace']) {
+    $(id)?.classList.remove('on');
+  }
+  $('traceInfo').classList.remove('show');
+  /* и сразу перерисовываем обычный кадр: иначе на экране висит последний
+     кадр трассировки, пока не наступит следующий тик */
+  renderFrame(renderer, scene, camera, worldGroup.rotation.z);
 }
 
 /* Трассировка идёт только по неподвижному кадру: любое движение мира или
    камеры обнулило бы накопленное. Поэтому на время съёмки мир замирает. */
 /** Единственное место, где пишется строка индикатора: раньше её ставили в
     трёх местах по-разному, и сообщение об отказе терялось. */
+/** Насколько ярко светит труба в текущей фазе: то же значение, что управляет
+    ею в обычном кадре. По нему трассировка выставляет свой источник. */
+function sunLevelNow() {
+  const P = CONFIG.PHASES;
+  const i = Math.floor(phase) % P.length;
+  const A = CONFIG[P[i]], B = CONFIG[P[(i + 1) % P.length]];
+  return lerp(A.sunEmis, B.sunEmis, phase - Math.floor(phase));
+}
+
 function showTrace(text) {
   const el = $('traceInfo');
   el.textContent = text;
@@ -596,7 +626,10 @@ function initUI() {
 
   const bPath = $('bPath');
   bPath.onclick = async () => {
-    if (pt.active || pt.error) { stopPath(); bPath.classList.remove('on'); return; }
+    if (pt.active || pt.error) {
+      stopPath(); forcePost(renderer, false);
+      bPath.classList.remove('on'); return;
+    }
     setTrace(false);
     setTraceDebug(0);
     bPath.classList.add('on');
@@ -606,6 +639,9 @@ function initUI() {
        блокирует поток на секунды, и без заранее отрисованного предупреждения
        это неотличимо от зависшей вкладки. */
     showTrace('загрузка библиотеки…');
+    /* Цепочка постобработки должна существовать: результат пути идёт
+       через неё, а при выключенном сглаживании её просто не было. */
+    forcePost(renderer, true);
     /* станцию и ветер уже остановил фото-режим — сцена статична */
     const okStart = await startPath(renderer, scene, camera, windU.uWind, isMobile,
       showTrace, structMats.sun, hemi,
@@ -614,7 +650,11 @@ function initUI() {
          всё сглаживание. */
       texture => composite(renderer, texture, renderer.toneMappingExposure),
       worldMats.hull, worldMats.waterRough,
-      hullU.uCityGlow.value > 0.2 ? 0xffd9a0 : 0xcfe0ff);
+      hullU.uCityGlow.value > 0.2 ? 0xffd9a0 : 0xcfe0ff,
+      /* яркость трубы берём из текущей фазы, иначе день выбеливает */
+      structMats.sun ? Math.max(0.25, sunLevelNow()) : 1,
+      /* периметральная подсветка — ночная деталь */
+      1 - daylight, worldMats.waterNormal);
     if (!okStart) {
       bPath.classList.remove('on');
       showTrace(pathLabel());

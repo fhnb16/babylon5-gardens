@@ -42,9 +42,11 @@ let WebGLPathTracer = null;
 let savedWind = 1, windU = null, hidden = [];
 let expanded = [], clones = [], swapped = [];
 let starting = false;   // замок от повторного нажатия во время сборки
+let composeOut = null;  // вывод через общую цепочку постобработки
 const geoCache = new Map(), matCache = new Map();
 let normalized = [];
-let prevEnv = null, envTex = null, waterSaved = null, emitSaved = [], rimAdded = [];
+let prevEnv = null, envTex = null, waterSaved = null;
+let emitSaved = [], rimAdded = [], axisSaved = [];
 
 /* ═══════════════════════════════════════════════════════════════════════════
    ПОСТРОЙКА ДЕРЕВА В ОТДЕЛЬНОМ ПОТОКЕ
@@ -108,6 +110,7 @@ function applyTracerSettings(t, mobile, onComposite) {
   /* Перехватываем вывод: библиотека рисует результат прямо в канвас и минует
      всю нашу постобработку — ни свечения, ни лучей от оси, ни сглаживания.
      Отдаём её цель в общую цепочку, и всё это возвращается. */
+  composeOut = onComposite;
   t.renderToCanvasCallback = (target, renderer2, quad) => {
     if (onComposite && onComposite(target.texture)) return;
     const auto = renderer2.autoClear;
@@ -319,17 +322,25 @@ function collapseInstances() {
 /** Вода: подсовываем корпусу карту шероховатости и усиливаем рельеф.
     Волны из патча шейдера трассировщику недоступны, но карта нормалей у
     корпуса уже есть — поднимаем её вклад, чтобы рябь читалась. */
-function waterForPath(hullMat, roughMap) {
+function waterForPath(hullMat, roughMap, normalMap) {
   if (!hullMat) return;
   waterSaved = {
     mat: hullMat,
     rough: hullMat.roughnessMap,
     roughVal: hullMat.roughness,
     metal: hullMat.metalness,
+    normal: hullMat.normalMap,
     scale: hullMat.normalScale ? hullMat.normalScale.clone() : null
   };
+  /* Рельеф подменяем волновой картой: рябь живёт в патче шейдера, которого
+     трассировщик не видит, и вода выходила зеркально-гладкой. */
+  if (normalMap) hullMat.normalMap = normalMap;
   if (roughMap) { hullMat.roughnessMap = roughMap; hullMat.roughness = 1; }
-  hullMat.metalness = CONFIG.PATH.waterMetal;
+  /* Металличность воде противопоказана: металл красит отражение в свой цвет,
+     а альбедо реки тёмно-синее — получалось чёрное пятно вместо зеркала.
+     Вода диэлектрик: гладкая поверхность и без металличности отражает по
+     Френелю, как ей и положено. */
+  hullMat.metalness = 0;
   hullMat.normalScale?.multiplyScalar(CONFIG.PATH.normalBoost);
   hullMat.needsUpdate = true;
 }
@@ -340,20 +351,26 @@ function restoreWater() {
   s.mat.roughnessMap = s.rough;
   s.mat.roughness = s.roughVal;
   s.mat.metalness = s.metal;
+  s.mat.normalMap = s.normal;
   if (s.scale) s.mat.normalScale.copy(s.scale);
   s.mat.needsUpdate = true;
   waterSaved = null;
 }
 
-function lightForPath(scene, sunMat, hemi) {
+function lightForPath(scene, sunMat, hemi, sunLevel = 1) {
   if (!GradientTex) return;
   swapped = [];
 
   if (sunMat) {
+    /* Яркость трубы следует фазе. Постоянное число пересвечивало день:
+       полусфера там и так даёт 1.35, а труба площадью 2.2 × 276 с
+       фиксированной яркостью добавляла сверху столько же, сколько ночью, —
+       кадр выбеливало. Опорная величина берётся из палитры (sunEmis), она же
+       управляет трубой в обычном кадре. */
     const lit = new THREE.MeshStandardMaterial({
       color: 0x000000,
       emissive: sunMat.color.clone(),
-      emissiveIntensity: CONFIG.PATH.sunEmit,
+      emissiveIntensity: CONFIG.PATH.sunEmit * sunLevel,
       /* непрозрачный: прозрачное со сцены снимается, а источник должен остаться */
       transparent: false, side: THREE.DoubleSide
     });
@@ -427,13 +444,18 @@ function boostEmissive(scene) {
     случайным лучом — то есть практически никогда. Настоящие точечные
     источники он выбирает явно, поэтому на время съёмки добавляем кольцо у
     каждого торца. Они снимаются при выходе и в обычном кадре не участвуют. */
-function addRimLights(scene, palette) {
+function addRimLights(scene, palette, level) {
   const P = CONFIG.PATH;
+  /* Мощность соизмеряется с осевыми источниками сцены. Первый раз я задал её
+     числом «на глаз» — вышло в 274 раза ярче каждого осевого, а их вдвадцатеро
+     больше: кольцо светило в тысячу раз сильнее всего остального и выбеливало
+     кадр. Плюс периметральная подсветка — ночная деталь, днём её гасим. */
+  if (level < 0.02) return;
   const R = CONFIG.R - 3, HL = CONFIG.L / 2;
   for (const sign of [-1, 1]) {
     for (let k = 0; k < P.rimLights; k++) {
       const a = (k / P.rimLights) * Math.PI * 2;
-      const l = new THREE.PointLight(palette.rim, P.rimPower, P.rimRange, 1.4);
+      const l = new THREE.PointLight(palette.rim, P.rimPower * level, P.rimRange, 1.4);
       l.position.set(Math.sin(a) * R, Math.cos(a) * R, sign * (HL - P.rimInset));
       scene.add(l);
       rimAdded.push(l);
@@ -444,6 +466,26 @@ function addRimLights(scene, palette) {
 function removeRimLights() {
   for (const l of rimAdded) l.parent?.remove(l);
   rimAdded = [];
+}
+
+/** Приглушить осевые источники на время съёмки.
+
+    В растре труба — базовый материал и сцену не освещает вовсе: её свет
+    ИЗОБРАЖАЮТ пять точечных источников вдоль оси. В трассировке труба светит
+    сама, и вместе с ними выходит двойной счёт — отсюда пересвеченный день.
+    Гасим их, оставляя малую долю: она заменяет многократные переотражения,
+    которых при сотне выборок ещё не набралось. */
+function dimAxisLights(scene) {
+  scene.traverse(o => {
+    if (!o.isPointLight || rimAdded.includes(o)) return;
+    axisSaved.push({ light: o, v: o.intensity });
+    o.intensity *= CONFIG.PATH.axisKeep;
+  });
+}
+
+function restoreAxisLights() {
+  for (const a of axisSaved) a.light.intensity = a.v;
+  axisSaved = [];
 }
 
 function restoreEmissive() {
@@ -460,7 +502,7 @@ function restoreLight(scene) {
 }
 
 /** Запустить трассировку. Возвращает false, если устройство не потянуло. */
-export async function startPath(renderer, scene, camera, wind, mobile, onPhase, sunMat, hemi, onComposite, hullMat, roughMap, rimColor) {
+export async function startPath(renderer, scene, camera, wind, mobile, onPhase, sunMat, hemi, onComposite, hullMat, roughMap, rimColor, sunLevel = 1, rimLevel = 0, waterNormal = null) {
   /* Два замка. Первый — от повторного нажатия: сборка дерева длится секунды,
      и второй запуск застаёт генератор занятым, отвечая «BVH is already
      building asynchronously». */
@@ -489,10 +531,11 @@ export async function startPath(renderer, scene, camera, wind, mobile, onPhase, 
        тумане, — и hideNonSolid убрал бы её вместе с дымкой: главный источник
        просто исчезал из сцены. Сперва меняем ей материал на непрозрачный
        светящийся, и только потом прячем всё остальное прозрачное. */
-    lightForPath(scene, sunMat, hemi);
+    lightForPath(scene, sunMat, hemi, sunLevel);
     boostEmissive(scene);
-    addRimLights(scene, { rim: rimColor || 0xffd9a0 });
-    waterForPath(hullMat, roughMap);
+    dimAxisLights(scene);
+    addRimLights(scene, { rim: rimColor || 0xffd9a0 }, rimLevel);
+    waterForPath(hullMat, roughMap, waterNormal);
     hideNonSolid(scene);
     expandInstances(scene);
     normalizeSolids(scene);
@@ -585,7 +628,13 @@ export function pathCameraMoved() {
     незачем — путь стоит на порядок дороже обычной отрисовки. */
 export function pathStep() {
   if (!pt.active || !pt.ready) return 0;
-  if (pt.paused) return Math.min(1, pt.samples / CONFIG.PATH.samples);
+  if (pt.paused) {
+    /* На паузе выборки не считаются, но кадр обязан пройти через цепочку
+       заново: очистка живёт там. Раньше здесь был просто выход, и
+       шумоподавитель не выполнялся ни разу — картинка не менялась. */
+    if (composeOut && tracer.target) composeOut(tracer.target.texture);
+    return Math.min(1, pt.samples / CONFIG.PATH.samples);
+  }
   const done = Math.min(1, pt.samples / CONFIG.PATH.samples);
   if (done >= 1) return 1;
   try {
@@ -606,6 +655,7 @@ function cleanup() {
   if (windU) windU.value = savedWind;
   restoreLight(S);
   restoreEmissive();
+  restoreAxisLights();
   removeRimLights();
   restoreWater();
   restoreSolids();

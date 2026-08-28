@@ -25,6 +25,7 @@ const smoothLine = (ctx, pts, sx = 1, sy = 1) => {
   ctx.stroke();
 };
 
+const TAU_2D = Math.PI * 2;
 const cv = (w, h) => {
   const c = document.createElement('canvas');
   c.width = w; c.height = h;
@@ -487,39 +488,83 @@ export function makeFacade(rnd, variant) {
 export function makeEndCapTexture(size, rnd) {
   const S = size, C = S / 2;
   const a = cv(S, S), b = cv(S, S);
-  a.g.fillStyle = '#5c5f66'; a.g.beginPath(); a.g.arc(C, C, C, 0, 6.2832); a.g.fill();
+  a.g.fillStyle = '#7e848c';
+  a.g.beginPath(); a.g.arc(C, C, C, 0, TAU_2D); a.g.fill();
   b.g.fillStyle = '#000'; b.g.fillRect(0, 0, S, S);
 
-  const rings = 16;
+  /* Торец собран как настоящая торцевая переборка: концентрические пояса,
+     каждый поделён на секции по дуге, и в секциях — мелкие блоки. Ровные
+     кольца одного тона читались диском, а не конструкцией: масштаб не
+     считывался, потому что не за что зацепиться. */
+  const rings = 22;
   for (let i = rings; i >= 1; i--) {
     const r1 = C * (i / rings), r0 = C * ((i - 1) / rings);
-    const sectors = 12 + i * 4;
-    for (let s = 0; s < sectors; s++) {
-      const a0 = (s / sectors) * 6.2832, a1 = ((s + 1) / sectors) * 6.2832;
-      a.g.fillStyle = rnd() < 0.34
-        ? pick(rnd, ['#a98d95', '#b79aa0', '#96787f', '#c0a5aa'])
-        : pick(rnd, ['#6a6e75', '#7b8087', '#5a5e65', '#868b92']);
-      a.g.beginPath(); a.g.arc(C, C, r1, a0, a1); a.g.arc(C, C, r0, a1, a0, true); a.g.closePath(); a.g.fill();
-      if (rnd() < 0.32) {
-        b.g.fillStyle = pick(rnd, ['#ffca7d', '#ffe0ac', '#7fb6ff']);
-        b.g.beginPath(); b.g.arc(C, C, r1 * 0.97, a0 + 0.01, a1 - 0.01);
-        b.g.arc(C, C, r0 * 1.05, a1 - 0.01, a0 + 0.01, true); b.g.closePath(); b.g.fill();
+    /* число секций растёт к краю: длина дуги должна оставаться соизмеримой */
+    const seg = Math.max(6, Math.round(i * 2.6));
+    for (let k = 0; k < seg; k++) {
+      const a0 = (k / seg) * TAU_2D + rnd() * 0.01;
+      const a1 = ((k + 1) / seg) * TAU_2D;
+      const tone = 0.72 + rnd() * 0.5;
+      const v = Math.round(132 * tone);
+      a.g.fillStyle = `rgb(${v},${v + 4},${v + 9})`;
+      a.g.beginPath();
+      a.g.arc(C, C, r1, a0, a1);
+      a.g.arc(C, C, r0, a1, a0, true);
+      a.g.closePath();
+      a.g.fill();
+
+      /* мелкие блоки внутри секции — по ним и читается размер */
+      const blocks = 1 + Math.floor(rnd() * 3);
+      for (let m = 0; m < blocks; m++) {
+        const rr = r0 + (r1 - r0) * (0.2 + rnd() * 0.6);
+        const aa = a0 + (a1 - a0) * (0.15 + rnd() * 0.7);
+        const bw = (r1 - r0) * (0.12 + rnd() * 0.3);
+        const ba = (a1 - a0) * (0.12 + rnd() * 0.4);
+        a.g.fillStyle = rnd() < 0.5 ? 'rgba(48,54,62,.5)' : 'rgba(206,214,224,.34)';
+        a.g.beginPath();
+        a.g.arc(C, C, rr + bw, aa, aa + ba);
+        a.g.arc(C, C, rr, aa + ba, aa, true);
+        a.g.closePath();
+        a.g.fill();
+      }
+
+      /* светящиеся иллюминаторы: редкие, но именно они оживляют торец */
+      if (rnd() < 0.1) {
+        const rr = r0 + (r1 - r0) * 0.5;
+        const ba = (a1 - a0) * 0.4;
+        const aa = a0 + (a1 - a0) * 0.3;
+        b.g.fillStyle = pick(rnd, ['#ffe6b4', '#cfe0f2', '#ffd08a']);
+        b.g.beginPath();
+        b.g.arc(C, C, rr + (r1 - r0) * 0.16, aa, aa + ba);
+        b.g.arc(C, C, rr, aa + ba, aa, true);
+        b.g.closePath();
+        b.g.fill();
       }
     }
-    a.g.strokeStyle = 'rgba(30,34,40,.55)'; a.g.lineWidth = 2;
-    a.g.beginPath(); a.g.arc(C, C, r1, 0, 6.2832); a.g.stroke();
+    /* радиальный шов пояса */
+    a.g.strokeStyle = 'rgba(38,44,52,.42)';
+    a.g.lineWidth = 1.4;
+    a.g.beginPath(); a.g.arc(C, C, r0, 0, TAU_2D); a.g.stroke();
   }
-  a.g.strokeStyle = 'rgba(28,32,38,.4)'; a.g.lineWidth = 2;
-  for (let i = 0; i < 96; i++) {
-    const ang = (i / 96) * 6.2832;
-    a.g.beginPath();
-    a.g.moveTo(C + Math.cos(ang) * C * 0.1, C + Math.sin(ang) * C * 0.1);
-    a.g.lineTo(C + Math.cos(ang) * C, C + Math.sin(ang) * C);
-    a.g.stroke();
+
+  /* шесть силовых спиц поверх поясов */
+  for (let k = 0; k < 6; k++) {
+    const ang = (k / 6) * TAU_2D + 0.26;
+    a.g.save();
+    a.g.translate(C, C);
+    a.g.rotate(ang);
+    a.g.fillStyle = 'rgba(150,158,168,.85)';
+    a.g.fillRect(-C * 0.018, -C * 0.96, C * 0.036, C * 0.9);
+    a.g.fillStyle = 'rgba(44,50,58,.5)';
+    a.g.fillRect(-C * 0.02, -C * 0.96, C * 0.006, C * 0.9);
+    a.g.restore();
   }
-  a.g.fillStyle = '#43474e'; a.g.beginPath(); a.g.arc(C, C, C * 0.1, 0, 6.2832); a.g.fill();
-  a.g.strokeStyle = '#8b9098'; a.g.lineWidth = 3;
-  a.g.beginPath(); a.g.arc(C, C, C * 0.1, 0, 6.2832); a.g.stroke();
+
+  /* ступица */
+  a.g.fillStyle = '#6c727a';
+  a.g.beginPath(); a.g.arc(C, C, C * 0.085, 0, TAU_2D); a.g.fill();
+  a.g.strokeStyle = 'rgba(36,42,50,.6)'; a.g.lineWidth = 2;
+  a.g.beginPath(); a.g.arc(C, C, C * 0.085, 0, TAU_2D); a.g.stroke();
 
   return { map: tex(a.c), emis: tex(b.c), canvas: a.c };
 }
@@ -529,27 +574,74 @@ export function makeEndCapTexture(size, rnd) {
    ═══════════════════════════════════════════════════════════════════════════ */
 export function makePanelTexture(rnd) {
   const S = 512, { c, g } = cv(S, S);
-  g.fillStyle = '#9aa3ac'; g.fillRect(0, 0, S, S);
-  /* плиты */
-  for (let y = 0; y < S; y += 64) for (let x = 0; x < S; x += 128) {
-    g.fillStyle = pick(rnd, ['#a4adb6', '#909aa3', '#b0b8c0', '#858e97']);
-    g.fillRect(x + 1, y + 1, 126, 62);
+  g.fillStyle = '#8e959d'; g.fillRect(0, 0, S, S);
+
+  /* Плиты РАЗНОГО размера, а не ровная сетка. Одинаковые прямоугольники
+     читаются как заглушка: глазу не за что зацепиться, масштаб не считывается.
+     Панель набирается рядами разной высоты, ряд делится на плиты разной
+     ширины — так выглядит настоящая обшивка. */
+  let y = 0;
+  while (y < S) {
+    const h = 26 + Math.floor(rnd() * 46);
+    let x = -Math.floor(rnd() * 60);
+    while (x < S) {
+      const w = 34 + Math.floor(rnd() * 92);
+      const tone = 0.78 + rnd() * 0.42;
+      const base = Math.round(150 * tone);
+      g.fillStyle = `rgb(${base},${base + 5},${base + 11})`;
+      g.fillRect(x, y, w - 1, h - 1);
+
+      /* фаска: светлая сверху-слева, тёмная снизу-справа — плита читается
+         объёмной даже без карты нормалей */
+      g.fillStyle = 'rgba(255,255,255,.10)';
+      g.fillRect(x, y, w - 1, 1);
+      g.fillRect(x, y, 1, h - 1);
+      g.fillStyle = 'rgba(24,30,38,.30)';
+      g.fillRect(x, y + h - 2, w - 1, 1);
+      g.fillRect(x + w - 2, y, 1, h - 1);
+      x += w;
+    }
+    y += h;
   }
-  /* швы */
-  g.strokeStyle = 'rgba(40,46,54,.5)'; g.lineWidth = 2;
-  for (let y = 0; y <= S; y += 64) { g.beginPath(); g.moveTo(0, y); g.lineTo(S, y); g.stroke(); }
-  for (let x = 0; x <= S; x += 128) { g.beginPath(); g.moveTo(x, 0); g.lineTo(x, S); g.stroke(); }
-  /* заклёпки и подписи */
-  for (let i = 0; i < 900; i++) {
-    g.fillStyle = rnd() < 0.5 ? 'rgba(255,255,255,.2)' : 'rgba(30,36,44,.3)';
-    g.beginPath(); g.arc(rnd() * S, rnd() * S, 1.4, 0, 6.2832); g.fill();
+
+  /* Потёки вниз от стыков: главная примета обшивки, работавшей годами.
+     Без них металл выглядит только что отлитым. */
+  for (let i = 0; i < 220; i++) {
+    const sx = rnd() * S, sy = rnd() * S;
+    const len = 12 + rnd() * 90, wdt = 1 + rnd() * 5;
+    const gr = g.createLinearGradient(sx, sy, sx, sy + len);
+    const dark = rnd() < 0.62;
+    gr.addColorStop(0, dark ? 'rgba(38,44,52,.34)' : 'rgba(226,232,240,.20)');
+    gr.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = gr;
+    g.fillRect(sx, sy, wdt, len);
   }
-  for (let i = 0; i < 40; i++) {
-    g.fillStyle = pick(rnd, ['rgba(230,180,60,.5)', 'rgba(200,60,50,.45)', 'rgba(70,120,190,.45)']);
-    g.fillRect(rnd() * S, rnd() * S, 6 + rnd() * 40, 3 + rnd() * 5);
+
+  /* Мелкие люки и вставки — по ним считывается масштаб конструкции */
+  for (let i = 0; i < 130; i++) {
+    const x2 = rnd() * S, y2 = rnd() * S;
+    const w2 = 5 + rnd() * 22, h2 = 4 + rnd() * 12;
+    g.fillStyle = rnd() < 0.5 ? 'rgba(56,64,74,.42)' : 'rgba(196,204,214,.28)';
+    g.fillRect(x2, y2, w2, h2);
+    g.strokeStyle = 'rgba(30,36,44,.35)'; g.lineWidth = 1;
+    g.strokeRect(x2 + 0.5, y2 + 0.5, w2, h2);
+  }
+
+  /* заклёпки */
+  for (let i = 0; i < 700; i++) {
+    g.fillStyle = rnd() < 0.5 ? 'rgba(255,255,255,.16)' : 'rgba(28,34,42,.26)';
+    g.beginPath(); g.arc(rnd() * S, rnd() * S, 1.2, 0, TAU_2D); g.fill();
+  }
+
+  /* редкая цветная маркировка: без неё поверхность безжизненно серая */
+  for (let i = 0; i < 26; i++) {
+    g.fillStyle = pick(rnd, ['rgba(226,178,62,.55)', 'rgba(198,62,52,.5)',
+      'rgba(72,120,190,.5)', 'rgba(226,232,240,.45)']);
+    g.fillRect(rnd() * S, rnd() * S, 8 + rnd() * 34, 2 + rnd() * 4);
   }
   return { map: tex(c, { wrap: true }), canvas: c };
 }
+
 
 /* ═══════════════════════════════════════════════════════════════════════════
    СПРАЙТЫ: частицы, тени-пятна, градиент солнца
@@ -631,6 +723,39 @@ export function makeWaterRoughness(mask, size) {
   }
   g.putImageData(d, 0, 0);
   return tex(c, { srgb: false, wrap: true });
+}
+
+/** Карта нормалей воды: волны там, где маска показывает реку.
+
+    Рябь у нас считается в патче шейдера, а трассировщик патчей не видит —
+    вода выходила зеркально-гладкой, без единой волны. Здесь тот же рисунок
+    волн выкладывается в карту высот и переводится в нормали. */
+export function makeWaterNormal(mask, size, strength) {
+  const { c, g } = cv(size, size);
+  g.drawImage(mask.image || mask, 0, 0, size, size);
+  const src = g.getImageData(0, 0, size, size).data;
+  const out = g.createImageData(size, size);
+  const d = out.data;
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const i = (y * size + x) * 4;
+      const water = src[i] / 255;                 // R — глубина воды
+      /* пять волн разной длины и направления: одна синусоида читается
+         как гофра, несколько дают рябь */
+      const u = x / size * Math.PI * 2, v = y / size * Math.PI * 2;
+      let h = 0;
+      h += Math.sin(u * 120 + v * 14) * 0.5;
+      h += Math.sin(u * 74 - v * 31) * 0.36;
+      h += Math.sin(u * 191 + v * 7) * 0.24;
+      h += Math.sin(v * 143 + u * 5) * 0.3;
+      h += Math.sin(u * 47 + v * 61) * 0.2;
+      const val = 128 + h * 60 * water;
+      d[i] = d[i + 1] = d[i + 2] = Math.max(0, Math.min(255, val));
+      d[i + 3] = 255;
+    }
+  }
+  g.putImageData(out, 0, 0);
+  return heightToNormal(c, strength, size);
 }
 
 export function makeCarWindows() {

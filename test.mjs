@@ -1442,8 +1442,17 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
      'Пока идёт съёмка, мир не вращается и камера не двигается');
   ok(/fly\.on \|\| trace\.active/.test(msrc), 'Ввод во время съёмки её прекращает');
   ok(/addEventListener\('keydown', stopTracing\)/.test(msrc), 'Клавиша тоже прекращает');
-  ok(/setTraceDebug\(0\); \$\('bDebug'\)\.classList\.remove\('on'\); setTrace\(false\)/.test(msrc),
-     'Выход из фото-режима останавливает трассировку и сбрасывает отладку');
+  /* Выход обязан снять ВСЁ: раньше он гасил только экранные лучи, а
+     трассировка пути продолжала считать, и её кадр оставался на канвасе. */
+  ok(/function exitPhotoModes/.test(msrc), 'Выход снимает все режимы съёмки разом');
+  for (const call of ['setTrace\\(false\\)', 'stopPath\\(\\)', 'forcePost\\(renderer, false\\)',
+    'setDenoise\\(false\\)', 'setTraceDebug\\(0\\)']) {
+    const body = msrc.slice(msrc.indexOf('function exitPhotoModes'));
+    ok(new RegExp(call).test(body.slice(0, body.indexOf('\n}'))),
+       `Выход вызывает ${call.replace(/\\\\/g, '')}`);
+  }
+  ok(/renderFrame\(renderer, scene, camera, worldGroup\.rotation\.z\);\s*\n\}/.test(msrc),
+     'И сразу перерисовывает обычный кадр: иначе на экране висит последний кадр трассировки');
 
   /* дойдя до конца, не жжём кадры впустую */
   ok(/if \(n >= trace\.total\)/.test(src), 'Набрав нужное число кадров, только показываем результат');
@@ -2707,7 +2716,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   /* Кадр отдаётся ДО подмены материалов: иначе замерший кадр останется с
      погашенным солнцем и снятой дымкой — «плоско, без эффектов». */
   const iYield = src.indexOf('await nextFrame();');
-  const iSwap = src.indexOf('lightForPath(scene, sunMat, hemi);');
+  const iSwap = src.indexOf('    lightForPath(scene, sunMat, hemi,');
   ok(iYield > 0 && iYield < iSwap,
      'Браузер получает кадр до подмены материалов, а не после');
   ok(/await nextFrame\(\);\s*\n\s*await nextFrame\(\);/.test(src),
@@ -2775,9 +2784,9 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   ok(/function restoreSolids/.test(src), 'Исходные геометрии и материалы возвращаются');
 
   /* порядок: труба помечена прозрачной, её нельзя убрать раньше подмены */
-  const iLight = src.indexOf('lightForPath(scene, sunMat, hemi);');
+  const iLight = src.indexOf('    lightForPath(scene, sunMat, hemi,');
   const iHide = src.indexOf('hideNonSolid(scene);', iLight - 400);
-  ok(iLight > 0 && iLight < src.indexOf('hideNonSolid(scene);\n    expandInstances'),
+  ok(iLight > 0 && iLight < src.indexOf('hideNonSolid(scene);', iLight),
      'Свет подменяется ДО скрытия прозрачного: труба помечена прозрачной и исчезала вместе с дымкой');
   ok(/transparent: false, side: THREE\.DoubleSide/.test(src),
      'Светящийся материал трубы непрозрачен — иначе его снимут вместе с остальным');
@@ -2854,7 +2863,8 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   /* пауза с очисткой */
   ok(html.includes('id="bPause"'), 'Кнопка паузы есть');
   ok(/export function setPaused/.test(src), 'Накопление можно остановить');
-  ok(/if \(pt\.paused\) return Math\.min/.test(src), 'На паузе выборки не считаются');
+  ok(/if \(pt\.paused\) \{/.test(src) && /composeOut\(tracer\.target\.texture\)/.test(src),
+     'На паузе выборки не считаются, но кадр проходит через цепочку заново — иначе очистке негде выполниться');
   ok(/const DENOISE_FRAG/.test(psrc), 'Шумоподавитель есть');
   ok(/float wc = exp\( -dc \/ max/.test(psrc),
      'Фильтр двусторонний: вес по близости цвета, поэтому кромки переживают');
@@ -2878,7 +2888,10 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   ok(/hullMat\.normalScale\?\.multiplyScalar/.test(src),
      'Рельеф усиливается: рябь из патча шейдера трассировщику не видна');
   ok(/function restoreWater/.test(src), 'После съёмки материал возвращается');
-  ok(CONFIG.PATH.waterMetal > 0, `Металличность воды ${CONFIG.PATH.waterMetal}`);
+  /* Металл красит отражение в свой цвет, а альбедо реки тёмно-синее —
+     выходило чёрное пятно. Вода диэлектрик. */
+  ok(/hullMat\.metalness = 0;/.test(src), 'Вода отражает как диэлектрик, без металличности');
+  ok(CONFIG.PATH.waterMetal === undefined, 'Параметра металличности воды не осталось');
 
   /* свет от окон и периметра */
   ok(/function boostEmissive/.test(src),
@@ -2888,8 +2901,78 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   ok(/function addRimLights/.test(src),
      'Кольцевая подсветка торцов становится настоящими источниками');
   ok(CONFIG.PATH.rimLights >= 6, `Источников по кольцу: ${CONFIG.PATH.rimLights} × 2 торца`);
+
+  /* Мощность обязана быть соизмерима с осевыми источниками сцены. Задана
+     «на глаз» она вышла в 274 раза ярче каждого осевого, а их вдвадцатеро
+     больше — кадр выбеливало. */
+  const axis = CONFIG.DAY.pointInt * CONFIG.LIGHT_Z.length;
+  const rim = CONFIG.PATH.rimPower * CONFIG.PATH.rimLights * 2;
+  ok(rim < axis * 12,
+     `Кольцо (${rim.toFixed(1)}) соизмеримо с осевым освещением (${axis.toFixed(1)}), а не в тысячу раз ярче`);
+  ok(/if \(level < 0\.02\) return;/.test(src),
+     'Днём периметральная подсветка выключена: это ночная деталь');
+  ok(/P\.rimPower \* level/.test(src), 'И гаснет вместе с фазой');
+
+  /* яркость трубы тоже обязана следовать фазе */
+  ok(/CONFIG\.PATH\.sunEmit \* sunLevel/.test(src),
+     'Яркость трубы следует фазе: постоянная пересвечивала день');
+  ok(/function sunLevelNow/.test(msrc), 'Уровень берётся из той же палитры, что и в обычном кадре');
+  ok(CONFIG.PATH.sunEmit * CONFIG.DAY.sunEmis < CONFIG.PATH.sunEmit * 2,
+     `Днём труба светит ${(CONFIG.PATH.sunEmit * CONFIG.DAY.sunEmis).toFixed(1)}, ночью ${(CONFIG.PATH.sunEmit * CONFIG.NIGHT.sunEmis).toFixed(1)}`);
+
+  /* цепочка постобработки в режиме пути обязана существовать */
+  ok(/export function forcePost/.test(psrc),
+     'Цепочка поднимается принудительно: composite молча возвращал false, и очистка со свечением не работали');
+  ok(/forcePost\(renderer, true\)/.test(msrc), 'Включается при старте пути');
+  ok(/forcePost\(renderer, false\)/.test(msrc), 'И снимается при выходе');
+  ok(/setFxaa\(renderer, !!mode \|\| glowOn \|\| raysOn \|\| forced/.test(psrc),
+     'Признак учитывается там же, где решается, нужен ли буфер');
   ok(/function removeRimLights/.test(src), 'И снимаются при выходе');
   ok(CONFIG.PATH.emitBoost > 1, `Усиление эмиссии ×${CONFIG.PATH.emitBoost}`);
+}
+
+/* ══ 3h31. Текстуры металла и торца ════════════════════════════════════ */
+{
+  const tsrc = readFileSync(new URL('./js/textures.js', import.meta.url), 'utf8');
+
+  /* Ровная сетка одинаковых плит читается заглушкой: глазу не за что
+     зацепиться, масштаб не считывается. */
+  const panel = tsrc.slice(tsrc.indexOf('export function makePanelTexture'));
+  const panelBody = panel.slice(0, panel.indexOf('\n}'));
+  ok(/const h = 26 \+ Math\.floor\(rnd\(\) \* 46\)/.test(panelBody),
+     'Ряды плит разной высоты, а не ровная сетка');
+  ok(/const w = 34 \+ Math\.floor\(rnd\(\) \* 92\)/.test(panelBody), 'И плиты разной ширины');
+  ok(/фаска: светлая сверху-слева/.test(panelBody),
+     'У плит есть фаска — объём читается даже без карты нормалей');
+  ok(/Потёки вниз от стыков/.test(panelBody),
+     'Есть потёки: без них металл выглядит только что отлитым');
+  ok(/createLinearGradient/.test(panelBody), 'Потёки затухают, а не рисуются полосой');
+  ok(/Мелкие люки и вставки/.test(panelBody), 'Есть люки и вставки для масштаба');
+
+  /* Торец: концентрические пояса с секциями, а не ровные кольца */
+  const cap = tsrc.slice(tsrc.indexOf('export function makeEndCapTexture'));
+  const capBody = cap.slice(0, cap.indexOf('\n}\n'));
+  ok(/const seg = Math\.max\(6, Math\.round\(i \* 2\.6\)\)/.test(capBody),
+     'Число секций растёт к краю: длина дуги остаётся соизмеримой');
+  ok(/мелкие блоки внутри секции/.test(capBody), 'В секциях есть мелкие блоки');
+  ok(/светящиеся иллюминаторы/.test(capBody), 'И редкие светящиеся окна');
+  ok(/шесть силовых спиц/.test(capBody), 'Спицы нарисованы поверх поясов');
+  ok(/rings = 22/.test(capBody), 'Поясов достаточно, чтобы читалась конструкция');
+
+  /* двойной счёт осевого света */
+  const psrc2 = readFileSync(new URL('./js/pathtrace.js', import.meta.url), 'utf8');
+  ok(/function dimAxisLights/.test(psrc2),
+     'Осевые источники приглушаются: в растре они изображают свет трубы, а в трассировке труба светит сама');
+  ok(CONFIG.PATH.axisKeep < 0.4, `Остаётся ${(CONFIG.PATH.axisKeep * 100) | 0}% — на недобранные переотражения`);
+  ok(/function restoreAxisLights/.test(psrc2), 'И возвращаются при выходе');
+  ok(/rimAdded\.includes\(o\)/.test(psrc2), 'Кольцевые источники приглушением не задеты');
+
+  /* рябь воды */
+  ok(/export function makeWaterNormal/.test(tsrc),
+     'Карта ряби строится отдельно: волны живут в патче шейдера, которого трассировщик не видит');
+  ok(/if \(normalMap\) hullMat\.normalMap = normalMap;/.test(psrc2),
+     'И подставляется корпусу на время съёмки');
+  ok(/s\.mat\.normalMap = s\.normal;/.test(psrc2), 'Исходный рельеф возвращается');
 }
 
 /* ══ 3i. Звук реагирует на то, где находится камера ════════════════════ */
