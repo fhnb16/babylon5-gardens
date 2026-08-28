@@ -2779,7 +2779,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   ok(/function expandInstances/.test(src), 'Инстансы разворачиваются в обычные меши');
   ok(/im\.getMatrixAt\(k, m\)/.test(src), 'Матрица каждого экземпляра переносится в свой меш');
   ok(/function collapseInstances/.test(src), 'И сворачиваются обратно при выходе');
-  ok(/byColor\.get\(im\.material\.uuid \+ ':' \+ key\)/.test(src),
+  ok(/byColor\.get\(uid \+ ':' \+ key\)/.test(src),
      'Материалы группируются по цвету: клон на каждый экземпляр дал бы десять тысяч материалов');
 
   /* свет: полусферу библиотека не знает, базовый материал не светит */
@@ -3085,6 +3085,52 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
     return x[0] - y[0] || x[1] - y[1] || x[2] - y[2];
   };
   ok(hist.every((v, i) => i === 0 || cmp(v, hist[i - 1]) > 0), 'История возрастает');
+}
+
+/* ══ 3h33. Массивы материалов и порог свечения ═════════════════════════ */
+{
+  const src = readFileSync(new URL('./js/pathtrace.js', import.meta.url), 'utf8');
+  const psrc = readFileSync(new URL('./js/photo.js', import.meta.url), 'utf8');
+  const msrc = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+
+  /* У дома два материала — стены и кровля. Прежняя версия возвращала сам
+     массив, у которого нет ни vertexColors, ни clone. */
+  ok(/if \(Array\.isArray\(mat\)\) return mat\.map\(flatMat\)/.test(src),
+     'Массив материалов обрабатывается поэлементно');
+  ok(/function cloneMat/.test(src), 'И клонируется тоже поэлементно');
+
+  /* Сборщик присваивает КАЖДОМУ мешу один номер материала по его порядку в
+     списке и собственные группы геометрии не читает. Дом с двумя материалами
+     сдвигал номера всех последующих мешей: колонне доставался материал дома,
+     дому — травы, корпус пропадал. */
+  ok(/function splitByGroups/.test(src),
+     'Меш с несколькими материалами разбирается на меши по одному материалу');
+  ok(/g\.setAttribute\(name, geo\.attributes\[name\]\)/.test(src),
+     'Атрибуты у частей общие — копируется только список индексов');
+  ok(/const parts = Array\.isArray\(flat\) \? splitByGroups\(baseGeo\) : null/.test(src),
+     'Инстансы разбираются при развороте');
+  ok(/if \(Array\.isArray\(m\)\) \{\s*\n\s*const parts = splitByGroups\(g\);/.test(src),
+     'Одиночные меши — тоже: они разъехались бы так же');
+  ok(/for \(const g of subGeos\) g\.dispose\(\)/.test(src), 'Части освобождаются при выходе');
+  ok(/im\.material\.map\(m => m\.uuid\)\.join\('\+'\)/.test(src),
+     'Ключ цветового кэша учитывает все материалы объекта');
+  ok(/Array\.isArray\(m\)\s*\n?\s*\? m\.some/.test(src.replace(/\r/g, '')),
+     'Сравнение на изменение тоже знает про массив');
+
+  /* Порог свечения подбирался под обычный кадр, а в трассировке эмиссия
+     усилена в девять раз — половина картинки проходила в яркую выборку. */
+  ok(/export function setBrightScale/.test(psrc), 'Порог яркой выборки настраивается');
+  ok(/P\.threshold \* brightScale/.test(psrc), 'И поднимается вместе с усилением');
+  ok(/P\.glow \/ brightScale/.test(psrc) && /P\.rays \/ brightScale/.test(psrc),
+     'Сила свечения и лучей делится на то же число: источники и так ярче');
+  ok(/setBrightScale\(CONFIG\.PATH\.emitBoost \* CONFIG\.PATH\.brightRatio\)/.test(msrc),
+     'В режиме пути порог берётся из усиления эмиссии');
+  ok(/setBrightScale\(1\)/.test(msrc), 'И возвращается при выходе');
+
+  const k = CONFIG.PATH.emitBoost * CONFIG.PATH.brightRatio;
+  const over = CONFIG.NIGHT.winEmis * CONFIG.PATH.emitBoost / (CONFIG.POST.threshold * k);
+  ok(over > 1.5 && over < 8,
+     `Окна превышают порог в ${over.toFixed(1)} раза — ореол есть, засветки нет`);
 }
 
 /* ══ 3i. Звук реагирует на то, где находится камера ════════════════════ */

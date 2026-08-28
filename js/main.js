@@ -13,6 +13,7 @@ import { pt, startPath, pathStep, stopPath, pathLabel, pathCameraMoved,
   setPaused } from './pathtrace.js';
 import { trace, startTrace, traceStep, stopTrace,
   setPost, setSunScreen, resizePost, renderFrame, composite, setDenoise, forcePost,
+  setBrightScale,
   setTraceDebug, DEBUG_NAMES, setAmbientShare, setHullRef } from './photo.js';
 
 const $ = id => document.getElementById(id);
@@ -487,6 +488,7 @@ function exitPhotoModes() {
   setTrace(false);
   stopPath();
   forcePost(renderer, false);
+  setBrightScale(1);
   setDenoise(false);
   traceHeld = false;
   for (const id of ['bDebug', 'bPath', 'bPause', 'bTrace']) {
@@ -628,7 +630,7 @@ function initUI() {
   const bPath = $('bPath');
   bPath.onclick = async () => {
     if (pt.active || pt.error) {
-      stopPath(); forcePost(renderer, false);
+      stopPath(); forcePost(renderer, false); setBrightScale(1);
       bPath.classList.remove('on'); return;
     }
     setTrace(false);
@@ -643,6 +645,8 @@ function initUI() {
     /* Цепочка постобработки должна существовать: результат пути идёт
        через неё, а при выключенном сглаживании её просто не было. */
     forcePost(renderer, true);
+    /* эмиссия в трассировке усилена — порог свечения обязан подняться */
+    setBrightScale(CONFIG.PATH.emitBoost * CONFIG.PATH.brightRatio);
     /* станцию и ветер уже остановил фото-режим — сцена статична */
     const okStart = await startPath(renderer, scene, camera, windU.uWind, isMobile,
       showTrace, structMats.sun, hemi,

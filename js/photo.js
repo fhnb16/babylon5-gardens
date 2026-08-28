@@ -1028,6 +1028,13 @@ export function resizePost(renderer) {
 }
 
 let dnMat = null, dnRT = [], dnOn = false;
+let brightScale = 1;
+
+/** Поднять порог яркой выборки. В трассировке пути эмиссия усилена в девять
+    раз, чтобы редкие попадания лучей давали вклад, — и порог, подобранный под
+    обычный кадр, начинает пропускать половину картинки: свечение раздувается
+    в сплошную засветку. */
+export function setBrightScale(k) { brightScale = k > 0 ? k : 1; }
 
 /** Включить очистку кадра перед выводом */
 export function setDenoise(on) { dnOn = !!on; }
@@ -1137,6 +1144,7 @@ export function composite(renderer, srcTexture, exposure) {
   if ((glowOn || raysOn) && blRT) {
     /* яркая выборка — общая для свечения и лучей */
     brMat.uniforms.tScene.value = src;
+    brMat.uniforms.uThreshold.value = P.threshold * brightScale;
     brMat.uniforms.uExposure.value = exposure;
     pass(brMat, blRT);
 
@@ -1157,8 +1165,10 @@ export function composite(renderer, srcTexture, exposure) {
   }
 
   fxMat.uniforms.tGlow.value = glowOn && blRT ? blRT.texture : null;
-  fxMat.uniforms.uGlow.value = glowOn ? P.glow : 0;
-  fxMat.uniforms.uRays.value = raysOn && rayRT && sunVisible ? P.rays : 0;
+  /* Сила делится на то же число, что подняло порог: источники в трассировке
+     и так ярче, иначе ореол превращается в сплошную засветку. */
+  fxMat.uniforms.uGlow.value = glowOn && blRT ? P.glow / brightScale : 0;
+  fxMat.uniforms.uRays.value = raysOn && rayRT && sunVisible ? P.rays / brightScale : 0;
   fxMat.uniforms.uExposure.value = exposure;
   fxMat.uniforms.uFxaa.value = fxaaFilter ? 1 : 0;
 

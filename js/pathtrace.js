@@ -43,7 +43,8 @@ let savedWind = 1, windU = null, hidden = [];
 let expanded = [], clones = [], swapped = [];
 let starting = false;   // замок от повторного нажатия во время сборки
 let composeOut = null;  // вывод через общую цепочку постобработки
-const geoCache = new Map(), matCache = new Map();
+const geoCache = new Map(), matCache = new Map(), groupCache = new Map();
+let subGeos = [];
 let normalized = [];
 let prevEnv = null, envTex = null, waterSaved = null;
 let emitSaved = [], rimAdded = [], axisSaved = [];
@@ -220,9 +221,13 @@ function normalizeGeo(geo) {
   return g;
 }
 
-/** Материал без вершинных цветов: атрибут мы убрали, флаг должен уйти с ним */
+/** Материал без вершинных цветов: атрибут мы убрали, флаг должен уйти с ним.
+
+    Работает и с массивом: у дома два материала — стены и кровля, — и прежняя
+    версия возвращала сам массив, у которого нет ни vertexColors, ни clone. */
 function flatMat(mat) {
-  if (!mat.vertexColors) return mat;
+  if (Array.isArray(mat)) return mat.map(flatMat);
+  if (!mat || !mat.vertexColors) return mat;
   let m = matCache.get(mat.uuid);
   if (!m) {
     m = mat.clone();
@@ -231,6 +236,42 @@ function flatMat(mat) {
     clones.push(m);
   }
   return m;
+}
+
+/** Разбить геометрию с группами на отдельные геометрии — по одной на группу.
+
+    Сборщик присваивает КАЖДОМУ мешу один номер материала по его порядку в
+    списке и собственные группы геометрии не читает вовсе. Дом с массивом
+    [стены, кровля] попадает туда одним мешем, получает один номер — и дальше
+    номера всех последующих мешей едут: колонне достаётся материал дома, дому
+    материал травы. Отсюда и красные колонны, и пропавший корпус.
+
+    Поэтому перед сборкой каждая группа становится своим мешем с одним
+    материалом. Атрибуты общие, копируется только список индексов. */
+function splitByGroups(geo) {
+  const key = geo.uuid;
+  let parts = groupCache.get(key);
+  if (parts) return parts;
+  if (!geo.groups || geo.groups.length < 2) { groupCache.set(key, null); return null; }
+
+  const idx = geo.index;
+  parts = geo.groups.map(gr => {
+    const g = new THREE.BufferGeometry();
+    for (const name of Object.keys(geo.attributes)) g.setAttribute(name, geo.attributes[name]);
+    const sub = new Uint32Array(gr.count);
+    for (let k = 0; k < gr.count; k++) sub[k] = idx.getX(gr.start + k);
+    g.setIndex(new THREE.BufferAttribute(sub, 1));
+    subGeos.push(g);
+    return { geo: g, materialIndex: gr.materialIndex };
+  });
+  groupCache.set(key, parts);
+  return parts;
+}
+
+/** Клон материала или массива материалов */
+function cloneMat(mat) {
+  if (Array.isArray(mat)) return mat.map(m => m.clone());
+  return mat.clone();
 }
 
 function expandInstances(scene) {
@@ -245,9 +286,18 @@ function expandInstances(scene) {
     holder.matrixAutoUpdate = false;
     for (let k = 0; k < im.count; k++) {
       im.getMatrixAt(k, m);
-      const mesh = new THREE.Mesh(normalizeGeo(im.geometry), flatMat(im.material));
-      mesh.matrixAutoUpdate = false;
-      mesh.matrix.copy(m);
+      const baseGeo = normalizeGeo(im.geometry);
+      const flat = flatMat(im.material);
+      const parts = Array.isArray(flat) ? splitByGroups(baseGeo) : null;
+      /* группы разъезжаются при сборке, поэтому меш на каждую */
+      const made = parts
+        ? parts.map(pp => new THREE.Mesh(pp.geo, flat[pp.materialIndex] || flat[0]))
+        : [new THREE.Mesh(baseGeo, Array.isArray(flat) ? flat[0] : flat)];
+      const mesh = made[0];
+      for (const one of made) {
+        one.matrixAutoUpdate = false;
+        one.matrix.copy(m);
+      }
       /* Цвет экземпляра переносим в материал, иначе вся роща выйдет одного
          оттенка. Но клонировать материал на КАЖДЫЙ экземпляр нельзя — это
          десять тысяч материалов на сцену. Оттенки берутся из небольших
@@ -256,17 +306,24 @@ function expandInstances(scene) {
       if (im.instanceColor) {
         im.getColorAt(k, col);
         const key = col.getHex();
-        let mat = byColor.get(im.material.uuid + ':' + key);
+        /* ключ строим по всем материалам объекта: у дома их два */
+        const uid = Array.isArray(im.material)
+          ? im.material.map(m => m.uuid).join('+') : im.material.uuid;
+        let mat = byColor.get(uid + ':' + key);
         if (!mat) {
-          mat = flatMat(im.material).clone();
-          mat.vertexColors = false;
-          mat.color.copy(col);
-          byColor.set(im.material.uuid + ':' + key, mat);
-          clones.push(mat);
+          mat = cloneMat(flatMat(im.material));
+          for (const m of (Array.isArray(mat) ? mat : [mat])) {
+            m.vertexColors = false;
+            m.color.copy(col);
+            clones.push(m);
+          }
+          byColor.set(uid + ':' + key, mat);
         }
-        mesh.material = mat;
+        made.forEach((one, mi) => {
+          one.material = Array.isArray(mat) ? (mat[mi] || mat[0]) : mat;
+        });
       }
-      holder.add(mesh);
+      for (const one of made) holder.add(one);
     }
     im.parent.add(holder);
     holder.matrix.copy(im.matrixWorld);
@@ -279,16 +336,43 @@ function expandInstances(scene) {
 /** Привести к единому виду и одиночные меши: разнобой ломает сборку так же */
 function normalizeSolids(scene) {
   normalized = [];
-  scene.traverse(o => {
-    if (!o.isMesh || o.isInstancedMesh || !o.visible) return;
+  const list = [];
+  scene.traverse(o => { if (o.isMesh && !o.isInstancedMesh && o.visible) list.push(o); });
+
+  for (const o of list) {
     const g = normalizeGeo(o.geometry);
     const m = flatMat(o.material);
-    if (g !== o.geometry || m !== o.material) {
+
+    /* Одиночный меш с массивом материалов разъедется так же, как инстанс:
+       сборщик читает один номер на меш. Прячем его и подставляем по мешу на
+       каждую группу. */
+    if (Array.isArray(m)) {
+      const parts = splitByGroups(g);
+      if (parts) {
+        const holder = new THREE.Group();
+        holder.matrixAutoUpdate = false;
+        holder.matrix.copy(o.matrix);
+        for (const pp of parts) {
+          const one = new THREE.Mesh(pp.geo, m[pp.materialIndex] || m[0]);
+          one.matrixAutoUpdate = false;
+          holder.add(one);
+        }
+        o.parent.add(holder);
+        expanded.push({ holder, im: o, wasVisible: o.visible });
+        o.visible = false;
+        continue;
+      }
+    }
+
+    const changed = Array.isArray(m)
+      ? m.some((x, i) => x !== o.material[i])
+      : m !== o.material;
+    if (g !== o.geometry || changed) {
       normalized.push({ mesh: o, geo: o.geometry, mat: o.material });
       o.geometry = g;
       o.material = m;
     }
-  });
+  }
 }
 
 function restoreSolids() {
@@ -302,7 +386,8 @@ function collapseInstances() {
     e.im.visible = e.wasVisible;
   }
   for (const mm of clones) mm.dispose();
-  for (const g of geoCache.values()) if (g.userData.__clone) g.dispose();
+  for (const g of subGeos) g.dispose();
+  subGeos = []; groupCache.clear();
   geoCache.clear(); matCache.clear();
   expanded = []; clones = [];
 }
