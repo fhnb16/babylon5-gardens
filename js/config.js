@@ -7,7 +7,11 @@ export const CONFIG = {
   SEED: 1337,
 
   /* --- геометрия станции: ось = мировая Z --- */
-  R: 50, L: 300, HULL_SEG: 128,
+  R: 50, L: 300, HULL_SEG: 256,
+  /* Колец корпуса по длине. Нужны, чтобы холмы продавливали САМ корпус: при
+     одном кольце гнуть нечего. Ячейка выходит 1.2 × 3.1 юнита — холм
+     радиусом пять юнитов ложится на четыре ячейки по дуге. */
+  HULL_RINGS: 96,
   HULL_TEX: { HIGH: 2048, LOW: 1024 },
   MASK_TEX: 1024,
   DETAIL_REP: 70,          // тайлинг детального шума по корпусу
@@ -99,8 +103,12 @@ export const CONFIG = {
     r: [5, 14], rise: [0.12, 0.22],
     /* Цвет земли под травой: оливково-зелёный, не ярче древесных крон.
        Задаётся в sRGB — см. комментарий у setColorAt в world.js. */
-    hue: [0.19, 0.29], sat: [0.28, 0.46], lum: [0.26, 0.36]
-  },
+    hue: [0.19, 0.29], sat: [0.28, 0.46], lum: [0.26, 0.36],
+    /* Доля холмов, дающих вместо подъёма низину, и её глубина относительно
+       высоты холма: в таких низинах и стоят пруды. */
+    pondChance: 0.34, dipDepth: 0.55,
+    /* запас от торцов: продавленный край не должен упереться в диск */
+    endGap: 22 },
 
   /* Дерево задаётся ПОЛНОЙ высотой в тех же юнитах, что и дома: раньше
      ствол и крона выбирались независимо и в сумме давали до 87 м — двадцать
@@ -313,13 +321,13 @@ export const CONFIG = {
   PRINT: { across: 1.19, along: 1.9, dark: 0.72 },
 
   QUALITY: {
-    LOW:    { count: 1, foliage: 0, trees: 1.0,  hullTex: 1024, mask: 512,  aniso: 4,  dpr: 0, footprint: false, normals: 0,    lights: 3, mirror: 0, chunks: 4 },
-    HIGH:   { count: 0, foliage: 1, trees: 1.0,  hullTex: 2048, mask: 1024, aniso: 8,  dpr: 4, footprint: true,  normals: 1024, lights: 5, mirror: 0, chunks: 8 },
+    LOW:    { count: 1, foliage: 0, trees: 1.0,  hullTex: 1024, mask: 512,  aniso: 4,  dpr: 0, footprint: false, normals: 0,    lights: 3, mirror: 0, chunks: 4, rings: 40 },
+    HIGH:   { count: 0, foliage: 1, trees: 1.0,  hullTex: 2048, mask: 1024, aniso: 8,  dpr: 4, footprint: true,  normals: 1024, lights: 5, mirror: 0, chunks: 8, rings: 96 },
     /* Ультра для телефона: все возможности те же — нормали, следы домов,
        подробная маска фонарей, — режется только листва. Она и есть 78%
        геометрии, всё остальное вместе весит вчетверо меньше. */
-    ULTRAM: { count: 0, foliage: 1, trees: 0.85, hullTex: 2048, mask: 2048, aniso: 8,  dpr: 3, footprint: true,  normals: 1024, lights: 3, mirror: 1, chunks: 4 },
-    ULTRA:  { count: 0, foliage: 2, trees: 1.3,  hullTex: 2048, mask: 2048, aniso: 16, dpr: 4, footprint: true,  normals: 2048, lights: 5, mirror: 1, chunks: 8 }
+    ULTRAM: { count: 0, foliage: 1, trees: 0.85, hullTex: 2048, mask: 2048, aniso: 8,  dpr: 3, footprint: true,  normals: 1024, lights: 3, mirror: 1, chunks: 4, rings: 64 },
+    ULTRA:  { count: 0, foliage: 2, trees: 1.3,  hullTex: 2048, mask: 2048, aniso: 16, dpr: 4, footprint: true,  normals: 2048, lights: 5, mirror: 1, chunks: 8, rings: 128 }
   },
 
   /* Трассировка в фото-режиме. rays — лучей на пиксель за кадр,
@@ -437,7 +445,21 @@ export const CONFIG = {
     denoiseR: 2, denoiseSigma: 0.5, denoiseRadius: 1.0, denoisePasses: 4,
     /* Строгость по направляющему кадру: чем больше, тем жёстче фильтр
        держится кромок. Он и не даёт размазывать детали в мыло. */
-    denoiseGuide: 900,
+    /* Строгость по нормали (степень) и допуск по глубине. Ими фильтр и
+       отличает соседний предмет от того же самого. */
+    denoiseNormal: 48, denoiseDepth: 0.02,
+    /* glslSmartDeNoise: радиус, сигма, множитель и порог по цвету */
+    smartR: 5, smartSigma: 4.0, smartK: 1.2, smartThreshold: 0.12,
+    /* Доля истории во временном накоплении */
+    emaAlpha: 0.82,
+    /* Способы очистки. У каждого своя цена и своя слабость — выбор за
+       человеком, потому что «лучше» зависит от сцены. */
+    DENOISERS: [
+      { id: 'atrous', label: 'À-Trous + G-буфер', hint: 'лучше держит кромки' },
+      { id: 'cross', label: 'Кросс-билатеральный', hint: 'то же в один проход' },
+      { id: 'smart', label: 'glslSmartDeNoise', hint: 'мягче, но мылит детали' },
+      { id: 'temporal', label: 'Временное накопление', hint: 'копейки, нужен покой' }
+    ],
     rays: 0.3, raySteps: 32, rayDensity: 0.5, rayDecay: 0.9
   },
   /* Запасное число секторов, если пресет его не задал. Само число живёт в

@@ -576,13 +576,16 @@ const DENOISE_FRAG = `
   precision highp float;
   varying vec2 vUv;
   uniform sampler2D tSrc;
-  uniform sampler2D tGuide;
+  uniform sampler2D tGuide;      // нормаль в RGB, глубина в альфе
   uniform vec2 uRes;
-  uniform float uSigma, uRadius, uGuideW, uHasGuide;
+  uniform float uSigma, uRadius, uHasGuide;
+  uniform float uNormalW, uDepthW;
 
   void main() {
     vec3 c0 = texture2D( tSrc, vUv ).rgb;
-    vec3 g0 = texture2D( tGuide, vUv ).rgb;
+    vec4 g0 = texture2D( tGuide, vUv );
+    float l0 = dot( c0, vec3( 0.2126, 0.7152, 0.0722 ) );
+
     vec3 sum = vec3( 0.0 );
     float wsum = 0.0;
     for ( int y = -DENOISE_R; y <= DENOISE_R; y ++ ) {
@@ -591,29 +594,89 @@ const DENOISE_FRAG = `
         vec2 uv2 = vUv + off;
         vec3 c = texture2D( tSrc, uv2 ).rgb;
 
-        /* Вес по расстоянию */
+        /* ядро по расстоянию — то самое «à-trous»: при растущем шаге веса
+           остаются прежними, а охват удваивается */
         float w = exp( -float( x * x + y * y ) * 0.08 );
 
-        /* Вес по НАПРАВЛЯЮЩЕМУ кадру. Фильтр, знающий только цвет, не
-           отличает шум от детали и потому мылит. Направляющий кадр —
-           обычная растровая отрисовка той же сцены с той же камеры, без
-           шума: кромки предметов стоят в нём ровно там же. Усредняем
-           только тех соседей, которые и там того же цвета. */
         if ( uHasGuide > 0.5 ) {
-          vec3 g = texture2D( tGuide, uv2 ).rgb;
-          float dg = dot( g - g0, g - g0 );
-          w *= exp( -dg * uGuideW );
+          vec4 g = texture2D( tGuide, uv2 );
+          /* Нормаль: соседи с другой ориентацией — другая поверхность.
+             Степень делает переход резким, и грань не размазывается. */
+          float dn = max( 0.0, dot( g0.xyz, g.xyz ) );
+          w *= pow( dn, uNormalW );
+          /* Глубина: разрыв означает другой предмет. Допуск растёт с
+             расстоянием — на дальнем плане шаг глубины между соседними
+             пикселями сам по себе больше. */
+          float dd = abs( g0.a - g.a ) / max( 1.0, g0.a * uDepthW );
+          w *= exp( -dd * dd );
         }
 
-        /* и по цвету самого кадра — от крупных выбросов */
-        float dc = dot( c - c0, c - c0 );
-        w *= exp( -dc / max( 1e-5, uSigma ) );
+        /* и по яркости самого кадра — от одиночных выбросов */
+        float dl = dot( c, vec3( 0.2126, 0.7152, 0.0722 ) ) - l0;
+        w *= exp( -dl * dl / max( 1e-5, uSigma ) );
 
         sum += c * w;
         wsum += w;
       }
     }
     gl_FragColor = vec4( sum / max( 1e-5, wsum ), 1.0 );
+  }
+`;
+
+/* glslSmartDeNoise — тот, что лежит в самой библиотеке трассировщика.
+   Работает только по цвету: направляющих не знает, поэтому детали мылит, но
+   на вид мягче и стоит один проход. Оставлен как выбор: на гладких сценах
+   его результат приятнее. */
+const SMART_FRAG = `
+  precision highp float;
+  varying vec2 vUv;
+  uniform sampler2D tSrc;
+  uniform vec2 uRes;
+  uniform float uSigma, uKSigma, uThreshold;
+
+  void main() {
+    float radius = round( uKSigma * uSigma );
+    float radQ = radius * radius;
+    float invSigmaQx2 = 0.5 / ( uSigma * uSigma );
+    float invSigmaQx2PI = 0.15915494 * invSigmaQx2;
+    float invThresholdSqx2 = 0.5 / ( uThreshold * uThreshold );
+    float invThresholdSqrt2PI = 0.39894228 / uThreshold;
+
+    vec3 c0 = texture2D( tSrc, vUv ).rgb;
+    float zBuff = 0.0;
+    vec3 aBuff = vec3( 0.0 );
+    vec2 size = uRes;
+
+    for ( float x = -SMART_R; x <= SMART_R; x ++ ) {
+      for ( float y = -SMART_R; y <= SMART_R; y ++ ) {
+        vec2 d = vec2( x, y );
+        if ( dot( d, d ) > radQ ) continue;
+        float blurFactor = exp( -dot( d, d ) * invSigmaQx2 ) * invSigmaQx2PI;
+        vec3 walk = texture2D( tSrc, vUv + d / size ).rgb;
+        vec3 dC = walk - c0;
+        float deltaFactor = exp( -dot( dC, dC ) * invThresholdSqx2 )
+          * invThresholdSqrt2PI * blurFactor;
+        zBuff += deltaFactor;
+        aBuff += deltaFactor * walk;
+      }
+    }
+    gl_FragColor = vec4( aBuff / max( 1e-5, zBuff ), 1.0 );
+  }
+`;
+
+/* Временное накопление: кадр смешивается с предыдущим по скользящему
+   среднему. Стоит копейки и не трогает детали вовсе, но работает только на
+   неподвижной камере — движение оставляет шлейф. В фото-режиме камера как
+   раз неподвижна. */
+const EMA_FRAG = `
+  precision highp float;
+  varying vec2 vUv;
+  uniform sampler2D tSrc, tPrev;
+  uniform float uAlpha, uHasPrev;
+  void main() {
+    vec3 c = texture2D( tSrc, vUv ).rgb;
+    vec3 p = texture2D( tPrev, vUv ).rgb;
+    gl_FragColor = vec4( uHasPrev > 0.5 ? mix( c, p, uAlpha ) : c, 1.0 );
   }
 `;
 
@@ -919,8 +982,10 @@ export function setSunScreen(camera, worldGroup) {
 
 function disposeFxaa() {
   for (const t of [fxRT, brRT, blRT, rayRT, ...dnRT, ...taaRT, ...smaaRT]) t?.dispose();
-  dnMat?.dispose(); dnMat = null; dnRT = [];
+  for (const mm of [dnMat, smartMat, emaMat]) mm?.dispose();
+  dnMat = smartMat = emaMat = null; dnRT = [];
   guideRT?.dispose(); guideRT = null;
+  guideMat?.dispose(); guideMat = null;
   for (const mm of smaaMat) mm.dispose();
   for (const tx of smaaTex) tx.dispose();
   smaaMat = []; smaaTex = []; smaaRT = [];
@@ -1013,16 +1078,34 @@ export function resizePost(renderer) {
     type: THREE.HalfFloatType, depthBuffer: false,
     minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter
   }));
+  const D = CONFIG.POST;
   dnMat = dnMat || new THREE.ShaderMaterial({
-    defines: { DENOISE_R: CONFIG.POST.denoiseR },
+    defines: { DENOISE_R: D.denoiseR },
     vertexShader: VERT, fragmentShader: DENOISE_FRAG,
     uniforms: {
       tSrc: { value: null }, tGuide: { value: null },
       uRes: { value: new THREE.Vector2(1, 1) },
-      uSigma: { value: CONFIG.POST.denoiseSigma },
-      uRadius: { value: CONFIG.POST.denoiseRadius },
-      uGuideW: { value: CONFIG.POST.denoiseGuide },
+      uSigma: { value: D.denoiseSigma },
+      uRadius: { value: D.denoiseRadius },
+      uNormalW: { value: D.denoiseNormal },
+      uDepthW: { value: D.denoiseDepth },
       uHasGuide: { value: 0 }
+    }
+  });
+  smartMat = smartMat || new THREE.ShaderMaterial({
+    defines: { SMART_R: D.smartR.toFixed(1) },
+    vertexShader: VERT, fragmentShader: SMART_FRAG,
+    uniforms: {
+      tSrc: { value: null }, uRes: { value: new THREE.Vector2(1, 1) },
+      uSigma: { value: D.smartSigma }, uKSigma: { value: D.smartK },
+      uThreshold: { value: D.smartThreshold }
+    }
+  });
+  emaMat = emaMat || new THREE.ShaderMaterial({
+    vertexShader: VERT, fragmentShader: EMA_FRAG,
+    uniforms: {
+      tSrc: { value: null }, tPrev: { value: null },
+      uAlpha: { value: D.emaAlpha }, uHasPrev: { value: 0 }
     }
   });
 
@@ -1048,7 +1131,8 @@ export function resizePost(renderer) {
   }
 }
 
-let dnMat = null, dnRT = [], dnOn = false;
+let dnMat = null, smartMat = null, emaMat = null;
+let dnRT = [], dnOn = false, dnMode = 'atrous', emaHas = false;
 let brightScale = 1;
 
 /** Поднять порог яркой выборки. В трассировке пути эмиссия усилена в девять
@@ -1058,9 +1142,12 @@ let brightScale = 1;
 export function setBrightScale(k) { brightScale = k > 0 ? k : 1; }
 
 /** Включить очистку кадра перед выводом */
-export function setDenoise(on) { dnOn = !!on; }
+export function setDenoise(on) { dnOn = !!on; emaHas = false; }
 
-let guideRT = null;
+/** Способ очистки: у каждого своя цена и своя слабость */
+export function setDenoiseMode(mode) { dnMode = mode || 'atrous'; emaHas = false; }
+
+let guideRT = null, guideMat = null;
 
 /** Снять направляющий кадр: обычная растровая отрисовка той же сцены с той же
     камеры. Шума в ней нет, а кромки предметов стоят ровно там же — по ним
@@ -1074,13 +1161,38 @@ export function renderGuide(renderer, scene, camera) {
     guideRT?.dispose();
     guideRT = new THREE.WebGLRenderTarget(s.x, s.y, {
       type: THREE.HalfFloatType, depthBuffer: true,
-      minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter
+      minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter
     });
   }
+  /* Нормаль в RGB, глубина в альфе. Цветной кадр направляющим хуже: два
+     разных предмета одного цвета фильтр принимает за один и сглаживает
+     границу между ними. Нормаль и глубина различают их всегда. */
+  guideMat = guideMat || new THREE.ShaderMaterial({
+    vertexShader: `
+      varying vec3 vN;
+      varying float vD;
+      void main() {
+        vN = normalize( normalMatrix * normal );
+        vec4 mv = modelViewMatrix * vec4( position, 1.0 );
+        vD = -mv.z;
+        gl_Position = projectionMatrix * mv;
+      }`,
+    fragmentShader: `
+      precision highp float;
+      varying vec3 vN;
+      varying float vD;
+      void main() { gl_FragColor = vec4( normalize( vN ), vD ); }`,
+    side: THREE.DoubleSide
+  });
+
+  const prevMat = scene.overrideMaterial;
   const prev = renderer.getRenderTarget();
+  scene.overrideMaterial = guideMat;
   renderer.setRenderTarget(guideRT);
+  renderer.clear();
   renderer.render(scene, camera);
   renderer.setRenderTarget(prev);
+  scene.overrideMaterial = prevMat;
   return guideRT.texture;
 }
 
@@ -1170,7 +1282,24 @@ export function composite(renderer, srcTexture, exposure) {
   /* Очистка идёт первой, до тонмаппинга: шум живёт в линейных значениях,
      и давить его после сжатия яркости поздно. */
   let src = srcTexture;
-  if (dnOn && dnMat && dnRT.length) {
+  if (dnOn && dnMode === 'smart' && smartMat && dnRT.length) {
+    smartMat.uniforms.tSrc.value = srcTexture;
+    smartMat.uniforms.uRes.value.set(dnRT[0].width, dnRT[0].height);
+    pass(smartMat, dnRT[0]);
+    src = dnRT[0].texture;
+  } else if (dnOn && dnMode === 'temporal' && emaMat && dnRT.length) {
+    /* скользящее среднее: пишем в один буфер, читая другой как историю */
+    emaMat.uniforms.tSrc.value = srcTexture;
+    emaMat.uniforms.tPrev.value = dnRT[1].texture;
+    emaMat.uniforms.uHasPrev.value = emaHas ? 1 : 0;
+    pass(emaMat, dnRT[0]);
+    /* копируем результат в историю следующим проходом */
+    emaMat.uniforms.tSrc.value = dnRT[0].texture;
+    emaMat.uniforms.uHasPrev.value = 0;
+    pass(emaMat, dnRT[1]);
+    emaHas = true;
+    src = dnRT[0].texture;
+  } else if (dnOn && dnMat && dnRT.length) {
     /* Несколько проходов с растущим шагом — «à-trous». Один проход с малым
        окном оставляет крупнозернистый узор: соседние пиксели он усредняет, а
        пятна размером в несколько пикселей не видит вовсе. Расширять окно в
@@ -1178,12 +1307,14 @@ export function composite(renderer, srcTexture, exposure) {
        от прохода к проходу — окно охватывает всё более далёких соседей при
        той же цене каждого прохода. */
     let step = 1;
-    for (let k = 0; k < CONFIG.POST.denoisePasses; k++) {
+    /* кросс-билатеральный — тот же фильтр в один проход */
+    const passes = dnMode === 'cross' ? 1 : CONFIG.POST.denoisePasses;
+    for (let k = 0; k < passes; k++) {
       const from = k === 0 ? srcTexture : dnRT[(k - 1) % 2].texture;
       const to = dnRT[k % 2];
       dnMat.uniforms.tSrc.value = from;
       /* направляющий кадр читается на каждом проходе */
-      dnMat.uniforms.uGuideW.value = CONFIG.POST.denoiseGuide;
+
       dnMat.uniforms.uRes.value.set(to.width, to.height);
       dnMat.uniforms.uRadius.value = CONFIG.POST.denoiseRadius * step;
       /* с ростом шага допуск по цвету сужается: иначе далёкие проходы

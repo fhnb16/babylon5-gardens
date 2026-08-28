@@ -13,7 +13,7 @@ import { pt, startPath, pathStep, stopPath, pathLabel, pathCameraMoved,
   setPaused, setPathScale } from './pathtrace.js';
 import { trace, startTrace, traceStep, stopTrace,
   setPost, setSunScreen, resizePost, renderFrame, composite, setDenoise, forcePost,
-  setBrightScale, setDenoiseGuide, renderGuide,
+  setBrightScale, setDenoiseGuide, renderGuide, setDenoiseMode,
   setTraceDebug, DEBUG_NAMES, setAmbientShare, setHullRef } from './photo.js';
 
 const $ = id => document.getElementById(id);
@@ -754,6 +754,28 @@ function initUI() {
      включая MSAA, поэтому канвас и создаётся без antialias. */
   const sAAon = $('sAAon'), sAAv = $('sAAv'), sAAcost = $('sAAcost');
   const sMsaa = $('sMsaa'), sFilter = $('sFilter'), sScale = $('sScale');
+
+  /* Способ очистки. «Лучше» зависит от сцены: направляющий буфер держит
+     кромки, но на гладких поверхностях его резкость заметна; фильтр по цвету
+     мягче, зато мылит; временное накопление даром, но требует покоя. */
+  const sDn = $('sDn');
+  for (const it of CONFIG.POST.DENOISERS) {
+    const op = document.createElement('option');
+    op.value = it.id; op.textContent = it.label.toUpperCase();
+    sDn.appendChild(op);
+  }
+  sDn.value = prefs.get('denoiser', 'atrous');
+  const showDn = () => {
+    const it = CONFIG.POST.DENOISERS.find(x => x.id === sDn.value);
+    $('sDnV').textContent = it ? `${it.label} · ${it.hint}` : '';
+  };
+  sDn.onchange = () => {
+    prefs.set('denoiser', sDn.value);
+    setDenoiseMode(sDn.value);
+    showDn();
+  };
+  setDenoiseMode(sDn.value);
+  showDn();
 
   /* Доля разрешения трассировки. Считать в половину разрешения вчетверо
      дешевле, а на снимке разница мала: шум при том же числе выборок падает

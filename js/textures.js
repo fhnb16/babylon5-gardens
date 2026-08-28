@@ -80,7 +80,7 @@ export function heightToNormal(srcCanvas, strength = 1, size = 0) {
    КОРПУС: альбедо + маска каналов (R=вода, G=растительность, B=покрытие)
    Оба холста рисуются из одних и тех же секторов CONFIG.
    ═══════════════════════════════════════════════════════════════════════════ */
-export function makeHullMaps(size, maskSize, rnd) {
+export function makeHullMaps(size, maskSize, rnd, ponds = []) {
   const W = size, H = size, A = cv(W, H);
   const M = cv(maskSize, maskSize);
   const X = deg => (deg / 360) * W;
@@ -369,6 +369,43 @@ export function makeHullMaps(size, maskSize, rnd) {
   const albedo = tex(A.c, { wrap: true });
   const mask = tex(M.c, { srgb: false, wrap: true });
   return { albedo, mask, canvas: A.c };
+  /* ─── ПРУДЫ ───
+     Низины корпуса заливаются водой. Канал тот же, что у рек, поэтому им
+     достаётся весь водный шейдер даром: глубина, кайма, отражение. Разница
+     одна — течения нет, и рисуются они не полосой, а пятном по форме низины. */
+  for (const p of ponds) {
+    const rx = p.r / (TAU_2D * CONFIG.R) * M.c.width;
+    const ry = p.r / CONFIG.L * M.c.width;
+    const big = Math.max(rx, ry);
+    /* тем же пятном и в альбедо, и в маску: иначе вода встанет не там */
+    for (const [g2, size2, col] of [[m, M.c.width, '0,0,255'], [a, W, '32,74,96']]) {
+      const px = ((p.t / TAU_2D) % 1 + 1) % 1 * size2;
+      const py = (p.z / CONFIG.L + 0.5) * size2;
+      const kx = rx / big * (size2 / M.c.width), ky = ry / big * (size2 / M.c.width);
+      g2.save();
+      g2.translate(px, py);
+      g2.scale(kx, ky);
+      const grd = g2.createRadialGradient(0, 0, 0, 0, 0, big);
+      /* глубина спадает к берегу — кайма получается сама */
+      if (g2 === m) {
+        grd.addColorStop(0, 'rgba(255,0,0,1)');
+        grd.addColorStop(0.72, 'rgba(255,0,0,.92)');
+        grd.addColorStop(1, 'rgba(255,0,0,0)');
+      } else {
+        grd.addColorStop(0, `rgba(${col},1)`);
+        grd.addColorStop(0.8, `rgba(${col},.9)`);
+        grd.addColorStop(1, `rgba(${col},0)`);
+      }
+      g2.fillStyle = grd;
+      g2.globalCompositeOperation = g2 === m ? 'lighter' : 'source-over';
+      g2.beginPath();
+      g2.arc(0, 0, big, 0, TAU_2D);
+      g2.fill();
+      g2.globalCompositeOperation = 'source-over';
+      g2.restore();
+    }
+  }
+
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════

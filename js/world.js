@@ -358,6 +358,80 @@ function buildingGeo(type) {
   return roofUV(g);
 }
 
+/** Продавить корпус холмами.
+
+    Список холмов тот же, что раньше расставлял отдельные меши: место, радиус
+    и высота. Вершина смещается внутрь цилиндра на величину, спадающую от
+    центра холма к краю по гладкой кривой — стыка не остаётся вовсе.
+
+    Заодно возвращается сам список: по нему потом строятся пруды в низинах и
+    красится трава, чтобы холм читался не только формой. */
+export function displaceHills(geo, R, L, rnd) {
+  const H = CONFIG.HILL;
+  const hills = [];
+  const want = CONFIG.COUNT.hills.reduce((a, b) => a + b, 0);
+
+  /* Холм не должен попадать на город или русло: под домами поверхность
+     обязана остаться ровной, иначе они встанут на склон, а река потечёт в
+     гору. Проверяем ВЕСЬ угловой размах с мелким шагом — русло узкое и
+     проскакивало между тремя контрольными точками. */
+  const clearOf = (t, rad) => {
+    const half = rad / R;
+    for (let d = -half; d <= half + 1e-6; d += half / 8) {
+      const deg = (((t + d) / TAU * 360) % 360 + 360) % 360;
+      const zone = zoneAt(deg);
+      if (zone === 'river' || zone === 'city') return false;
+    }
+    return true;
+  };
+
+  for (let i = 0, guard = 0; i < want && guard < want * 60; guard++) {
+    const rad = H.r[0] + rnd() * (H.r[1] - H.r[0]);
+    const t = rnd() * TAU;
+    /* с запасом от торцов: продавленный край не должен упереться в диск */
+    const z = (rnd() - 0.5) * (L - rad * 4 - H.endGap * 2);
+    if (!clearOf(t, rad)) continue;
+    hills.push({
+      t, z, r: rad,
+      h: rad * (H.rise[0] + rnd() * (H.rise[1] - H.rise[0])),
+      dip: rnd() < H.pondChance
+    });
+    i++;
+  }
+
+  const pos = geo.attributes.position;
+  const v = new THREE.Vector3();
+  for (let k = 0; k < pos.count; k++) {
+    v.fromBufferAttribute(pos, k);
+    /* Цилиндр three лежит вдоль Y, а мир получит его после rotateX(90°).
+       Угол при этом становится 180° − исходный, и длина переезжает с Y на Z.
+       Считаем сразу в КОНЕЧНОЙ системе: иначе холмы садятся в зеркально
+       отражённые зоны — под город и на русло. */
+    const t = Math.atan2(v.x, -v.z);
+    const z = v.y;
+    let lift = 0;
+    for (const hl of hills) {
+      /* угловое расстояние по кратчайшей дуге, в юнитах поверхности */
+      let dt = ((t - hl.t + Math.PI) % TAU + TAU) % TAU - Math.PI;
+      const dx = dt * R, dz = z - hl.z;
+      const d = Math.hypot(dx, dz);
+      if (d >= hl.r) continue;
+      /* гладкий колокол: у края производная равна нулю, стыка не видно */
+      const u = d / hl.r;
+      const f = (1 - u * u) * (1 - u * u);
+      lift += hl.dip ? -hl.h * H.dipDepth * f : hl.h * f;
+    }
+    if (lift !== 0) {
+      const rr = Math.hypot(v.x, v.z);
+      const k2 = (rr - lift) / rr;      // внутрь цилиндра = ближе к оси
+      pos.setXYZ(k, v.x * k2, v.y, v.z * k2);
+    }
+  }
+  pos.needsUpdate = true;
+  geo.computeVertexNormals();
+  return hills;
+}
+
 /* ═══════════════════════════════════════════════════════════════════════════
    СБОРКА МИРА
    ═══════════════════════════════════════════════════════════════════════════ */
@@ -386,10 +460,20 @@ export function buildWorld(group, renderer, quality) {
   const add = o => { group.add(o); sceneParts.push(o); return o; };
 
   /* ─────────── КОРПУС ─────────── */
-  const hullGeo = new THREE.CylinderGeometry(R, R, L, CONFIG.HULL_SEG, 1, true);
+  /* Корпус тесселирован по длине, чтобы холмы стали ЕГО частью, а не
+     отдельными мешами поверх. Прежде холм был диском, положенным на землю:
+     своя кромка, свой цвет, резкий стык — «навалили кучу». Продавленный
+     корпус даёт непрерывную поверхность, а трава на нём та же самая. */
+  /* Тесселяция корпуса — из пресета: холмы продавливают сам корпус, и на
+     слабом устройстве колец нужно меньше. */
+  const hullGeo = new THREE.CylinderGeometry(R, R, L,
+    Q.rings ? CONFIG.HULL_SEG : 128, Q.rings || CONFIG.HULL_RINGS, true);
+  const hullHills = displaceHills(hullGeo, R, L, mulberry32(CONFIG.SEED + 404));
   hullGeo.rotateX(Math.PI / 2);
+  /* низины корпуса заливаются водой — тем же каналом маски, что и реки */
+  const ponds = hullHills.filter(h => h.dip).map(h => ({ t: h.t, z: h.z, r: h.r * 0.62 }));
   const { albedo, mask, canvas: hullCanvas } = makeHullMaps(Q.hullTex, Q.mask,
-    mulberry32(CONFIG.SEED + 7));
+    mulberry32(CONFIG.SEED + 7), ponds);
 
   /* BackSide зеркалит U. Самотест сверяет реальные UV геометрии с мировым θ. */
   const flip = uvSelfTest(hullGeo, true);
@@ -665,39 +749,27 @@ export function buildWorld(group, renderer, quality) {
      резервировавшая место всего на 9 юнитов: зелёная блямба, глотавшая
      деревья и дома. Теперь пологая гранёная возвышенность, которая
      резервирует свой настоящий радиус, а зелень встаёт НА неё. */
+  /* ─────────── ХОЛМЫ ───────────
+     Отдельных мешей больше нет: корпус уже продавлен по этому же списку
+     (см. displaceHills). Раньше холм был сферой, положенной на землю: своя
+     кромка, свой цвет, резкий стык — «навалили кучу на цилиндр». Здесь
+     остаётся только список, по которому зелень встаёт на склон, а в низинах
+     появляются пруды. */
   const HILL = CONFIG.HILL;
-  const hills = [];   // [θ, z, радиус, высота] — рельеф для всего остального
-  instance(
-    new THREE.SphereGeometry(1, 12, 7),
-    new THREE.MeshStandardMaterial({ roughness: 1, flatShading: true }),
-    /* холм СЧИТАЕТСЯ с застройкой, но сам места не занимает: зелень должна
-       вырасти прямо на его склоне, а не быть отброшена от него */
-    sample(W_HILL, CONFIG.COUNT.hills[i],
-      () => HILL.r[0] + rnd() * (HILL.r[1] - HILL.r[0]), false, ['rivers', 'cities']),
-    (k, t, z, im, rad) => {
-      const h = rad * (HILL.rise[0] + rnd() * (HILL.rise[1] - HILL.rise[0]));
-      hills.push([t, z, rad, h]);
-      m4.compose(surfacePos(t, R, z, v3), surfaceQuat(t, q), sc.set(rad, h, rad));
-      im.setMatrixAt(k, m4);
-      /* SRGBColorSpace обязателен: по умолчанию setHSL задаёт цвет в рабочем
-         ЛИНЕЙНОМ пространстве, и светлота 0.30 выходит как 0.58 в sRGB —
-         холмы получались вдвое ярче древесных крон и выглядели инородно.
-         Оттенок земляной: от оливкового к траве. */
-      const H = CONFIG.HILL;
-      im.setColorAt(k, new THREE.Color().setHSL(
-        H.hue[0] + rnd() * (H.hue[1] - H.hue[0]),
-        (H.sat[0] + rnd() * (H.sat[1] - H.sat[0])) * CONFIG.SATURATION,
-        H.lum[0] + rnd() * (H.lum[1] - H.lum[0]),
-        THREE.SRGBColorSpace));
-    });
+  const hills = hullHills.map(h => [h.t, h.z, h.r, h.dip ? -h.h * HILL.dipDepth : h.h]);
 
   /** Высота купола холма в точке — чтобы дерево стояло на склоне, а не в нём */
   const relief = (t, z) => {
+    /* Складываем вклады тем же колоколом, каким продавлен корпус: иначе
+       дерево встанет не на той высоте, что сама поверхность. Низины дают
+       отрицательный вклад — там вода. */
     let up = 0;
     for (let k = 0; k < hills.length; k++) {
       const [ht, hz, hr, hh] = hills[k];
       const d = Math.hypot(angGap(t, ht) * R, z - hz);
-      if (d < hr) up = Math.max(up, hh * Math.sqrt(1 - (d / hr) * (d / hr)));
+      if (d >= hr) continue;
+      const u = d / hr, f = (1 - u * u) * (1 - u * u);
+      up += hh * f;
     }
     return up;
   };

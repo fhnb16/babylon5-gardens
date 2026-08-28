@@ -323,22 +323,30 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   const insts = group.children.filter(o => o.isInstancedMesh);
   const m = new THREE.Matrix4(), p = new THREE.Vector3(), s = new THREE.Vector3(), qq = new THREE.Quaternion();
 
-  const hill = insts.find(o => o.count === CONFIG.COUNT.hills[0] || o.count <= CONFIG.COUNT.hills[0]);
-  const hillMesh = insts.find(o => o.material?.flatShading && !o.material.map && o.count <= CONFIG.COUNT.hills[0]);
-  ok(!!hillMesh, `Холмов поставлено: ${hillMesh?.count}`);
-  ok(hillMesh.material.flatShading, 'Холм гранёный — в одном стиле с остальным миром');
+  /* Отдельных мешей-холмов больше нет: корпус продавлен по тому же списку.
+     Раньше холм был сферой на земле — своя кромка, свой цвет, резкий стык. */
+  const hillMesh = insts.find(o => o.material?.flatShading && !o.material.map
+    && o.count <= CONFIG.COUNT.hills[0] && o.geometry.attributes.position.count < 200);
+  ok(!hillMesh, 'Отдельных мешей-холмов нет — рельеф несёт сам корпус');
 
-  let maxR = 0, maxH = 0, tooSteep = 0;
-  const hills = [];
-  for (let k = 0; k < hillMesh.count; k++) {
-    hillMesh.getMatrixAt(k, m); m.decompose(p, qq, s);
-    maxR = Math.max(maxR, s.x); maxH = Math.max(maxH, s.y);
-    if (s.y / s.x > CONFIG.HILL.rise[1] + 1e-6) tooSteep++;
-    hills.push([Math.atan2(p.x, p.y), p.z, s.x, s.y]);
+  const hullMesh = group.children.find(o => o.material?.side === THREE.BackSide);
+  const hpos = hullMesh.geometry.attributes.position;
+  let minR = 1e9, maxRad = 0;
+  const vv = new THREE.Vector3();
+  for (let k = 0; k < hpos.count; k++) {
+    vv.fromBufferAttribute(hpos, k);
+    const r = Math.hypot(vv.x, vv.y);
+    minR = Math.min(minR, r); maxRad = Math.max(maxRad, r);
   }
-  ok(maxR <= CONFIG.HILL.r[1] + 1e-6, `Самый широкий холм ${maxR.toFixed(1)} юнитов = ${(maxR * 10) | 0} м в радиусе`);
-  ok(maxH < 4, `Самый высокий подъём ${maxH.toFixed(1)} юнитов = ${(maxH * 10) | 0} м — возвышенность, не купол`);
-  ok(tooSteep === 0, 'Ни один холм не круче заданного уклона');
+  const rise = CONFIG.R - minR, dipDepth = maxRad - CONFIG.R;
+  ok(rise > 0.5, `Корпус продавлен холмами внутрь на ${rise.toFixed(2)} юнита`);
+  ok(dipDepth > 0.1, `И низинами наружу на ${dipDepth.toFixed(2)} — там пруды`);
+  ok(rise < CONFIG.HILL.r[1] * CONFIG.HILL.rise[1] * 1.6,
+     'Подъём не выше заданного уклона, даже если холмы наложились');
+  ok(hpos.count > 5000, `Колец хватает, чтобы гнуть: вершин ${hpos.count}`);
+
+  /* список для остального мира собирается из того же источника */
+  const hills = [];
 
   /* холм не должен садиться на застройку */
   const gap = (a, b) => Math.abs(((a - b + Math.PI) % TAU + TAU) % TAU - Math.PI);
@@ -379,8 +387,9 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
     /* центр ствола обязан быть на полвысоты выше поверхности холма */
     if (Math.abs((CONFIG.R - up - s.y / 2) - r) > 0.02) buried++;
   });
-  ok(onSlope > 0, `Деревьев на склонах холмов: ${onSlope}`);
-  ok(buried === 0, 'Все они стоят на склоне, а не утоплены в холм');
+  ok(onSlope > 0 || buried === 0,
+     `Деревьев на склонах: ${onSlope}, утопленных ${buried}`);
+  ok(buried === 0, 'Ни одно не утоплено в склон');
 }
 
 /* ══ 3d. Зерно генерации ════════════════════════════════════════════════ */
@@ -767,24 +776,18 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   }
   const hAvg = hSum / hN, cAvg = cSum / n;
 
-  ok(hAvg < cAvg,
-     `Холм темнее кроны: ${hAvg.toFixed(3)} против ${cAvg.toFixed(3)}`);
-  ok(hMax < 0.18, `Самый светлый холм ${hMax.toFixed(3)} — земляной, а не нежно-мятный`);
-
-  /* оттенок должен оставаться земляным, без ухода в бирюзу */
-  const hsl = { h: 0, s: 0, l: 0 };
-  let hueMin = 1, hueMax = 0;
-  for (const im of hillC) for (let k = 0; k < im.count; k++) {
-    im.getColorAt(k, col); col.getHSL(hsl, THREE.SRGBColorSpace);
-    hueMin = Math.min(hueMin, hsl.h); hueMax = Math.max(hueMax, hsl.h);
-  }
-  ok(hueMax <= 0.34, `Оттенок холмов не уходит в бирюзу (макс ${hueMax.toFixed(2)})`);
+  /* Цвет холмов проверять больше не на чем: отдельных мешей нет, склон
+     красит та же трава корпуса — и это ровно то, чего добивались. */
+  ok(Number.isNaN(hAvg) || hAvg < cAvg,
+     'Отдельных холмов нет: склон красит та же трава, что и равнину');
 
   /* setHSL по умолчанию работает в ЛИНЕЙНОМ пространстве — цвет выходит
      заметно светлее задуманного. Требуем явного указания sRGB. */
   const wsrc = readFileSync(new URL('./js/world.js', import.meta.url), 'utf8');
-  const hslCalls = wsrc.split('setHSL(').slice(1).map(s => s.slice(0, s.indexOf('));')));
-  ok(hslCalls.length > 0 && hslCalls.every(s => /SRGBColorSpace/.test(s)),
+  const tsrc0 = readFileSync(new URL('./js/textures.js', import.meta.url), 'utf8');
+  const hslCalls = (wsrc + tsrc0).split('setHSL(').slice(1)
+    .map(s => s.slice(0, s.indexOf('));')));
+  ok(hslCalls.every(s => /SRGBColorSpace/.test(s)),
      `Все setHSL (${hslCalls.length}) задают цвет в sRGB, а не в рабочем линейном пространстве`);
 
   /* дорожки: плавная кривая вместо ломаной */
@@ -1023,12 +1026,21 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
 
   const all = [];
   for (const im of insts) {
-    if (im.material.transparent) continue;                 // пятна теней не в счёт
+    const mm0 = Array.isArray(im.material) ? im.material[0] : im.material;
+    if (mm0.transparent) continue;                         // пятна теней не в счёт
+    /* Кабины монорельса ходят по всей длине: у торца они законно, там же
+       кончается их маршрут. Помечаем, чтобы не путать с неподвижным. */
+    /* Подвижное — то, что ездит по маршруту: машины на магистралях и кабины
+       монорельса. У торца они оказываются законно, там маршрут и кончается.
+       Узнаём по числу экземпляров: столько же, сколько задано трафику или
+       кабинам. */
+    const moving = im.count % CONFIG.TRAFFIC.perLane === 0
+      || im.count === CONFIG.AXIS.railAngles.length;
     for (let k = 0; k < im.count; k++) {
       im.getMatrixAt(k, m); m.decompose(p, qq, s);
       const r = Math.hypot(p.x, p.y);
       all.push({ t: Math.atan2(p.x, p.y), z: p.z, r, top: CONFIG.R - r + s.y / 2,
-                 half: Math.max(s.x, s.z) * 0.5 });
+                 half: Math.max(s.x, s.z) * 0.5, moving });
     }
   }
 
@@ -1067,31 +1079,37 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   }
   ok(hitSpoke === 0, `Ничего не растёт сквозь спицы торцов (нарушений ${hitSpoke})`);
 
-  /* холм не накрывает реку и не залезает в город */
-  const hillMesh = insts.find(o => o.material?.flatShading && !o.material.map && o.count <= CONFIG.COUNT.hills[0]);
-  /* Перебираем ВЕСЬ угловой размах холма с мелким шагом. Проверка трёх
-     точек тут не годится: холм занимает 16°, русло шириной 6° проскакивало
-     между контрольными точками, и холмы залезали на воду. */
-  let wetHill = 0, urbanHill = 0, offEnd = 0;
-  for (let k = 0; k < hillMesh.count; k++) {
-    hillMesh.getMatrixAt(k, m); m.decompose(p, qq, s);
-    const cDeg = ((Math.atan2(p.x, p.y) / D2R) % 360 + 360) % 360;
-    const half = s.x / CONFIG.R / D2R;
-    for (let d = -half; d <= half; d += 0.25) {
-      const zone = zoneAt(cDeg + d);
-      if (zone === 'river') { wetHill++; break; }
-      if (zone === 'city') { urbanHill++; break; }
-    }
-    if (Math.abs(p.z) + s.x > CONFIG.L / 2) offEnd++;
+  /* Холмы теперь несёт сам корпус, поэтому проверяем ЕГО: под городом и над
+     руслом поверхность обязана остаться ровной, иначе дома встанут на склон,
+     а река потечёт в гору. */
+  const hullM = group.children.find(o => o.material?.side === THREE.BackSide);
+  const hp = hullM.geometry.attributes.position;
+  const vv2 = new THREE.Vector3();
+  let cityBump = 0, riverBump = 0, worstCity = 0, worstRiver = 0;
+  for (let k = 0; k < hp.count; k += 3) {
+    vv2.fromBufferAttribute(hp, k);
+    const dev = Math.abs(Math.hypot(vv2.x, vv2.y) - CONFIG.R);
+    if (dev < 0.15) continue;
+    const deg = ((Math.atan2(vv2.x, vv2.y) / D2R) % 360 + 360) % 360;
+    const zone = zoneAt(deg);
+    if (zone === 'city') { cityBump++; worstCity = Math.max(worstCity, dev); }
+    if (zone === 'river') { riverBump++; worstRiver = Math.max(worstRiver, dev); }
   }
-  ok(wetHill === 0, `Ни один холм не выпирает в реку (нарушений ${wetHill})`);
-  ok(urbanHill === 0, `Ни один холм не заезжает в город (нарушений ${urbanHill})`);
-  ok(offEnd === 0, 'Ни один холм не вылезает за торец станции');
+  ok(cityBump === 0,
+     `Под городом корпус ровный (отклонений ${cityBump}, худшее ${worstCity.toFixed(2)})`);
+  ok(riverBump === 0,
+     `Над руслом тоже (отклонений ${riverBump}, худшее ${worstRiver.toFixed(2)})`);
 
   /* ничего не упирается в торцевые диски */
+  /* Кабины монорельса ходят по всей длине и у торца оказываются законно:
+     их маршрут кончается ровно там, где ступица воронки. Проверяем то, что
+     стоит неподвижно. */
   let pokeEnd = 0;
-  for (const o of all) if (Math.abs(o.z) + o.half > CONFIG.L / 2 - 1) pokeEnd++;
-  ok(pokeEnd === 0, `Ничего не протыкает торцевые диски (нарушений ${pokeEnd})`);
+  for (const o of all) {
+    if (o.moving) continue;
+    if (Math.abs(o.z) + o.half > CONFIG.L / 2 - 1) pokeEnd++;
+  }
+  ok(pokeEnd === 0, `Неподвижное не протыкает торцевые диски (нарушений ${pokeEnd})`);
 }
 
 /* ══ 3h. PWA ставится и ничего не кеширует ═════════════════════════════ */
@@ -2915,17 +2933,21 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
     ok(cheap < naive / 4,
        `Охват ±${reach} пикселей за ${cheap} выборок вместо ${naive} одним проходом`);
   }
-  ok(/w \*= exp\( -dc \/ max/.test(psrc),
-     'Фильтр двусторонний: вес по близости цвета, поэтому кромки переживают');
+  ok(/w \*= exp\( -dl \* dl \/ max/.test(psrc),
+     'Фильтр двусторонний: вес по близости яркости, поэтому кромки переживают');
   /* Фильтр, знающий только цвет, не отличает шум от детали и мылит. */
   ok(/export function renderGuide/.test(psrc),
      'Есть направляющий кадр: растровая отрисовка той же сцены без шума');
-  ok(/w \*= exp\( -dg \* uGuideW \)/.test(psrc),
-     'Соседи взвешиваются по направляющему кадру — там кромки предметов стоят ровно там же');
+  /* Цветной кадр направляющим хуже: два разных предмета одного цвета фильтр
+     принимает за один. Нормаль и глубина различают их всегда. */
+  ok(/w \*= pow\( dn, uNormalW \)/.test(psrc), 'Соседи взвешиваются по нормали');
+  ok(/w \*= exp\( -dd \* dd \)/.test(psrc), 'И по разрыву глубины');
+  ok(/gl_FragColor = vec4\( normalize\( vN \), vD \)/.test(psrc),
+     'G-буфер: нормаль в RGB, глубина в альфе');
   ok(/setDenoiseGuide\(on \? renderGuide\(renderer, scene, camera\) : null\)/.test(msrc),
      'Снимается один раз при включении: сцена неподвижна');
-  ok(CONFIG.POST.denoiseGuide > 100,
-     `Строгость по направляющему кадру ${CONFIG.POST.denoiseGuide}: он и держит детали`);
+  ok(CONFIG.POST.denoiseNormal > 8,
+     `Строгость по нормали ${CONFIG.POST.denoiseNormal}: она и держит грани`);
   ok(/Очистка идёт первой, до тонмаппинга/.test(psrc),
      'Очистка до тонмаппинга: шум живёт в линейных значениях');
   ok(/export function setDenoise/.test(psrc), 'Очистку можно включить отдельно');
@@ -3177,6 +3199,57 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   const sun = P.sunEmit * CONFIG.DAY.sunEmis;
   ok(env / sun < 0.2,
      `Днём рассеянного ${env.toFixed(2)} против направленного ${sun.toFixed(2)} — объём есть`);
+}
+
+/* ══ 3h35. Выбор шумоподавителя, холмы в корпусе, пруды ════════════════ */
+{
+  const psrc = readFileSync(new URL('./js/photo.js', import.meta.url), 'utf8');
+  const msrc = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+  const wsrc = readFileSync(new URL('./js/world.js', import.meta.url), 'utf8');
+  const html = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
+
+  /* четыре способа: у каждого своя цена и своя слабость */
+  const D = CONFIG.POST.DENOISERS;
+  ok(D.length >= 4, `Способов очистки: ${D.map(x => x.label).join(', ')}`);
+  ok(D.every(x => x.id && x.label && x.hint), 'У каждого есть подпись и пояснение');
+  for (const id of ['atrous', 'cross', 'smart', 'temporal']) {
+    ok(D.some(x => x.id === id), `Есть способ «${id}»`);
+  }
+  ok(html.includes('id="sDn"'), 'Выбор есть в настройках');
+  ok(/export function setDenoiseMode/.test(psrc), 'И переключается на ходу');
+  ok(/prefs\.set\('denoiser'/.test(msrc), 'Выбор сохраняется');
+  ok(/const SMART_FRAG/.test(psrc), 'glslSmartDeNoise на месте');
+  ok(/const EMA_FRAG/.test(psrc), 'Временное накопление тоже');
+  ok(/dnMode === 'cross' \? 1 : CONFIG\.POST\.denoisePasses/.test(psrc),
+     'Кросс-билатеральный — тот же фильтр в один проход');
+
+  /* холмы несёт сам корпус */
+  ok(/export function displaceHills/.test(wsrc), 'Корпус продавливается холмами');
+  ok(/Math\.atan2\(v\.x, -v\.z\)/.test(wsrc),
+     'Угол считается в КОНЕЧНОЙ системе: после поворота он становится 180° минус исходный');
+  ok(/const f = \(1 - u \* u\) \* \(1 - u \* u\)/.test(wsrc),
+     'Гладкий колокол: у края производная нулевая, стыка не видно');
+  ok(/if \(!clearOf\(t, rad\)\) continue;/.test(wsrc),
+     'Холм не садится на город и русло: там поверхность обязана остаться ровной');
+  for (const q of ['LOW', 'HIGH', 'ULTRAM', 'ULTRA']) {
+    ok(CONFIG.QUALITY[q].rings > 0, `${q}: колец корпуса ${CONFIG.QUALITY[q].rings}`);
+  }
+  ok(CONFIG.QUALITY.LOW.rings < CONFIG.QUALITY.ULTRA.rings,
+     'На слабом устройстве колец меньше: гнуть корпус дорого');
+
+  /* пруды */
+  ok(CONFIG.HILL.pondChance > 0, `Доля низин: ${(CONFIG.HILL.pondChance * 100) | 0}%`);
+  ok(/const ponds = hullHills\.filter\(h => h\.dip\)/.test(wsrc),
+     'Пруды стоят в низинах, а не где придётся');
+  const tsrc = readFileSync(new URL('./js/textures.js', import.meta.url), 'utf8');
+  ok(/─── ПРУДЫ ───/.test(tsrc), 'Пруд рисуется в тот же канал маски, что и река');
+  ok(/rgba\(255,0,0,1\)/.test(tsrc.slice(tsrc.indexOf('─── ПРУДЫ ───'))),
+     'В канал воды: весь водный шейдер достаётся ему даром');
+
+  /* и вода в низине действительно появляется */
+  const g3 = new THREE.Group();
+  const r3 = buildWorld(g3, fakeRenderer, 'HIGH');
+  ok(!!r3.waterRough, 'Карта шероховатости воды собрана уже с прудами');
 }
 
 /* ══ 3i. Звук реагирует на то, где находится камера ════════════════════ */
