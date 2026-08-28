@@ -576,22 +576,39 @@ const DENOISE_FRAG = `
   precision highp float;
   varying vec2 vUv;
   uniform sampler2D tSrc;
+  uniform sampler2D tGuide;
   uniform vec2 uRes;
-  uniform float uSigma, uRadius;
+  uniform float uSigma, uRadius, uGuideW, uHasGuide;
 
   void main() {
     vec3 c0 = texture2D( tSrc, vUv ).rgb;
+    vec3 g0 = texture2D( tGuide, vUv ).rgb;
     vec3 sum = vec3( 0.0 );
     float wsum = 0.0;
     for ( int y = -DENOISE_R; y <= DENOISE_R; y ++ ) {
       for ( int x = -DENOISE_R; x <= DENOISE_R; x ++ ) {
         vec2 off = vec2( float( x ), float( y ) ) * uRadius / uRes;
-        vec3 c = texture2D( tSrc, vUv + off ).rgb;
-        /* вес по расстоянию и по близости цвета: кромки переживают */
+        vec2 uv2 = vUv + off;
+        vec3 c = texture2D( tSrc, uv2 ).rgb;
+
+        /* Вес по расстоянию */
+        float w = exp( -float( x * x + y * y ) * 0.08 );
+
+        /* Вес по НАПРАВЛЯЮЩЕМУ кадру. Фильтр, знающий только цвет, не
+           отличает шум от детали и потому мылит. Направляющий кадр —
+           обычная растровая отрисовка той же сцены с той же камеры, без
+           шума: кромки предметов стоят в нём ровно там же. Усредняем
+           только тех соседей, которые и там того же цвета. */
+        if ( uHasGuide > 0.5 ) {
+          vec3 g = texture2D( tGuide, uv2 ).rgb;
+          float dg = dot( g - g0, g - g0 );
+          w *= exp( -dg * uGuideW );
+        }
+
+        /* и по цвету самого кадра — от крупных выбросов */
         float dc = dot( c - c0, c - c0 );
-        float wd = exp( -float( x * x + y * y ) * 0.08 );
-        float wc = exp( -dc / max( 1e-5, uSigma ) );
-        float w = wd * wc;
+        w *= exp( -dc / max( 1e-5, uSigma ) );
+
         sum += c * w;
         wsum += w;
       }
@@ -903,6 +920,7 @@ export function setSunScreen(camera, worldGroup) {
 function disposeFxaa() {
   for (const t of [fxRT, brRT, blRT, rayRT, ...dnRT, ...taaRT, ...smaaRT]) t?.dispose();
   dnMat?.dispose(); dnMat = null; dnRT = [];
+  guideRT?.dispose(); guideRT = null;
   for (const mm of smaaMat) mm.dispose();
   for (const tx of smaaTex) tx.dispose();
   smaaMat = []; smaaTex = []; smaaRT = [];
@@ -999,9 +1017,12 @@ export function resizePost(renderer) {
     defines: { DENOISE_R: CONFIG.POST.denoiseR },
     vertexShader: VERT, fragmentShader: DENOISE_FRAG,
     uniforms: {
-      tSrc: { value: null }, uRes: { value: new THREE.Vector2(1, 1) },
+      tSrc: { value: null }, tGuide: { value: null },
+      uRes: { value: new THREE.Vector2(1, 1) },
       uSigma: { value: CONFIG.POST.denoiseSigma },
-      uRadius: { value: CONFIG.POST.denoiseRadius }
+      uRadius: { value: CONFIG.POST.denoiseRadius },
+      uGuideW: { value: CONFIG.POST.denoiseGuide },
+      uHasGuide: { value: 0 }
     }
   });
 
@@ -1038,6 +1059,38 @@ export function setBrightScale(k) { brightScale = k > 0 ? k : 1; }
 
 /** Включить очистку кадра перед выводом */
 export function setDenoise(on) { dnOn = !!on; }
+
+let guideRT = null;
+
+/** Снять направляющий кадр: обычная растровая отрисовка той же сцены с той же
+    камеры. Шума в ней нет, а кромки предметов стоят ровно там же — по ним
+    фильтр и отличает деталь от зерна.
+
+    Снимается один раз при включении очистки: сцена в фото-режиме неподвижна,
+    пересчитывать каждый кадр незачем. */
+export function renderGuide(renderer, scene, camera) {
+  const s = renderer.getDrawingBufferSize(new THREE.Vector2());
+  if (!guideRT || guideRT.width !== s.x || guideRT.height !== s.y) {
+    guideRT?.dispose();
+    guideRT = new THREE.WebGLRenderTarget(s.x, s.y, {
+      type: THREE.HalfFloatType, depthBuffer: true,
+      minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter
+    });
+  }
+  const prev = renderer.getRenderTarget();
+  renderer.setRenderTarget(guideRT);
+  renderer.render(scene, camera);
+  renderer.setRenderTarget(prev);
+  return guideRT.texture;
+}
+
+/** Направляющий кадр: обычная отрисовка той же сцены без шума. По нему
+    фильтр узнаёт, где кромки предметов, и перестаёт их размазывать. */
+export function setDenoiseGuide(tex2) {
+  if (!dnMat) return;
+  dnMat.uniforms.tGuide.value = tex2 || null;
+  dnMat.uniforms.uHasGuide.value = tex2 ? 1 : 0;
+}
 export const denoiseOn = () => dnOn;
 
 /** Обычный кадр: напрямую или через FXAA */
@@ -1129,6 +1182,8 @@ export function composite(renderer, srcTexture, exposure) {
       const from = k === 0 ? srcTexture : dnRT[(k - 1) % 2].texture;
       const to = dnRT[k % 2];
       dnMat.uniforms.tSrc.value = from;
+      /* направляющий кадр читается на каждом проходе */
+      dnMat.uniforms.uGuideW.value = CONFIG.POST.denoiseGuide;
       dnMat.uniforms.uRes.value.set(to.width, to.height);
       dnMat.uniforms.uRadius.value = CONFIG.POST.denoiseRadius * step;
       /* с ростом шага допуск по цвету сужается: иначе далёкие проходы

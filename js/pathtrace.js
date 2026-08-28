@@ -99,7 +99,7 @@ self.onmessage = e => {
     синхронную сборку он создаётся заново и настройки нужны те же. */
 function applyTracerSettings(t, mobile, onComposite) {
   const P = CONFIG.PATH;
-  t.renderScale = mobile ? P.mobileScale : P.scale;
+  t.renderScale = scaleWanted || (mobile ? P.mobileScale : P.scale);
   t.tiles.set(mobile ? P.mobileTiles : P.tiles, 1);
   t.bounces = mobile ? P.mobileBounces : P.bounces;
   t.minSamples = 1;
@@ -713,15 +713,18 @@ export function pathCameraMoved() {
     незачем — путь стоит на порядок дороже обычной отрисовки. */
 export function pathStep() {
   if (!pt.active || !pt.ready) return 0;
-  if (pt.paused) {
-    /* На паузе выборки не считаются, но кадр обязан пройти через цепочку
-       заново: очистка живёт там. Раньше здесь был просто выход, и
-       шумоподавитель не выполнялся ни разу — картинка не менялась. */
-    if (composeOut && tracer.target) composeOut(tracer.target.texture);
-    return Math.min(1, pt.samples / CONFIG.PATH.samples);
-  }
   const done = Math.min(1, pt.samples / CONFIG.PATH.samples);
-  if (done >= 1) return 1;
+
+  /* Накопленный кадр каждый раз проходит через цепочку заново — и на паузе,
+     и когда счёт уже завершён. Раньше в обоих случаях был просто выход, и
+     канвас в этом кадре не перерисовывался вовсе. Отсюда сразу две беды:
+     снятие паузы не возвращало исходную картинку, а снимок читал канвас с
+     уже неопределённым содержимым и выходил пустым. Один полноэкранный
+     проход — цена невелика. */
+  if (pt.paused || done >= 1) {
+    if (composeOut && tracer.target) composeOut(tracer.target.texture);
+    return done;
+  }
   try {
     tracer.renderSample();
     /* при нескольких полосах счётчик дробный: кадр набирается по частям */
@@ -761,6 +764,18 @@ function cleanup() {
    становится чище, но детали, которых ещё нет, не появятся. Зато снимок
    можно делать раньше, не дожидаясь полного схождения.
    ═══════════════════════════════════════════════════════════════════════════ */
+let scaleWanted = 0;
+
+/** Доля разрешения трассировки. Меняется и на ходу: накопление при этом
+    начинается заново — размер буфера другой. */
+export function setPathScale(v) {
+  scaleWanted = v > 0 ? v : 0;
+  if (tracer) {
+    tracer.renderScale = scaleWanted || tracer.renderScale;
+    pt.samples = 0;
+  }
+}
+
 export function setPaused(on) {
   pt.paused = !!on;
   if (tracer) tracer.renderToCanvas = true;

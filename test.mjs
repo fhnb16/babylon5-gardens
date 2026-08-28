@@ -2826,7 +2826,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   ok(/restoreHidden/.test(src), 'И возвращаются на место при выходе');
 
   /* накопление */
-  ok(/if \(done >= 1\) return 1;/.test(src),
+  ok(/if \(pt\.paused \|\| done >= 1\) \{/.test(src),
      'Набрав нужное, счёт прекращается — путь стоит на порядок дороже обычной отрисовки');
   ok(/export function pathCameraMoved/.test(src) && /tracer\.updateCamera\(\)/.test(src),
      'Сдвиг камеры сбрасывает накопление');
@@ -2892,8 +2892,12 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   /* пауза с очисткой */
   ok(html.includes('id="bPause"'), 'Кнопка паузы есть');
   ok(/export function setPaused/.test(src), 'Накопление можно остановить');
-  ok(/if \(pt\.paused\) \{/.test(src) && /composeOut\(tracer\.target\.texture\)/.test(src),
-     'На паузе выборки не считаются, но кадр проходит через цепочку заново — иначе очистке негде выполниться');
+  /* И на паузе, и по завершении кадр обязан пройти через цепочку заново:
+     иначе канвас в этом кадре не перерисовывается, снятие паузы не
+     возвращает картинку, а снимок читает канвас с неопределённым
+     содержимым и выходит пустым. */
+  ok(/if \(pt\.paused \|\| done >= 1\) \{[\s\S]{0,160}composeOut\(tracer\.target\.texture\)/.test(src),
+     'И на паузе, и по завершении кадр проходит через цепочку заново');
   ok(/const DENOISE_FRAG/.test(psrc), 'Шумоподавитель есть');
 
   /* Один проход с малым окном оставляет крупнозернистый узор: соседние
@@ -2911,8 +2915,17 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
     ok(cheap < naive / 4,
        `Охват ±${reach} пикселей за ${cheap} выборок вместо ${naive} одним проходом`);
   }
-  ok(/float wc = exp\( -dc \/ max/.test(psrc),
+  ok(/w \*= exp\( -dc \/ max/.test(psrc),
      'Фильтр двусторонний: вес по близости цвета, поэтому кромки переживают');
+  /* Фильтр, знающий только цвет, не отличает шум от детали и мылит. */
+  ok(/export function renderGuide/.test(psrc),
+     'Есть направляющий кадр: растровая отрисовка той же сцены без шума');
+  ok(/w \*= exp\( -dg \* uGuideW \)/.test(psrc),
+     'Соседи взвешиваются по направляющему кадру — там кромки предметов стоят ровно там же');
+  ok(/setDenoiseGuide\(on \? renderGuide\(renderer, scene, camera\) : null\)/.test(msrc),
+     'Снимается один раз при включении: сцена неподвижна');
+  ok(CONFIG.POST.denoiseGuide > 100,
+     `Строгость по направляющему кадру ${CONFIG.POST.denoiseGuide}: он и держит детали`);
   ok(/Очистка идёт первой, до тонмаппинга/.test(psrc),
      'Очистка до тонмаппинга: шум живёт в линейных значениях');
   ok(/export function setDenoise/.test(psrc), 'Очистку можно включить отдельно');
@@ -3131,6 +3144,39 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   const over = CONFIG.NIGHT.winEmis * CONFIG.PATH.emitBoost / (CONFIG.POST.threshold * k);
   ok(over > 1.5 && over < 8,
      `Окна превышают порог в ${over.toFixed(1)} раза — ореол есть, засветки нет`);
+}
+
+/* ══ 3h34. Разрешение, отскоки, рябь, рассеянный свет ══════════════════ */
+{
+  const src = readFileSync(new URL('./js/pathtrace.js', import.meta.url), 'utf8');
+  const msrc = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+  const html = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
+  const P = CONFIG.PATH;
+
+  /* доля разрешения — в настройках рядом со сглаживанием */
+  ok(Array.isArray(P.SCALES) && P.SCALES.length >= 3,
+     `Долей разрешения на выбор: ${P.SCALES.map(s => s.label).join(', ')}`);
+  ok(P.SCALES[0].v === 1, 'Первая — полное разрешение');
+  ok(P.SCALES.every((s, i) => i === 0 || s.v < P.SCALES[i - 1].v), 'Доли убывают');
+  ok(html.includes('id="sPtScale"'), 'Настройка есть в разметке');
+  ok(/export function setPathScale/.test(src), 'И меняется на ходу');
+  ok(/pt\.samples = 0;/.test(src.slice(src.indexOf('export function setPathScale'))),
+     'Смена доли сбрасывает накопление: размер буфера другой');
+
+  /* отскоки: каждый следующий даёт всё меньше, а стоит столько же */
+  ok(P.bounces <= 4, `Отскоков на настольном: ${P.bounces}`);
+  ok(P.mobileBounces < P.bounces, `На телефоне меньше: ${P.mobileBounces}`);
+
+  /* рябь не должна съедать отражение */
+  const tilt = P.normalBoost * CONFIG.NORMALS.water / CONFIG.NORMALS.hull;
+  ok(tilt < 1.5,
+     `Наклон ряби ${tilt.toFixed(2)}× против корпуса: при пятикратном отражение размазывалось`);
+
+  /* рассеянный свет плоский — направленный должен вести */
+  const env = CONFIG.DAY.hemiInt * P.envScale;
+  const sun = P.sunEmit * CONFIG.DAY.sunEmis;
+  ok(env / sun < 0.2,
+     `Днём рассеянного ${env.toFixed(2)} против направленного ${sun.toFixed(2)} — объём есть`);
 }
 
 /* ══ 3i. Звук реагирует на то, где находится камера ════════════════════ */

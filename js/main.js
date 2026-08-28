@@ -10,10 +10,10 @@ import { buildStructures, structMats, updateStructures,
 import { ctl, isMobile, initControls, updateControls, syncFromCamera, resetStick, stationUp } from './controls.js';
 import { audio, startAudio, updateAudio, setVolume, setEnabled, suspendAudio } from './audio.js';
 import { pt, startPath, pathStep, stopPath, pathLabel, pathCameraMoved,
-  setPaused } from './pathtrace.js';
+  setPaused, setPathScale } from './pathtrace.js';
 import { trace, startTrace, traceStep, stopTrace,
   setPost, setSunScreen, resizePost, renderFrame, composite, setDenoise, forcePost,
-  setBrightScale,
+  setBrightScale, setDenoiseGuide, renderGuide,
   setTraceDebug, DEBUG_NAMES, setAmbientShare, setHullRef } from './photo.js';
 
 const $ = id => document.getElementById(id);
@@ -623,6 +623,9 @@ function initUI() {
     const on = !pt.paused && !traceHeld;
     if (pt.active) setPaused(on);
     traceHeld = pt.active ? false : on;
+    /* Направляющий кадр снимаем один раз при включении: сцена неподвижна,
+       пересчитывать его каждый кадр незачем. */
+    setDenoiseGuide(on ? renderGuide(renderer, scene, camera) : null);
     setDenoise(on);
     bPause.classList.toggle('on', on);
   };
@@ -751,6 +754,28 @@ function initUI() {
      включая MSAA, поэтому канвас и создаётся без antialias. */
   const sAAon = $('sAAon'), sAAv = $('sAAv'), sAAcost = $('sAAcost');
   const sMsaa = $('sMsaa'), sFilter = $('sFilter'), sScale = $('sScale');
+
+  /* Доля разрешения трассировки. Считать в половину разрешения вчетверо
+     дешевле, а на снимке разница мала: шум при том же числе выборок падает
+     быстрее, потому что на пиксель приходится больше лучей. */
+  const sPt = $('sPtScale');
+  for (const it of CONFIG.PATH.SCALES) {
+    const op = document.createElement('option');
+    op.value = String(it.v); op.textContent = it.label.toUpperCase();
+    sPt.appendChild(op);
+  }
+  sPt.value = String(prefs.get('ptScale', 1));
+  const showPt = () => {
+    const it = CONFIG.PATH.SCALES.find(x => x.v === parseFloat(sPt.value));
+    $('sPtScaleV').textContent = it ? `${it.label} · ${(it.v * it.v * 100) | 0}% пикселей` : '';
+  };
+  sPt.onchange = () => {
+    prefs.set('ptScale', parseFloat(sPt.value));
+    setPathScale(parseFloat(sPt.value));
+    showPt();
+  };
+  setPathScale(parseFloat(sPt.value));
+  showPt();
   const fill = (el, list, key) => {
     for (const it of list) {
       const op = document.createElement('option');
