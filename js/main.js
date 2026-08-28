@@ -11,7 +11,7 @@ import { buildStructures, structMats, updateStructures,
 import { ctl, isMobile, initControls, updateControls, syncFromCamera, resetStick, stationUp } from './controls.js';
 import { audio, startAudio, updateAudio, setVolume, setEnabled, suspendAudio } from './audio.js';
 import { pt, startPath, pathStep, stopPath, pathLabel, pathCameraMoved,
-  setPaused, setPathScale } from './pathtrace.js';
+  setPaused, setPathScale, setNoiseTarget, samplesNeeded } from './pathtrace.js';
 import { trace, startTrace, traceStep, stopTrace,
   setPost, setSunScreen, resizePost, renderFrame, composite, setDenoise, forcePost,
   setBrightScale, setDenoiseGuide, renderGuide, setDenoiseMode, setSharpen,
@@ -762,6 +762,22 @@ function initUI() {
      включая MSAA, поэтому канвас и создаётся без antialias. */
   const sAAon = $('sAAon'), sAAv = $('sAAv'), sAAcost = $('sAAcost');
   const sMsaa = $('sMsaa'), sFilter = $('sFilter'), sScale = $('sScale');
+
+  /* Порог шума. Предела в выборках нет: их число выводится из порога,
+     потому что шум падает как единица на корень из выборок. */
+  const sNoise = $('sNoise');
+  for (const it of CONFIG.PATH.NOISE) {
+    const op = document.createElement('option');
+    op.value = String(it.v); op.textContent = it.label.toUpperCase();
+    sNoise.appendChild(op);
+  }
+  sNoise.value = String(prefs.get('noise', CONFIG.PATH.noise));
+  const showNoise = () => {
+    setNoiseTarget(parseFloat(sNoise.value));
+    $('sNoiseV').textContent = `${sNoise.value}% · ${samplesNeeded()} выборок`;
+  };
+  sNoise.onchange = () => { prefs.set('noise', parseFloat(sNoise.value)); showNoise(); };
+  showNoise();
 
   /* Способ очистки. «Лучше» зависит от сцены: направляющий буфер держит
      кромки, но на гладких поверхностях его резкость заметна; фильтр по цвету

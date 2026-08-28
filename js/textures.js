@@ -368,7 +368,6 @@ export function makeHullMaps(size, maskSize, rnd, ponds = []) {
 
   const albedo = tex(A.c, { wrap: true });
   const mask = tex(M.c, { srgb: false, wrap: true });
-  return { albedo, mask, canvas: A.c };
   /* ─── ПРУДЫ ───
      Низины корпуса заливаются водой. Канал тот же, что у рек, поэтому им
      достаётся весь водный шейдер даром: глубина, кайма, отражение. Течения
@@ -407,6 +406,8 @@ export function makeHullMaps(size, maskSize, rnd, ponds = []) {
     ellipse(m, M.c.width, 0.78, '#990000');
     ellipse(m, M.c.width, 0.5, '#ff0000');
   }
+
+  return { albedo, mask, canvas: A.c };
 
 
 }
@@ -677,11 +678,13 @@ export function makePanelTexture(rnd) {
     g.beginPath(); g.arc(rnd() * S, rnd() * S, 1.2, 0, TAU_2D); g.fill();
   }
 
-  /* редкая цветная маркировка: без неё поверхность безжизненно серая */
-  for (let i = 0; i < 26; i++) {
-    g.fillStyle = pick(rnd, ['rgba(226,178,62,.55)', 'rgba(198,62,52,.5)',
-      'rgba(72,120,190,.5)', 'rgba(226,232,240,.45)']);
-    g.fillRect(rnd() * S, rnd() * S, 8 + rnd() * 34, 2 + rnd() * 4);
+  /* Маркировка. Прежняя была цветной и яркой: красные, жёлтые и синие
+     полосы бросались в глаза сильнее самой обшивки. Оставляем разницу в
+     тоне, а не в цвете — так метка читается вблизи и не пестрит издали. */
+  for (let i = 0; i < 18; i++) {
+    g.fillStyle = pick(rnd, ['rgba(228,232,238,.30)', 'rgba(40,46,54,.34)',
+      'rgba(196,186,150,.22)']);
+    g.fillRect(rnd() * S, rnd() * S, 8 + rnd() * 26, 2 + rnd() * 3);
   }
   return { map: tex(c, { wrap: true }), canvas: c };
 }

@@ -713,7 +713,7 @@ export function pathCameraMoved() {
     незачем — путь стоит на порядок дороже обычной отрисовки. */
 export function pathStep() {
   if (!pt.active || !pt.ready) return 0;
-  const done = Math.min(1, pt.samples / CONFIG.PATH.samples);
+  const done = Math.min(1, pt.samples / samplesNeeded());
 
   /* Накопленный кадр каждый раз проходит через цепочку заново — и на паузе,
      и когда счёт уже завершён. Раньше в обоих случаях был просто выход, и
@@ -733,7 +733,7 @@ export function pathStep() {
     fail(e);
     return 1;
   }
-  return Math.min(1, pt.samples / CONFIG.PATH.samples);
+  return Math.min(1, pt.samples / samplesNeeded());
 }
 
 /** Вернуть сцену в исходное состояние. Отдельно от stopPath, потому что при
@@ -768,6 +768,24 @@ let scaleWanted = 0;
 
 /** Доля разрешения трассировки. Меняется и на ходу: накопление при этом
     начинается заново — размер буфера другой. */
+let noiseTarget = CONFIG.PATH.noise;
+
+/** Порог шума в процентах. Число выборок выводится из него: шум падает как
+    единица на корень из выборок, поэтому цель в 1% — это десять тысяч. */
+export function setNoiseTarget(pct) {
+  noiseTarget = pct > 0 ? pct : CONFIG.PATH.noise;
+}
+
+/** Сколько выборок нужно для текущего порога */
+export function samplesNeeded() {
+  return Math.ceil(1e4 / (noiseTarget * noiseTarget));
+}
+
+/** Текущий уровень шума в процентах */
+export function noiseNow() {
+  return pt.samples > 0 ? 100 / Math.sqrt(pt.samples) : 100;
+}
+
 export function setPathScale(v) {
   scaleWanted = v > 0 ? v : 0;
   if (tracer) {
@@ -801,11 +819,13 @@ export function pathLabel() {
       ? `дерево обхода · ${(pt.build * 100) | 0}%`
       : 'строится дерево обхода, это займёт время…';
   }
-  const done = Math.min(1, pt.samples / CONFIG.PATH.samples);
+  const done = Math.min(1, pt.samples / samplesNeeded());
   if (pt.paused) return `пауза · выборок ${pt.samples | 0} · картинка очищена`;
   const built = pt.buildMs
     ? ` · дерево ${(pt.buildMs / 1000).toFixed(1)} с${pt.threaded ? ' в потоке' : ''}` : '';
+  /* Показываем сам шум, а не долю от предела: по нему и решают, хватит ли. */
+  const n = noiseNow();
   return done >= 1
-    ? `готово · ${pt.samples | 0} выборок пути${built}`
-    : `путь · ${(done * 100) | 0}% · выборок ${pt.samples | 0}${built}`;
+    ? `готово · шум ${n.toFixed(1)}% · ${pt.samples | 0} выборок${built}`
+    : `путь · шум ${n.toFixed(1)}% из ${noiseTarget}% · выборок ${pt.samples | 0}${built}`;
 }

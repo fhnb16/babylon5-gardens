@@ -1181,7 +1181,7 @@ export function resizePost(renderer) {
 
 let dnMat = null, smartMat = null, emaMat = null, sharpMat = null;
 let sharpOn = 0;
-let dnRT = [], dnOn = false, dnMode = 'cross', emaHas = false;
+let dnRT = [], dnOn = false, dnMode = 'cross', emaHas = false, emaIdx = 0;
 let brightScale = 1;
 
 /** Поднять порог яркой выборки. В трассировке пути эмиссия усилена в девять
@@ -1191,10 +1191,10 @@ let brightScale = 1;
 export function setBrightScale(k) { brightScale = k > 0 ? k : 1; }
 
 /** Включить очистку кадра перед выводом */
-export function setDenoise(on) { dnOn = !!on; emaHas = false; }
+export function setDenoise(on) { dnOn = !!on; emaHas = false; emaIdx = 0; }
 
 /** Способ очистки: у каждого своя цена и своя слабость */
-export function setDenoiseMode(mode) { dnMode = mode || 'cross'; emaHas = false; }
+export function setDenoiseMode(mode) { dnMode = mode || 'cross'; emaHas = false; emaIdx = 0; }
 
 /** Сила резкости при растяжении. Ноль — растягивать как есть. */
 export function setSharpen(k) { sharpOn = k > 0 ? k : 0; }
@@ -1340,17 +1340,18 @@ export function composite(renderer, srcTexture, exposure) {
     pass(smartMat, dnRT[0]);
     src = dnRT[0].texture;
   } else if (dnOn && dnMode === 'temporal' && emaMat && dnRT.length) {
-    /* скользящее среднее: пишем в один буфер, читая другой как историю */
+    /* Скользящее среднее с ПЕРЕСТАНОВКОЙ буферов. Прежняя версия писала
+       результат обратно в тот же буфер, из которого читала историю: сэмплер
+       оставался привязан к цели прохода, и картинка уходила сперва в белое,
+       потом в чёрное. Меняем буферы местами — копирования не нужно вовсе. */
+    const dst = dnRT[emaIdx], hist = dnRT[1 - emaIdx];
     emaMat.uniforms.tSrc.value = srcTexture;
-    emaMat.uniforms.tPrev.value = dnRT[1].texture;
+    emaMat.uniforms.tPrev.value = emaHas ? hist.texture : null;
     emaMat.uniforms.uHasPrev.value = emaHas ? 1 : 0;
-    pass(emaMat, dnRT[0]);
-    /* копируем результат в историю следующим проходом */
-    emaMat.uniforms.tSrc.value = dnRT[0].texture;
-    emaMat.uniforms.uHasPrev.value = 0;
-    pass(emaMat, dnRT[1]);
+    pass(emaMat, dst);
+    src = dst.texture;
+    emaIdx = 1 - emaIdx;
     emaHas = true;
-    src = dnRT[0].texture;
   } else if (dnOn && dnMat && dnRT.length) {
     /* Несколько проходов с растущим шагом — «à-trous». Один проход с малым
        окном оставляет крупнозернистый узор: соседние пиксели он усредняет, а

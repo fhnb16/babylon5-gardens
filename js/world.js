@@ -381,9 +381,15 @@ function sectorSphere(list, R) {
     билбордом не видно. */
 function crossQuadGeo() {
   const parts = [];
-  for (let k = 0; k < 2; k++) {
+  const N = CONFIG.TREE_LOD.blades;
+  /* Три плоскости под 60°, а не две под 90°: у двух с некоторых углов видно
+     ровно ребро, и дерево истончается в нитку. С тремя силуэт остаётся
+     плотным с любой стороны, а стоит это один лишний треугольник на пару. */
+  for (let k = 0; k < N; k++) {
     const g = new THREE.PlaneGeometry(2, 2);
-    g.rotateY(k * Math.PI / 2);
+    /* центр кроны на уровне середины плоскости, ствол уходит вниз */
+    g.translate(0, CONFIG.TREE_LOD.lift, 0);
+    g.rotateY((k / N) * Math.PI);
     parts.push(g);          // индексированная: mergeGeos другой не принимает
   }
   const merged = mergeGeos(parts);
@@ -687,6 +693,23 @@ export function buildWorld(group, renderer, quality) {
     return false;
   };
 
+  /* Улица — полоса шириной CITY.street по краю каждой ячейки сетки. Дерево
+     считается стоящим на ней, если его крона задевает полосу. */
+  const CT = CONFIG.CITY;
+  const cellT = TAU / CT.cols, cellZ = L / CT.rows;
+  const onStreet = (t, z, r) => {
+    /* Полуширина берётся ПОЛНОЙ шириной улицы, а не половиной: полоса идёт
+       по обе стороны от границы ячейки, и от границы до края проезжей части
+       ровно street, а не street/2. Плюс радиус кроны — задевать тоже нельзя. */
+    const halfT = CT.street / R + r / R;
+    const halfZ = CT.street + r;
+    const fu = (((t % cellT) + cellT) % cellT) / cellT;
+    const fv = ((((z + HL) % cellZ) + cellZ) % cellZ) / cellZ;
+    const du = Math.min(fu, 1 - fu) * cellT;
+    const dv = Math.min(fv, 1 - fv) * cellZ;
+    return du < halfT || dv < halfZ;
+  };
+
   const sample = (w, n, rad = 0, claim = false, bad = null) => {
     const out = [];
     for (let guard = 0; out.length < n && guard < n * 80; guard++) {
@@ -697,6 +720,10 @@ export function buildWorld(group, renderer, quality) {
       if (p <= 0 || rnd() > p) continue;
       if (!free(t, z) || !fits(t, z, r)) continue;
       if (bad && spanHits(t, r, bad)) continue;
+      /* В городе не встаём на проезжую часть: улица — полоса по краю
+         квартала, и дерево посреди неё выглядит ошибкой, а не задумкой.
+         Раньше туда попадало пять сотен крон из шести. */
+      if (zoneAt(t / D2R) === 'city' && onStreet(t, z, r)) continue;
       out.push([t, z, r]);
       if (claim) taken.push([t, z, r]);
     }
@@ -955,8 +982,11 @@ export function buildWorld(group, renderer, quality) {
 
      Все три меша строятся сразу и полными, а раскладку по уровням делает
      updateTreeLod: он переписывает только счётчики. */
+  /* Прозрачность берём из АЛЬФЫ карты, а не из alphaMap: тот читает зелёный
+     канал, и у листвы (0.4…0.75) со стволом (0.32) порог 0.42 срезал почти
+     всё — дерево пропадало целиком. */
   const crownFar = new THREE.MeshStandardMaterial({
-    map: leafMap, alphaMap: leafMap, alphaTest: 0.42,
+    map: leafMap, alphaTest: 0.5,
     roughness: 0.95, side: THREE.DoubleSide, vertexColors: true
   });
   const crownMid = crownMat.clone();
@@ -1167,8 +1197,11 @@ export function buildWorld(group, renderer, quality) {
       };
       addLamp(-T2.w * 0.32, T2.len * 0.5, [1, 0.96, 0.85]);
       addLamp(T2.w * 0.32, T2.len * 0.5, [1, 0.96, 0.85]);
-      addLamp(-T2.w * 0.32, -T2.len * 0.5, [1, 0.16, 0.1]);
-      addLamp(T2.w * 0.32, -T2.len * 0.5, [1, 0.16, 0.1]);
+      /* Габариты гасим В САМОМ ЦВЕТЕ. Яркость материала 3.2 умножает все
+         каналы, и (1, 0.16, 0.1) превращалось в (3.2, 0.51, 0.32) — после
+         ограничения единицей это оранжево-белый, а не красный. */
+      addLamp(-T2.w * 0.32, -T2.len * 0.5, [0.38, 0.03, 0.015]);
+      addLamp(T2.w * 0.32, -T2.len * 0.5, [0.38, 0.03, 0.015]);
       const lampGeo = mergeGeos(lampParts);
       lampGeo.setAttribute('color', new THREE.Float32BufferAttribute(lampCol, 3));
       worldMats.trafficLamp = new THREE.MeshBasicMaterial({

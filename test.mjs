@@ -1735,9 +1735,17 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
 
   /* --- трафик --- */
   ok(/export function updateTraffic/.test(wsrc), 'Огни машин двигаются');
-  ok(/addLamp\(-T2\.w \* 0\.32, T2\.len \* 0\.5, \[1, 0\.96, 0\.85\]\)/.test(wsrc)
-     && /addLamp\(-T2\.w \* 0\.32, -T2\.len \* 0\.5, \[1, 0\.16, 0\.1\]\)/.test(wsrc),
-     'Фары спереди белые, габариты сзади красные');
+  /* Габариты гасим В САМОМ ЦВЕТЕ: яркость материала умножает все каналы, и
+     (1, 0.16, 0.1) превращалось в (3.2, 0.51, 0.32) — после ограничения
+     единицей это оранжево-белый, а не красный. */
+  const front = wsrc.match(/addLamp\(-T2\.w \* 0\.32, T2\.len \* 0\.5, \[([\d., ]+)\]/);
+  const rear = wsrc.match(/addLamp\(-T2\.w \* 0\.32, -T2\.len \* 0\.5, \[([\d., ]+)\]/);
+  ok(!!front && !!rear, 'Фары спереди и габариты сзади заданы');
+  const fc = front[1].split(',').map(Number), rc = rear[1].split(',').map(Number);
+  const lampK = CONFIG.TRAFFIC.lamp;
+  ok(fc.every(v => v * lampK >= 1), `Спереди белые: ${fc.map(v => (v * lampK).toFixed(2))}`);
+  ok(rc[0] * lampK >= 1 && rc[1] * lampK < 0.35 && rc[2] * lampK < 0.35,
+     `Сзади красные и после умножения на ${lampK}: ${rc.map(v => Math.min(1, v * lampK).toFixed(2))}`);
   ok(/traffic\.dir\[k\] < 0\) _tq\.multiply/.test(wsrc), 'Встречные машины развёрнуты');
   ok(CONFIG.TRAFFIC.lamp > 1,
      `Фары ярче единицы (${CONFIG.TRAFFIC.lamp}) — иначе не попадут в яркую выборку свечения`);
@@ -2874,7 +2882,15 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
      `На телефоне доля разрешения ${P.mobileScale} и ${P.mobileBounces} переотражения против ${P.scale} и ${P.bounces}`);
   ok(P.mobileTiles > P.tiles,
      `Полос больше (${P.mobileTiles}): короче каждый вызов, браузер не считает вкладку зависшей`);
-  ok(P.samples >= 100, `Выборок пути до готовности: ${P.samples}`);
+  /* Предела в выборках больше нет: их число выводится из порога шума. */
+  ok(Array.isArray(P.NOISE) && P.NOISE.length >= 3,
+     `Порогов шума: ${P.NOISE.map(x => x.v + '%').join(', ')}`);
+  ok(P.NOISE.every((x, i) => i === 0 || x.v < P.NOISE[i - 1].v), 'Пороги убывают');
+  for (const x of P.NOISE) {
+    const need = Math.ceil(1e4 / (x.v * x.v));
+    ok(need > 0 && Math.abs(100 / Math.sqrt(need) - x.v) < 0.1,
+       `Порог ${x.v}% требует ${need} выборок`);
+  }
   ok(html.includes('id="bPath"'), 'Кнопка пути есть в фото-режиме');
 }
 
@@ -3429,6 +3445,61 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   }
   ok(missing.length === 0,
      `Всё используемое импортировано${missing.length ? ': ' + missing.join(', ') : ''}`);
+}
+
+/* ══ 3h39. Улицы, озёра, дальнее дерево, накопление ════════════════════ */
+{
+  const wsrc = readFileSync(new URL('./js/world.js', import.meta.url), 'utf8');
+  const tsrc = readFileSync(new URL('./js/textures.js', import.meta.url), 'utf8');
+  const psrc = readFileSync(new URL('./js/photo.js', import.meta.url), 'utf8');
+
+  /* Ничего не растёт на проезжей части: раньше туда попадало пять сотен крон
+     из шести в городских секторах. */
+  const g5 = new THREE.Group();
+  buildWorld(g5, fakeRenderer, 'HIGH');
+  const C = CONFIG.CITY;
+  const m5 = new THREE.Matrix4(), p5 = new THREE.Vector3();
+  const s5 = new THREE.Vector3(), q5 = new THREE.Quaternion();
+  let inCity = 0, onRoad = 0;
+  for (const o of g5.children) {
+    if (!o.isInstancedMesh || !o.material?.flatShading || !o.instanceColor) continue;
+    for (let k = 0; k < o.count; k++) {
+      o.getMatrixAt(k, m5); m5.decompose(p5, q5, s5);
+      const deg = ((Math.atan2(p5.x, p5.y) * 180 / Math.PI) % 360 + 360) % 360;
+      if (zoneAt(deg) !== 'city') continue;
+      inCity++;
+      const t5 = ((Math.atan2(p5.x, p5.y) / TAU) % 1 + 1) % 1;
+      const fu = t5 * C.cols - Math.floor(t5 * C.cols);
+      const fv = (((p5.z + CONFIG.L / 2) / (CONFIG.L / C.rows)) % 1 + 1) % 1;
+      const road = C.street / (TAU * CONFIG.R / C.cols);
+      if (fu < road || fu > 1 - road || fv < road || fv > 1 - road) onRoad++;
+    }
+  }
+  ok(onRoad === 0, `На проезжей части ничего не растёт (${onRoad} из ${inCity} в городе)`);
+  ok(/if \(zoneAt\(t \/ D2R\) === 'city' && onStreet\(t, z, r\)\) continue;/.test(wsrc),
+     'Отсев идёт при расстановке, а не потом');
+  ok(/const halfT = CT\.street \/ R \+ r \/ R;/.test(wsrc),
+     'Полоса берётся полной шириной улицы: от границы ячейки до края проезжей части ровно street');
+
+  /* Пруды рисуются ДО возврата из функции: блок стоял после него и не
+     выполнялся ни разу — озёр не было вовсе. */
+  const hullFn = tsrc.slice(tsrc.indexOf('export function makeHullMaps'));
+  const iPond = hullFn.indexOf('─── ПРУДЫ ───');
+  const iRet = hullFn.indexOf('return { albedo, mask');
+  ok(iPond > 0 && iPond < iRet, 'Пруды рисуются до возврата из функции');
+
+  /* дальнее дерево — три плоскости, а не две */
+  ok(CONFIG.TREE_LOD.blades >= 3,
+     `Плоскостей в дальнем дереве: ${CONFIG.TREE_LOD.blades} под ${(180 / CONFIG.TREE_LOD.blades) | 0}°`);
+  ok(!/alphaMap: leafMap/.test(wsrc),
+     'Прозрачность из альфы карты, а не из alphaMap: тот читает зелёный канал и срезал крону целиком');
+
+  /* временное накопление не должно читать буфер, в который пишет */
+  ok(/const dst = dnRT\[emaIdx\], hist = dnRT\[1 - emaIdx\];/.test(psrc),
+     'Буферы накопления переставляются, а не копируются');
+  ok(/emaIdx = 1 - emaIdx;/.test(psrc), 'Перестановка после каждого кадра');
+  ok(!/pass\(emaMat, dnRT\[1\]\)/.test(psrc),
+     'Копирующего прохода нет: он читал и писал один буфер, картинка уходила в белое, потом в чёрное');
 }
 
 /* ══ 3i. Звук реагирует на то, где находится камера ════════════════════ */
