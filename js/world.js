@@ -36,6 +36,8 @@ export const hullU = {
   uSparZ: { value: [] }, uSparZW: { value: 30.0 },
   uSparShade: { value: CONFIG.DAY.sparShade },
   uFlow: { value: 0 },
+  uFoam: { value: CONFIG.WATER.foam },
+  uRipple: { value: CONFIG.WATER.ripple },
   uMirror: { value: 0 },
   uSunR: { value: CONFIG.SUN.r }, uHullR: { value: CONFIG.R },
   uHullL: { value: CONFIG.L }, uSunGlow: { value: 3.2 },
@@ -73,7 +75,7 @@ function patchHullMaterial(mat, nArm, nSpar) {
         uniform sampler2D uMask;
         uniform sampler2D uDetail;
         uniform float uTime, uDetailRep, uArmW, uSparZW, uSparShade, uCityGlow, uFlow;
-        uniform float uMirror, uSunR, uHullR, uHullL, uSunGlow;
+        uniform float uMirror, uSunR, uHullR, uHullL, uSunGlow, uFoam, uRipple;
         uniform vec3 uCamObj;   // камера в системе станции
         uniform float uArm[${nArm}];
         uniform float uSparZ[${nSpar}];
@@ -98,10 +100,13 @@ function patchHullMaterial(mat, nArm, nSpar) {
         // Пена у кромки: узкая полоса на самой отмели, с бегущим по течению
         // рисунком. Без неё вода стыкуется с берегом линией, как аппликация.
         if ( wDeep > 0.001 ) {
-          float edge = smoothstep( 0.34, 0.02, wDeep );
+          /* Полоса уже и бледнее прежней: пена — намёк на стык воды с
+             берегом, а не белая обводка. Раньше она бросалась в глаза
+             сильнее самой воды. */
+          float edge = smoothstep( 0.20, 0.02, wDeep );
           vec2 fp = vec2( vMapUv.x * 314.0, vMapUv.y * 300.0 - uTime * uFlow );
           float f = sin( fp.x * 14.0 + sin( fp.y * 3.1 ) * 2.0 ) * 0.5 + 0.5;
-          diffuseColor.rgb += vec3( 0.55, 0.62, 0.66 ) * edge * ( 0.35 + 0.65 * f ) * 0.5;
+          diffuseColor.rgb += vec3( 0.55, 0.62, 0.66 ) * edge * ( 0.35 + 0.65 * f ) * uFoam;
         }
 
         // тень фермы: угловой створ × локальность по z
@@ -157,7 +162,9 @@ function patchHullMaterial(mat, nArm, nSpar) {
           // и читается как течение.
           rip += vec2( 0.22, 0.55 ) * cos( dot( P, vec2( 1.7, 0.9 ) ) + t * 0.8 );
 
-          float amp = 0.055 * hullMask.r * ( 0.45 + 0.55 * near );
+          /* Волны видны, но отражение сквозь них читается: при прежней
+             величине силуэты рассыпались и разобрать было нечего. */
+          float amp = uRipple * hullMask.r * ( 0.45 + 0.55 * near );
           /* Рябь ставится поверх ГЕОМЕТРИЧЕСКОЙ нормали, а не поверх карты:
              иначе рельеф травы и швов плит просвечивал бы сквозь воду. */
           vec3 wn = normalize( nonPerturbedNormal + ( vTanU * rip.x + vTanV * rip.y ) * amp );
@@ -511,10 +518,29 @@ export function displaceHills(geo, R, L, rnd) {
     /* с запасом от торцов: продавленный край не должен упереться в диск */
     const z = (rnd() - 0.5) * (L - rad * 4 - H.endGap * 2);
     if (!clearOf(t, z, rad)) continue;
+    const dip = rnd() < H.pondChance;
+
+    /* Низины не должны наезжать друг на друга: слившиеся озёра читаются
+       кляксой, а не двумя водоёмами. Холмы наложением, наоборот, дают
+       гряду — им это позволено. */
+    if (dip) {
+      let clash = false;
+      for (const o of hills) {
+        if (!o.dip) continue;
+        const dt = ((t - o.t + Math.PI) % TAU + TAU) % TAU - Math.PI;
+        if (Math.hypot(dt * R, z - o.z) < (rad + o.r) * H.pondGap) { clash = true; break; }
+      }
+      if (clash) continue;
+    }
+
     hills.push({
       t, z, r: rad,
       h: rad * (H.rise[0] + rnd() * (H.rise[1] - H.rise[0])),
-      dip: rnd() < H.pondChance
+      dip,
+      /* Форма озера: вытянутость и поворот. Ровный круг выглядит вырезанным
+         циркулем, а не берегом. */
+      ax: H.pondAspect[0] + rnd() * (H.pondAspect[1] - H.pondAspect[0]),
+      rot: rnd() * TAU
     });
     i++;
   }
@@ -533,7 +559,14 @@ export function displaceHills(geo, R, L, rnd) {
     for (const hl of hills) {
       /* угловое расстояние по кратчайшей дуге, в юнитах поверхности */
       let dt = ((t - hl.t + Math.PI) % TAU + TAU) % TAU - Math.PI;
-      const dx = dt * R, dz = z - hl.z;
+      let dx = dt * R, dz = z - hl.z;
+      /* Овал: поворачиваем в его систему и сжимаем одну ось. Круг выглядит
+         вырезанным циркулем, а не берегом. */
+      if (hl.ax && hl.ax !== 1) {
+        const cs = Math.cos(hl.rot), sn = Math.sin(hl.rot);
+        const px = dx * cs + dz * sn, py = -dx * sn + dz * cs;
+        dx = px / hl.ax; dz = py * hl.ax;
+      }
       const d = Math.hypot(dx, dz);
       if (d >= hl.r) continue;
       /* гладкий колокол: у края производная равна нулю, стыка не видно */
@@ -595,7 +628,8 @@ export function buildWorld(group, renderer, quality) {
      Без него луч перебирал бы пятьдесят тысяч треугольников на каждый шаг. */
   hullGeo.computeBoundsTree({ targetLeafSize: 8 });
   /* низины корпуса заливаются водой — тем же каналом маски, что и реки */
-  const ponds = hullHills.filter(h => h.dip).map(h => ({ t: h.t, z: h.z, r: h.r * 0.62 }));
+  const ponds = hullHills.filter(h => h.dip)
+    .map(h => ({ t: h.t, z: h.z, r: h.r * 0.62, ax: h.ax || 1, rot: h.rot || 0 }));
   const { albedo, mask, canvas: hullCanvas } = makeHullMaps(Q.hullTex, Q.mask,
     mulberry32(CONFIG.SEED + 7), ponds);
 
@@ -1212,8 +1246,12 @@ export function buildWorld(group, renderer, quality) {
       /* Габариты гасим В САМОМ ЦВЕТЕ. Яркость материала 3.2 умножает все
          каналы, и (1, 0.16, 0.1) превращалось в (3.2, 0.51, 0.32) — после
          ограничения единицей это оранжево-белый, а не красный. */
-      addLamp(-T2.w * 0.32, -T2.len * 0.5, [0.38, 0.03, 0.015]);
-      addLamp(T2.w * 0.32, -T2.len * 0.5, [0.38, 0.03, 0.015]);
+      /* Значения ЛИНЕЙНЫЕ, а на экран идёт sRGB: 0.096 линейно превращается в
+         0.34 на экране, и красный уходил в оранжево-белый. Чтобы после
+         перевода зелень и синь остались около десятой, в линейном они должны
+         быть около сотой. */
+      addLamp(-T2.w * 0.32, -T2.len * 0.5, [0.4, 0.004, 0.0015]);
+      addLamp(T2.w * 0.32, -T2.len * 0.5, [0.4, 0.004, 0.0015]);
       const lampGeo = mergeGeos(lampParts);
       lampGeo.setAttribute('color', new THREE.Float32BufferAttribute(lampCol, 3));
       worldMats.trafficLamp = new THREE.MeshBasicMaterial({

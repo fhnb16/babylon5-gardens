@@ -61,7 +61,9 @@ function boot() {
   });
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.22;
+  /* Экспозиция ниже прежней: день выходил засвеченным, светлые места
+     упирались в единицу и теряли фактуру. */
+  renderer.toneMappingExposure = 1.0;
   renderer.shadowMap.enabled = false;   // тени — контактные пятна и аналитика в шейдере
   /* updateStyle = false обязателен: иначе three прописывает канвасу инлайновые
      style.width/height в пикселях стартового окна, и они навсегда перебивают

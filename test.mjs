@@ -9,7 +9,7 @@ import { D2R, TAU, zoneAt, mulberry32, clamp as clampNum, tpVec, aimAt, natural,
   cityBlock, cityCenter, cellInfo, cellUsable, pickFloors, turnToward, clampPitch,
   surfacePos, mergeGeos, rod } from './js/util.js';
 import { buildWorld, worldMats, hullU, uvSelfTest, patchAllRoughness,
-  updateTreeLod } from './js/world.js';
+  updateTreeLod, displaceHills } from './js/world.js';
 import { buildStructures, structMats, updateStructures,
   liftSeat, liftCount2, setLiftInside } from './js/structures.js';
 import { fieldAt, waterLevel, windLevel, humLevel, birdLevel } from './js/audio.js';
@@ -1736,8 +1736,12 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   const fc = front[1].split(',').map(Number), rc = rear[1].split(',').map(Number);
   const lampK = CONFIG.TRAFFIC.lamp;
   ok(fc.every(v => v * lampK >= 1), `Спереди белые: ${fc.map(v => (v * lampK).toFixed(2))}`);
-  ok(rc[0] * lampK >= 1 && rc[1] * lampK < 0.35 && rc[2] * lampK < 0.35,
-     `Сзади красные и после умножения на ${lampK}: ${rc.map(v => Math.min(1, v * lampK).toFixed(2))}`);
+  /* Проверяем цвет НА ЭКРАНЕ, а не линейный: 0.096 линейно = 0.34 в sRGB,
+     и красный уходил в оранжево-белый. */
+  const toSrgb = v => v <= 0.0031308 ? v * 12.92 : 1.055 * Math.pow(v, 1 / 2.4) - 0.055;
+  const rs = rc.map(v => toSrgb(Math.min(1, v * lampK)));
+  ok(rs[0] > 0.9 && rs[1] < 0.2 && rs[2] < 0.2,
+     `Сзади красные и на экране: ${rs.map(v => v.toFixed(2)).join(', ')}`);
   ok(/traffic\.dir\[k\] < 0\) _tq\.multiply/.test(wsrc), 'Встречные машины развёрнуты');
   ok(CONFIG.TRAFFIC.lamp > 1,
      `Фары ярче единицы (${CONFIG.TRAFFIC.lamp}) — иначе не попадут в яркую выборку свечения`);
@@ -1760,7 +1764,12 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   /* --- вода --- */
   ok(/1\.0 - exp\( -wDeep \* 3\.2 \)/.test(wsrc),
      'Поглощение по глубине нелинейное — на отмели дно просвечивает, на стрежне нет');
-  ok(/smoothstep\( 0\.34, 0\.02, wDeep \)/.test(wsrc), 'Пена держится узкой полосой у кромки');
+  ok(/smoothstep\( 0\.20, 0\.02, wDeep \)/.test(wsrc),
+     'Пена держится узкой полосой у кромки — уже прежней в 1.7 раза');
+  ok(/\* uFoam;/.test(wsrc) && CONFIG.WATER.foam < 0.3,
+     `Сила пены ${CONFIG.WATER.foam}: намёк на стык с берегом, а не белая обводка`);
+  ok(/float amp = uRipple \* hullMask\.r/.test(wsrc) && CONFIG.WATER.ripple < 0.03,
+     `Волны ${CONFIG.WATER.ripple}: при 0.055 отражение сквозь них рассыпалось`);
   ok(/uTime \* uFlow/.test(wsrc), 'Рисунок пены сносит по течению');
 
   /* --- настройки --- */
@@ -3529,6 +3538,51 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   ok(/strategy: SAH/.test(ptsrc),
      'Дерево трассировщика строится по площади поверхности: строится дольше, обходится быстрее');
   ok(/import \{ MeshBVH, SAH \}/.test(ptsrc), 'Стратегия берётся из библиотеки');
+}
+
+/* ══ 3h41. Форма озёр, спицы, дневной свет ═════════════════════════════ */
+{
+  const wsrc = readFileSync(new URL('./js/world.js', import.meta.url), 'utf8');
+  const ssrc = readFileSync(new URL('./js/structures.js', import.meta.url), 'utf8');
+  const tsrc = readFileSync(new URL('./js/textures.js', import.meta.url), 'utf8');
+
+  /* Озёра не наезжают друг на друга и не круглые */
+  const g7 = new THREE.CylinderGeometry(CONFIG.R, CONFIG.R, CONFIG.L,
+    CONFIG.HULL_SEG, 96, true);
+  const hills7 = displaceHills(g7, CONFIG.R, CONFIG.L, mulberry32(CONFIG.SEED + 404));
+  const dips = hills7.filter(h => h.dip);
+  ok(dips.length > 5, `Озёр: ${dips.length}`);
+  let clash = 0;
+  for (let i = 0; i < dips.length; i++) {
+    for (let j = i + 1; j < dips.length; j++) {
+      const dt = ((dips[i].t - dips[j].t + Math.PI) % TAU + TAU) % TAU - Math.PI;
+      if (Math.hypot(dt * CONFIG.R, dips[i].z - dips[j].z)
+          < (dips[i].r + dips[j].r) * CONFIG.HILL.pondGap * 0.7) clash++;
+    }
+  }
+  ok(clash === 0, `Озёра не наезжают друг на друга (наложений ${clash})`);
+  ok(dips.every(d => d.ax > 0), 'У каждого своя вытянутость');
+  const round = dips.filter(d => Math.abs(d.ax - 1) < 0.05).length;
+  ok(round <= dips.length * 0.3,
+     `Круглых из ${dips.length} только ${round}: ровный круг выглядит вырезанным циркулем`);
+  ok(/ctx\.rotate\(p\.rot\)/.test(tsrc),
+     'Та же форма в текстуре: вода легла бы кругом поверх овальной низины');
+
+  /* Спицы достают до стенки */
+  const R7 = CONFIG.R, hubR = 4.6, bite = CONFIG.ENDCAP.spokeBite;
+  ok(/const spokeLen = R \+ bite - hubR;/.test(ssrc),
+     'Длина спицы считается от ступицы до стенки, а не подбирается числом');
+  ok(hubR + (R7 + bite - hubR) > R7,
+     `Спица заходит в стенку на ${(hubR + (R7 + bite - hubR) - R7).toFixed(1)} юнита — щели нет`);
+
+  /* Дневной свет: пересвет даёт не сумма, а рассеянная составляющая */
+  const D = CONFIG.DAY;
+  const ratio = D.hemiInt / (D.pointInt * CONFIG.LIGHT_Z.length);
+  ok(ratio < 0.22,
+     `Днём рассеянного к направленному ${ratio.toFixed(2)}: полусфера светит ровно и смывает форму`);
+  const msrc = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+  const exp = parseFloat((msrc.match(/toneMappingExposure = ([\d.]+)/) || [])[1]);
+  ok(exp <= 1.05, `Экспозиция ${exp}: светлые места упирались в единицу и теряли фактуру`);
 }
 
 /* ══ 3i. Звук реагирует на то, где находится камера ════════════════════ */

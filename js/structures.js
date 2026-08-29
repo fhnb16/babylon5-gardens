@@ -430,11 +430,16 @@ function buildEndCaps(group, renderer, low, normals) {
   const hub = new THREE.CylinderGeometry(4.6, 4.6, 18, 18, 1, false);
   hub.rotateX(Math.PI / 2);
   hubParts.push(hub);
+  /* Спица идёт от ступицы ДО СТЕНКИ и заходит в неё: прежняя кончалась в
+     трёх юнитах от корпуса и висела в воздухе. Длина считается от радиуса
+     ступицы до радиуса цилиндра с заходом, а не подбирается числом. */
+  const hubR = 4.6, bite = CONFIG.ENDCAP.spokeBite;
+  const spokeLen = R + bite - hubR;
   for (let k = 0; k < 6; k++) {
     const a = (k / 6) * TAU + 0.26;
-    const spoke = new THREE.BoxGeometry(1.7, 1.2, R - 6);
+    const spoke = new THREE.BoxGeometry(1.7, 1.2, spokeLen);
     spoke.rotateX(Math.PI / 2);
-    spoke.translate(0, (R + 4) / 2 - 2, 0);
+    spoke.translate(0, hubR + spokeLen / 2, 0);
     spoke.rotateZ(-a);
     hubParts.push(spoke);
   }

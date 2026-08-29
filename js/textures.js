@@ -381,15 +381,19 @@ export function makeHullMaps(size, maskSize, rnd, ponds = []) {
     const v = p.z / CONFIG.L + 0.5;
     /* радиус в пикселях считается отдельно по осям: по дуге и по длине
        масштабы разные */
+    /* Форма та же, что продавила корпус: вытянутость и поворот берутся из
+       самого озера, иначе вода легла бы кругом поверх овальной низины. */
     const ellipse = (ctx, size, rr, fill) => {
-      const rxp = p.r * rr / (TAU_2D * CONFIG.R) * size;
-      const ryp = p.r * rr / CONFIG.L * size;
+      const rxp = p.r * rr * p.ax / (TAU_2D * CONFIG.R) * size;
+      const ryp = p.r * rr / p.ax / CONFIG.L * size;
+      const big = Math.max(rxp, ryp);
       ctx.save();
       ctx.translate(u * size, v * size);
-      ctx.scale(rxp / Math.max(rxp, ryp), ryp / Math.max(rxp, ryp));
+      ctx.rotate(p.rot);
+      ctx.scale(rxp / big, ryp / big);
       ctx.fillStyle = fill;
       ctx.beginPath();
-      ctx.arc(0, 0, Math.max(rxp, ryp), 0, TAU_2D);
+      ctx.arc(0, 0, big, 0, TAU_2D);
       ctx.fill();
       ctx.restore();
     };
