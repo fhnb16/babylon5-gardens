@@ -449,12 +449,16 @@ function buildEndCaps(group, renderer, low, normals) {
   });
 
   /* по два инстанса на каждую геометрию: у −z воронка развёрнута */
+  /* Воронка обязана уходить ВНУТРЬ станции. После поворота её глубина лежит
+     по −z, поэтому у торца при +HL масштаб должен быть +1, а не −1: с −1
+     ступица оказывалась на +166 — снаружи цилиндра, — и труба с ней не
+     сходилась, а спицы висели в пустоте посреди выгнутого наружу конуса. */
   const twin = (geo, mat, flipZ) => {
     const im = new THREE.InstancedMesh(geo, mat, 2);
     const m = new THREE.Matrix4();
     [-1, 1].forEach((sign, k) => {
       m.identity();
-      if (flipZ) m.makeScale(1, 1, -sign);
+      if (flipZ) m.makeScale(1, 1, sign);
       m.setPosition(0, 0, sign * (flipZ ? HL : HL - E.depth));
       im.setMatrixAt(k, m);
     });

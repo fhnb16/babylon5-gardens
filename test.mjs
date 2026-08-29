@@ -2525,6 +2525,34 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   ok(/sign \* \(flipZ \? HL : HL - E\.depth\)/.test(ssrc),
      'Ступица со спицами садится на дно воронки, а не висит на прежней глубине');
 
+  /* Воронка обязана уходить ВНУТРЬ станции. Проверяем не знак в коде, а
+     МИРОВУЮ координату ступицы: при перевёрнутом знаке она оказывалась на
+     +166 — снаружи цилиндра, — труба с ней не сходилась, а спицы висели в
+     пустоте посреди выгнутого наружу конуса. */
+  {
+    const E2 = CONFIG.ENDCAP, R2 = CONFIG.R, HL2 = CONFIG.L / 2;
+    const prof = [];
+    for (let k = 0; k <= E2.rings; k++) {
+      const u = k / E2.rings;
+      prof.push(new THREE.Vector2(Math.max(0.6, R2 * (1 - u)),
+        E2.depth * Math.pow(u, E2.curve)));
+    }
+    const capG = new THREE.LatheGeometry(prof, 16);
+    capG.rotateX(-Math.PI / 2);
+    capG.computeBoundingBox();
+    const hubLocal = capG.boundingBox.min.z;
+    const sc = /m\.makeScale\(1, 1, sign\)/.test(ssrc) ? 1 : -1;
+    for (const sign of [-1, 1]) {
+      const world = sign * HL2 + sign * sc * hubLocal;
+      ok(Math.abs(world) < HL2,
+         `Ступица торца ${sign > 0 ? '+' : ''}${sign} на z=${world.toFixed(0)} — внутри станции`);
+      ok(Math.abs(Math.abs(world) - (HL2 - E2.depth)) < 0.5,
+         'И ровно там, где стоит ступица со спицами');
+      ok(CONFIG.SUN.len / 2 > Math.abs(world),
+         `Труба (${CONFIG.SUN.len / 2}) доходит до неё`);
+    }
+  }
+
   /* Опоры — монолитные колонны, решётка только у ходовой балки */
   const C = CONFIG.AXIS.column;
   ok(C && C.bottom > C.top, `Колонна расширяется книзу: ${C.top} → ${C.bottom}`);
