@@ -3000,7 +3000,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   ok(/t\.renderToCanvasCallback = \(target, renderer2, quad\)/.test(src),
      'Вывод пути перехватывается');
   ok(/onComposite\(target\.texture\)/.test(src), 'И уходит в общую цепочку');
-  ok(/composite\(renderer, texture, renderer\.toneMappingExposure\)/.test(msrc),
+  ok(/composite\(renderer, texture,\s*\n\s*renderer\.toneMappingExposure \* CONFIG\.PATH\.exposure\)/.test(msrc),
      'Свечение, лучи от оси и сглаживание работают и в режиме пути');
 
   /* вода */
@@ -3605,12 +3605,23 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
 
   /* Дневной свет: пересвет даёт не сумма, а рассеянная составляющая */
   const D = CONFIG.DAY;
-  const ratio = D.hemiInt / (D.pointInt * CONFIG.LIGHT_Z.length);
-  ok(ratio < 0.22,
-     `Днём рассеянного к направленному ${ratio.toFixed(2)}: полусфера светит ровно и смывает форму`);
+  /* Яркость обычного кадра трогать нельзя: пересвет был только в
+     трассировке, а правка палитры погасила день во всей станции. Значения
+     здесь закреплены, чтобы это не повторилось. */
+  ok(D.hemiInt === 1.35 && D.pointInt === 0.95,
+     `Дневная палитра обычного режима нетронута: полусфера ${D.hemiInt}, осевые ${D.pointInt}`);
   const msrc = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
   const exp = parseFloat((msrc.match(/toneMappingExposure = ([\d.]+)/) || [])[1]);
-  ok(exp <= 1.05, `Экспозиция ${exp}: светлые места упирались в единицу и теряли фактуру`);
+  ok(exp === 1.22, `Экспозиция обычного кадра ${exp} — тоже нетронута`);
+
+  /* А у трассировки экспозиция своя: труба там площадной источник размером
+     4.4 × 276 юнитов, а в обычном кадре не светит вовсе. */
+  ok(CONFIG.PATH.exposure > 0 && CONFIG.PATH.exposure < 1,
+     `У трассировки своя экспозиция ×${CONFIG.PATH.exposure}`);
+  ok(/renderer\.toneMappingExposure \* CONFIG\.PATH\.exposure/.test(msrc),
+     'Она умножается только на пути вывода трассировки');
+  ok(!/composite\(renderer, srcTexture, renderer\.toneMappingExposure \* CONFIG\.PATH/.test(msrc),
+     'Обычный кадр её не видит');
 }
 
 /* ══ 3i. Звук реагирует на то, где находится камера ════════════════════ */

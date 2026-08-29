@@ -61,9 +61,7 @@ function boot() {
   });
   renderer.outputColorSpace = THREE.SRGBColorSpace;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  /* Экспозиция ниже прежней: день выходил засвеченным, светлые места
-     упирались в единицу и теряли фактуру. */
-  renderer.toneMappingExposure = 1.0;
+  renderer.toneMappingExposure = 1.22;
   renderer.shadowMap.enabled = false;   // тени — контактные пятна и аналитика в шейдере
   /* updateStyle = false обязателен: иначе three прописывает канвасу инлайновые
      style.width/height в пикселях стартового окна, и они навсегда перебивают
@@ -669,7 +667,10 @@ function initUI() {
       /* Результат пути идёт через ту же постобработку, что и обычный кадр:
          библиотека рисует прямо в канвас и минует свечение, лучи от оси и
          всё сглаживание. */
-      texture => composite(renderer, texture, renderer.toneMappingExposure),
+      /* Своя экспозиция: труба здесь площадной источник, а в обычном кадре
+         не светит вовсе, и общая экспозиция для них не годится. */
+      texture => composite(renderer, texture,
+        renderer.toneMappingExposure * CONFIG.PATH.exposure),
       worldMats.hull, worldMats.waterRough,
       hullU.uCityGlow.value > 0.2 ? 0xffd9a0 : 0xcfe0ff,
       /* яркость трубы берём из текущей фазы, иначе день выбеливает */
