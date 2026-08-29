@@ -1,5 +1,14 @@
 import * as THREE from 'three';
 import { CONFIG } from './config.js';
+/* Дерево обхода как расширение геометрии. Без установки `computeBoundsTree`
+   просто не существует, а вызов через ?. молча ничего не делает — и луч
+   столкновений перебирал бы полмиллиона треугольников на каждый шаг. */
+import { computeBoundsTree, disposeBoundsTree, acceleratedRaycast }
+  from 'three-mesh-bvh';
+
+THREE.BufferGeometry.prototype.computeBoundsTree = computeBoundsTree;
+THREE.BufferGeometry.prototype.disposeBoundsTree = disposeBoundsTree;
+THREE.Mesh.prototype.raycast = acceleratedRaycast;
 import {
   mulberry32, D2R, TAU, clamp, pick, zoneAt, surfaceQuat, surfacePos, mergeGeos,
   rod, facadeUV, splitRoofGroups, natural, cityBlock, cityCenter, cellInfo,
@@ -582,6 +591,9 @@ export function buildWorld(group, renderer, quality) {
     Q.rings ? CONFIG.HULL_SEG : 128, Q.rings || CONFIG.HULL_RINGS, true);
   const hullHills = displaceHills(hullGeo, R, L, mulberry32(CONFIG.SEED + 404));
   hullGeo.rotateX(Math.PI / 2);
+  /* Дерево обхода по корпусу: по нему камера и сталкивается с рельефом.
+     Без него луч перебирал бы пятьдесят тысяч треугольников на каждый шаг. */
+  hullGeo.computeBoundsTree({ targetLeafSize: 8 });
   /* низины корпуса заливаются водой — тем же каналом маски, что и реки */
   const ponds = hullHills.filter(h => h.dip).map(h => ({ t: h.t, z: h.z, r: h.r * 0.62 }));
   const { albedo, mask, canvas: hullCanvas } = makeHullMaps(Q.hullTex, Q.mask,

@@ -2,7 +2,7 @@
    Проверяет то, что молча ломается: инъекции в шейдер, согласование
    углов ферм с тенями, границы сборки мира. */
 import './test/dom-stub.mjs';
-import { readFileSync } from 'node:fs';
+import { readFileSync, existsSync } from 'node:fs';
 import * as THREE from 'three';
 import { CONFIG } from './js/config.js';
 import { D2R, TAU, zoneAt, mulberry32, clamp as clampNum, tpVec, aimAt, natural,
@@ -30,7 +30,6 @@ const forEachInstance = (arr, fn) => {
   }
 };
 
-const smaaTexNearest = s => /smaaTex\[1\]\.minFilter = THREE\.NearestFilter/.test(s);
 
 
 /* Дом — инстанс с массивом материалов: стены и кровля. Искать его по
@@ -1584,23 +1583,16 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
 
 
   /* --- SMAA --- */
-  const lut = readFileSync(new URL('./js/smaa-lut.js', import.meta.url), 'utf8');
-  const sh = readFileSync(new URL('./js/smaa-shaders.js', import.meta.url), 'utf8');
-  ok(/export const SMAA_AREA/.test(lut) && /export const SMAA_SEARCH/.test(lut),
-     'Обе таблицы SMAA на месте');
-  const areaLen = (lut.match(/SMAA_AREA = '([^']+)'/) || [])[1]?.length || 0;
-  ok(areaLen > 30000, `Таблица покрытия ${(areaLen / 1024) | 0} КБ — она и делает SMAA настоящим SMAA`);
-  for (const k of ['EDGES', 'WEIGHTS', 'BLEND']) {
-    ok(new RegExp(`SMAA_${k}_FRAG`).test(sh), `Проход «${k.toLowerCase()}» на месте`);
-  }
-  ok(/tArea: \{ value: smaaTex\[0\] \}/.test(psrc) && /tSearch: \{ value: smaaTex\[1\] \}/.test(psrc),
-     'Таблицы подключены к проходу весов — без них алгоритм вырождается в MLAA');
+  /* SMAA берём готовым проходом three: своя копия таблиц и шейдеров дважды
+     подвела — сперва я забыл перенести `defines`, потом разошлась версия
+     зависимости. Здесь всё чинится вместе с three. */
+  ok(/import \{ SMAAPass \} from 'three\/examples\/jsm\/postprocessing\/SMAAPass\.js'/.test(psrc),
+     'SMAA — готовый проход, а не своя копия');
+  ok(/smaaPass\.render\(renderer, null, smaaRT\[0\]\)/.test(psrc),
+     'Проход вызывается напрямую, без композера');
+  ok(/smaaPass\.renderToScreen = true/.test(psrc), 'И выводит прямо в канвас');
   ok(/pass\(fxMat, smaaRT\[0\]\)/.test(psrc),
-     'SMAA получает уже тонмаппенный кадр: по линейному HDR контраст яркости считается неверно');
-  ok(/pass\(smaaMat\[2\], null\)/.test(psrc), 'Последний проход SMAA идёт в канвас');
-  ok(CONFIG.AA_FILTER.some(mo => mo.id.includes('smaa')), 'SMAA есть в списке фильтров');
-  ok(smaaTexNearest(psrc), 'Таблица поиска берётся без интерполяции — иначе веса плывут');
-
+     'На вход ему идёт тонмаппенный кадр: по линейному HDR контраст яркости считается неверно');
   for (const k of ['aaOn', 'aaMsaa', 'aaFilter', 'aaScale']) {
     ok(new RegExp(`prefs\\.set\\('${k}'`).test(msrc), `Настройка «${k}» сохраняется`);
   }
@@ -2113,9 +2105,8 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
 
   /* ветка SMAA */
   const smaaBranch = body.slice(body.indexOf('if (smaaOn'), body.indexOf('return true;', body.indexOf('if (smaaOn')));
-  ok(/pass\(smaaMat\[2\], null\)/.test(smaaBranch), 'Ветка SMAA заканчивается выводом в канвас');
-  ok(smaaBranch.lastIndexOf('null') > smaaBranch.lastIndexOf('smaaRT['),
-     'После последнего буфера SMAA идёт именно канвас');
+  ok(/smaaPass\.renderToScreen = true/.test(smaaBranch),
+     'Ветка SMAA заканчивается выводом в канвас');
 
   /* обычная ветка */
   ok(/pass\(fxMat, null\);\s*\n\s*return true;/.test(body),
@@ -2152,16 +2143,6 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
 {
   /* Макросы SMAA зашиты в код проходов, а не приходят uniform. Без них
      шейдер просто не компилируется: 'SMAA_THRESHOLD' undeclared identifier. */
-  const sh = readFileSync(new URL('./js/smaa-shaders.js', import.meta.url), 'utf8');
-  const used = [...new Set([...sh.matchAll(/SMAA_[A-Z_]+/g)].map(m => m[0]))]
-    .filter(n => !/^SMAA_(EDGES|WEIGHTS|BLEND)/.test(n));
-  const declared = [...sh.matchAll(/^\s*(SMAA_[A-Z_]+):/gm)].map(m => m[1]);
-  const missing = used.filter(n => !declared.includes(n));
-  ok(missing.length === 0,
-     `Все ${used.length} макросов SMAA объявлены${missing.length ? ' (нет: ' + missing.join(', ') + ')' : ''}`);
-  const psrc = readFileSync(new URL('./js/photo.js', import.meta.url), 'utf8');
-  ok(/SMAA_EDGES_DEFINES/.test(psrc) && /SMAA_WEIGHTS_DEFINES/.test(psrc),
-     'Константы передаются материалам через defines');
 
   /* Затенение имён модульного уровня — источник ошибок «до инициализации» */
   for (const f of ['js/photo.js', 'js/main.js', 'js/world.js']) {
@@ -2627,7 +2608,8 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   ok(/if \(\(glowOn \|\| raysOn\) && blRT\)/.test(comp),
      'Яркая выборка и размытие не выполняются, когда свечение и лучи выключены');
   ok(/if \(raysOn && rayRT\)/.test(comp), 'Проход лучей — только при включённых лучах');
-  ok(/if \(smaaOn && smaaRT\.length\)/.test(comp), 'Три прохода SMAA — только при SMAA');
+  ok(/if \(smaaOn && smaaPass && smaaRT\.length\)/.test(comp),
+     'Проход SMAA выполняется только при SMAA');
   ok(/export const postPasses/.test(psrc), 'Число проходов доступно для замера');
 
   /* буферы заводятся по надобности, а не висят всегда */
@@ -3500,6 +3482,53 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   ok(/emaIdx = 1 - emaIdx;/.test(psrc), 'Перестановка после каждого кадра');
   ok(!/pass\(emaMat, dnRT\[1\]\)/.test(psrc),
      'Копирующего прохода нет: он читал и писал один буфер, картинка уходила в белое, потом в чёрное');
+}
+
+/* ══ 3h40. Готовые проходы three и дерево обхода ═══════════════════════ */
+{
+  const psrc = readFileSync(new URL('./js/photo.js', import.meta.url), 'utf8');
+  const wsrc = readFileSync(new URL('./js/world.js', import.meta.url), 'utf8');
+  const csrc = readFileSync(new URL('./js/controls.js', import.meta.url), 'utf8');
+  const ptsrc = readFileSync(new URL('./js/pathtrace.js', import.meta.url), 'utf8');
+  const html = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
+
+  /* Своей копии SMAA больше нет: она дважды подвела — забытые `defines` и
+     разошедшаяся версия зависимости. */
+  ok(!existsSync(new URL('./js/smaa-lut.js', import.meta.url)), 'Файл своих таблиц SMAA удалён');
+  ok(!existsSync(new URL('./js/smaa-shaders.js', import.meta.url)), 'И файл своих шейдеров');
+  ok(/from 'three\/examples\/jsm\/postprocessing\/SMAAPass\.js'/.test(psrc),
+     'SMAA берётся готовым проходом three');
+  ok(html.includes('"three/examples/jsm/"'), 'Карта импортов знает про примеры three');
+
+  /* Дерево обхода: расширение прототипа надо УСТАНОВИТЬ, иначе метода просто
+     не существует, а вызов через ?. молча ничего не делает. */
+  ok(/THREE\.BufferGeometry\.prototype\.computeBoundsTree = computeBoundsTree/.test(wsrc),
+     'Расширение геометрии установлено');
+  ok(/THREE\.Mesh\.prototype\.raycast = acceleratedRaycast/.test(wsrc),
+     'И ускоренный луч тоже');
+  ok(/hullGeo\.computeBoundsTree\(\{ targetLeafSize: 8 \}\)/.test(wsrc),
+     'Дерево строится по корпусу');
+  ok(!/computeBoundsTree\?\./.test(wsrc), 'Без ?. — промах здесь молчаливый и потому опасный');
+
+  /* и оно действительно строится */
+  const g6 = new THREE.Group();
+  buildWorld(g6, fakeRenderer, 'HIGH');
+  const hull6 = g6.children.find(o => o.material === worldMats.hull);
+  ok(!!hull6.geometry.boundsTree,
+     `Дерево обхода построено по ${(hull6.geometry.index.count / 3) | 0} треугольникам`);
+
+  /* столкновения камеры */
+  ok(/export function setCollider/.test(csrc), 'Камера умеет сталкиваться с миром');
+  ok(/_ray\.firstHitOnly = true/.test(csrc),
+     'Ищется ближайшее попадание: остальные не нужны и стоят времени');
+  ok(/hit\.distance - CONFIG\.COLLIDE\.radius/.test(csrc),
+     'Останавливаемся, не доходя радиуса до преграды');
+  ok(CONFIG.COLLIDE.radius > 0, `Радиус отхода ${CONFIG.COLLIDE.radius} юнита`);
+
+  /* SAH для дерева трассировщика */
+  ok(/strategy: SAH/.test(ptsrc),
+     'Дерево трассировщика строится по площади поверхности: строится дольше, обходится быстрее');
+  ok(/import \{ MeshBVH, SAH \}/.test(ptsrc), 'Стратегия берётся из библиотеки');
 }
 
 /* ══ 3i. Звук реагирует на то, где находится камера ════════════════════ */

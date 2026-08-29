@@ -6,6 +6,17 @@ import { clamp, clampPitch } from './util.js';
    УПРАВЛЕНИЕ — только Pointer Events. Никаких FlyControls/OrbitControls
    и никаких внешних джойстиков.
    ═══════════════════════════════════════════════════════════════════════════ */
+let collider = null;
+const _ray = new THREE.Raycaster();
+const _colPrev = new THREE.Vector3(), _colDir = new THREE.Vector3();
+
+/** Объект, с которым камера сталкивается. Ожидается меш с построенным
+    деревом обхода — без него луч перебирал бы всю геометрию поштучно. */
+export function setCollider(obj) {
+  collider = obj || null;
+  _ray.firstHitOnly = true;    // ближайшее попадание, дальше не ищем
+}
+
 export const ctl = {
   freeFly: false,       // false — горизонт следует цилиндру, true — обычный полёт
   speed: CONFIG.SPEED_BASE,
@@ -240,12 +251,33 @@ export function updateControls(dt, camera) {
   if (!fx && !fz && !fy) return;
 
   const spd = ctl.speed * (ctl.boost ? CONFIG.SPEED_BOOST : 1) * dt;
+  _colPrev.copy(camera.position);
   camera.getWorldDirection(_fwd);
   frameUp(camera, _up);
   _right.crossVectors(_fwd, _up).normalize();
   camera.position.addScaledVector(_fwd, fz * spd);
   camera.position.addScaledVector(_right, fx * spd);
   camera.position.addScaledVector(_up, fy * spd);   // «вверх» — к оси станции
+
+  /* Столкновения с миром. Луч пускается по направлению движения, и если
+     впереди ближе радиуса что-то есть — камера туда не идёт. Дерево обхода
+     строит three-mesh-bvh: без него такой луч перебирал бы полмиллиона
+     треугольников на каждый кадр. */
+  if (collider && (fx || fy || fz)) {
+    _colDir.copy(camera.position).sub(_colPrev);
+    const dist = _colDir.length();
+    if (dist > 1e-5) {
+      _colDir.divideScalar(dist);
+      _ray.set(_colPrev, _colDir);
+      _ray.far = dist + CONFIG.COLLIDE.radius;
+      const hit = _ray.intersectObject(collider, false)[0];
+      if (hit && hit.distance < dist + CONFIG.COLLIDE.radius) {
+        /* останавливаемся, не доходя радиуса до преграды */
+        camera.position.copy(_colPrev).addScaledVector(_colDir,
+          Math.max(0, hit.distance - CONFIG.COLLIDE.radius));
+      }
+    }
+  }
 
   /* Труба-солнце — сплошное тело, а не декорация: внутрь неё не пускаем.
      Отталкиваем по радиусу, оставляя движение вдоль оси свободным. */

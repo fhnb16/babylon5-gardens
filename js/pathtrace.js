@@ -77,7 +77,7 @@ function resolveUrl(name) {
 
 const workerSource = (threeUrl, bvhUrl) => `
 import { BufferGeometry, BufferAttribute } from '${threeUrl}';
-import { MeshBVH } from '${bvhUrl}';
+import { MeshBVH, SAH } from '${bvhUrl}';
 
 self.onmessage = e => {
   const { position, index, options } = e.data;
@@ -85,7 +85,9 @@ self.onmessage = e => {
     const geo = new BufferGeometry();
     geo.setAttribute('position', new BufferAttribute(position, 3));
     if (index) geo.setIndex(new BufferAttribute(index, 1));
-    const bvh = new MeshBVH(geo, options || {});
+    /* SAH — разбиение по площади поверхности: дерево строится дольше, но
+       обходится заметно быстрее, а строим мы его один раз за съёмку. */
+    const bvh = new MeshBVH(geo, { ...(options || {}), strategy: SAH });
     const packed = MeshBVH.serialize(bvh, { cloneBuffers: false });
     const move = [packed.index.buffer, ...packed.roots];
     self.postMessage({ ok: true, packed }, move);

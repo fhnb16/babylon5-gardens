@@ -8,7 +8,8 @@ import { buildWorld, worldMats, hullU, windU, updateTraffic, trafficMeshes,
   patchAllRoughness, updateTreeLod } from './world.js';
 import { buildStructures, structMats, updateStructures,
   liftSeat, liftCount2, setLiftInside } from './structures.js';
-import { ctl, isMobile, initControls, updateControls, syncFromCamera, resetStick, stationUp } from './controls.js';
+import { ctl, isMobile, initControls, updateControls, syncFromCamera, resetStick,
+  stationUp, setCollider } from './controls.js';
 import { audio, startAudio, updateAudio, setVolume, setEnabled, suspendAudio } from './audio.js';
 import { pt, startPath, pathStep, stopPath, pathLabel, pathCameraMoved,
   setPaused, setPathScale, setNoiseTarget, samplesNeeded } from './pathtrace.js';
@@ -179,6 +180,8 @@ function rebuild() {
   /* Раскладку деревьев зовём сразу: до неё меши уровней пусты. */
   worldGroup.updateMatrixWorld(true);
   updateTreeLod(camera.position, worldGroup, true);
+  /* камера сталкивается с корпусом: рельеф холмов теперь настоящий */
+  setCollider(worldGroup.children.find(o => o.material === worldMats.hull) || null);
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════

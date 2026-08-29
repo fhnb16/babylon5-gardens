@@ -1,11 +1,10 @@
 import * as THREE from 'three';
 import { CONFIG } from './config.js';
-import { SMAA_AREA, SMAA_SEARCH } from './smaa-lut.js';
-import {
-  SMAA_EDGES_VERT, SMAA_EDGES_FRAG, SMAA_EDGES_DEFINES,
-  SMAA_WEIGHTS_VERT, SMAA_WEIGHTS_FRAG, SMAA_WEIGHTS_DEFINES,
-  SMAA_BLEND_VERT, SMAA_BLEND_FRAG
-} from './smaa-shaders.js';
+/* SMAA берём готовым проходом three. Своя копия таблиц и шейдеров прожила
+   недолго и дважды подвела: сперва я забыл перенести `defines`, и шейдер не
+   компилировался, потом разошлась версия зависимости. Здесь всё это чинится
+   вместе с three. */
+import { SMAAPass } from 'three/examples/jsm/postprocessing/SMAAPass.js';
 
 /* ═══════════════════════════════════════════════════════════════════════════
    ТРАССИРОВКА ДЛЯ ФОТО-РЕЖИМА
@@ -888,20 +887,7 @@ const TAA_FRAG = `
    HDR считается неверно. Поэтому перед SMAA кадр тонмаппится в отдельный
    буфер, а после — просто выводится.
    ═══════════════════════════════════════════════════════════════════════════ */
-let smaaOn = false, smaaRT = [], smaaMat = [], smaaTex = [];
-
-function loadLut(src, format) {
-  const tx = new THREE.Texture();
-  const img = new Image();
-  img.onload = () => { tx.image = img; tx.needsUpdate = true; };
-  img.src = src;
-  tx.minFilter = THREE.LinearFilter;
-  tx.magFilter = THREE.LinearFilter;
-  tx.generateMipmaps = false;
-  tx.flipY = false;
-  if (format) tx.format = format;
-  return tx;
-}
+let smaaOn = false, smaaRT = [], smaaPass = null;
 
 let fxOn = false, fxRT = null, fxMat = null, fxQuad = null, fxScene = null, fxCam = null;
 let taaMat = null, taaRT = [], taaIdx = 0, taaHas = 0;
@@ -1027,9 +1013,8 @@ function disposeFxaa() {
   dnMat = smartMat = emaMat = sharpMat = null; dnRT = [];
   guideRT?.dispose(); guideRT = null;
   guideMat?.dispose(); guideMat = null;
-  for (const mm of smaaMat) mm.dispose();
-  for (const tx of smaaTex) tx.dispose();
-  smaaMat = []; smaaTex = []; smaaRT = [];
+  smaaPass?.dispose?.();
+  smaaPass = null; smaaRT = [];
   fxRT?.depthTexture?.dispose();
   taaMat?.dispose(); taaMat = null; taaRT = []; taaHas = 0;
   for (const m of [fxMat, brMat, blurMat, rayMat]) m?.dispose();
@@ -1075,87 +1060,22 @@ export function resizePost(renderer) {
   });
   fxMat.uniforms.uRes.value.set(s.x, s.y);
 
-  /* SMAA: три прохода, каждому нужен свой буфер. Первый принимает уже
-     тонмаппенный кадр — по линейному HDR контраст яркости считается неверно. */
+  /* SMAA готовым проходом. Ему нужен буфер входа: он читает из readBuffer и
+     пишет либо в writeBuffer, либо в канвас. Первый буфер — тонмаппенный
+     кадр: по линейному HDR контраст яркости считается неверно. */
   for (const t of smaaRT) t?.dispose();
   smaaRT = [];
   if (smaaOn) {
-    const ldr = () => new THREE.WebGLRenderTarget(s.x, s.y, {
+    smaaRT = [new THREE.WebGLRenderTarget(s.x, s.y, {
       depthBuffer: false, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter
-    });
-    smaaRT = [ldr(), ldr(), ldr()];        // тонмаппенный кадр, кромки, веса
-    if (!smaaMat.length) {
-      smaaTex = [
-        loadLut(SMAA_AREA),
-        loadLut(SMAA_SEARCH, THREE.RGBAFormat)
-      ];
-      smaaTex[1].minFilter = THREE.NearestFilter;
-      smaaTex[1].magFilter = THREE.NearestFilter;
-      const mk = (vert, frag, uniforms, defines) => new THREE.ShaderMaterial({
-        defines: defines || {}, vertexShader: vert, fragmentShader: frag, uniforms
-      });
-      smaaMat = [
-        mk(SMAA_EDGES_VERT, SMAA_EDGES_FRAG, {
-          tDiffuse: { value: null }, resolution: { value: new THREE.Vector2() }
-        }, SMAA_EDGES_DEFINES),
-        mk(SMAA_WEIGHTS_VERT, SMAA_WEIGHTS_FRAG, {
-          tDiffuse: { value: null }, tArea: { value: smaaTex[0] },
-          tSearch: { value: smaaTex[1] }, resolution: { value: new THREE.Vector2() }
-        }, SMAA_WEIGHTS_DEFINES),
-        mk(SMAA_BLEND_VERT, SMAA_BLEND_FRAG, {
-          tDiffuse: { value: null }, tColor: { value: null },
-          resolution: { value: new THREE.Vector2() }
-        })
-      ];
-    }
-    for (const mm of smaaMat) mm.uniforms.resolution.value.set(1 / s.x, 1 / s.y);
+    })];
+    smaaPass?.dispose?.();
+    smaaPass = new SMAAPass(s.x, s.y);
+    smaaPass.setSize?.(s.x, s.y);
+  } else if (smaaPass) {
+    smaaPass.dispose?.();
+    smaaPass = null;
   }
-
-  /* Буфер очистки: заводится вместе с цепочкой, но проход выполняется
-     только когда очистка включена. */
-  for (const t of dnRT) t?.dispose();
-  /* два буфера: проходы идут по очереди, читая один и записывая другой */
-  dnRT = [0, 1].map(() => new THREE.WebGLRenderTarget(s.x, s.y, {
-    type: THREE.HalfFloatType, depthBuffer: false,
-    minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter
-  }));
-  const D = CONFIG.POST;
-  dnMat = dnMat || new THREE.ShaderMaterial({
-    defines: { DENOISE_R: D.denoiseR },
-    vertexShader: VERT, fragmentShader: DENOISE_FRAG,
-    uniforms: {
-      tSrc: { value: null }, tGuide: { value: null },
-      uRes: { value: new THREE.Vector2(1, 1) },
-      uSigma: { value: D.denoiseSigma },
-      uRadius: { value: D.denoiseRadius },
-      uNormalW: { value: D.denoiseNormal },
-      uDepthW: { value: D.denoiseDepth },
-      uHasGuide: { value: 0 }
-    }
-  });
-  smartMat = smartMat || new THREE.ShaderMaterial({
-    defines: { SMART_R: D.smartR.toFixed(1) },
-    vertexShader: VERT, fragmentShader: SMART_FRAG,
-    uniforms: {
-      tSrc: { value: null }, uRes: { value: new THREE.Vector2(1, 1) },
-      uSigma: { value: D.smartSigma }, uKSigma: { value: D.smartK },
-      uThreshold: { value: D.smartThreshold }
-    }
-  });
-  sharpMat = sharpMat || new THREE.ShaderMaterial({
-    vertexShader: VERT, fragmentShader: SHARP_FRAG,
-    uniforms: {
-      tSrc: { value: null }, uRes: { value: new THREE.Vector2(1, 1) },
-      uAmount: { value: D.sharpen }
-    }
-  });
-  emaMat = emaMat || new THREE.ShaderMaterial({
-    vertexShader: VERT, fragmentShader: EMA_FRAG,
-    uniforms: {
-      tSrc: { value: null }, tPrev: { value: null },
-      uAlpha: { value: D.emaAlpha }, uHasPrev: { value: 0 }
-    }
-  });
 
   for (const t of taaRT) t?.dispose();
   taaRT = [];
@@ -1423,16 +1343,11 @@ export function composite(renderer, srcTexture, exposure) {
   fxMat.uniforms.uExposure.value = exposure;
   fxMat.uniforms.uFxaa.value = fxaaFilter ? 1 : 0;
 
-  if (smaaOn && smaaRT.length) {
-    /* тонмаппим в буфер, сглаживаем экранные значения, выводим */
+  if (smaaOn && smaaPass && smaaRT.length) {
+    /* тонмаппим в буфер, сглаживаем экранные значения, выводим в канвас */
     pass(fxMat, smaaRT[0]);
-    smaaMat[0].uniforms.tDiffuse.value = smaaRT[0].texture;
-    pass(smaaMat[0], smaaRT[1]);
-    smaaMat[1].uniforms.tDiffuse.value = smaaRT[1].texture;
-    pass(smaaMat[1], smaaRT[2]);
-    smaaMat[2].uniforms.tDiffuse.value = smaaRT[2].texture;
-    smaaMat[2].uniforms.tColor.value = smaaRT[0].texture;
-    pass(smaaMat[2], null);
+    smaaPass.renderToScreen = true;
+    smaaPass.render(renderer, null, smaaRT[0]);
     return true;
   }
 
