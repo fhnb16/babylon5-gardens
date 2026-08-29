@@ -5,7 +5,7 @@ import { mulberry32, clamp, lerp, easeInOut, tpVec, aimAt, fadeByFog,
   turnToward, clampPitch, TAU } from './util.js';
 import { makeSoftSprite, makeGlowTexture } from './textures.js';
 import { buildWorld, worldMats, hullU, windU, updateTraffic, trafficMeshes,
-  patchAllRoughness, updateTreeLod } from './world.js';
+  patchAllRoughness, updateTreeLod, setTreeDetailFull } from './world.js';
 import { buildStructures, structMats, updateStructures,
   liftSeat, liftCount2, setLiftInside } from './structures.js';
 import { ctl, isMobile, initControls, updateControls, syncFromCamera, resetStick,
@@ -498,6 +498,7 @@ function exitPhotoModes() {
   setTraceDebug(0);
   setTrace(false);
   stopPath();
+  setTreeDetailFull(false, camera.position, worldGroup);
   forcePost(renderer, false);
   setBrightScale(1);
   setDenoise(false);
@@ -535,6 +536,9 @@ function setTrace(on) {
   if (on && !trace.active) {
     shotBoost = CONFIG.SHOT.scale;      // трассируем сразу в масштабе снимка
     resize();
+    /* на время съёмки все деревья на полной детализации: сцена
+       неподвижна, а крест из плоскостей выдаёт себя на снимке */
+    setTreeDetailFull(true, camera.position, worldGroup);
     startTrace(renderer, scene, camera, windU.uWind, isMobile);
   } else if (!on && trace.active) {
     stopTrace(windU.uWind);
@@ -645,6 +649,7 @@ function initUI() {
   bPath.onclick = async () => {
     if (pt.active || pt.error) {
       stopPath(); forcePost(renderer, false); setBrightScale(1);
+      setTreeDetailFull(false, camera.position, worldGroup);
       bPath.classList.remove('on'); return;
     }
     setTrace(false);
@@ -656,6 +661,9 @@ function initUI() {
        блокирует поток на секунды, и без заранее отрисованного предупреждения
        это неотличимо от зависшей вкладки. */
     showTrace('загрузка библиотеки…');
+    /* Полную детализацию включаем ДО постройки дерева обхода: оно
+       строится по той геометрии, что видно в этот момент. */
+    setTreeDetailFull(true, camera.position, worldGroup);
     /* Цепочка постобработки должна существовать: результат пути идёт
        через неё, а при выключенном сглаживании её просто не было. */
     forcePost(renderer, true);

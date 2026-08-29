@@ -425,6 +425,20 @@ let treeLod = null;
 
     Раскладка меняет ТОЛЬКО счётчики мешей: матрицы у всех трёх уровней уже
     записаны и совпадают, поэтому переписывать нечего. */
+let treeFull = false;
+
+/** Развернуть все уровни детализации на полную.
+
+    Во время съёмки сцена неподвижна, и экономить на дальних деревьях незачем:
+    крест из плоскостей выдаёт себя на снимке, а кадр всё равно считается
+    секундами. Полная детализация стоит примерно вдвое дороже — для
+    неподвижного кадра это ничто. */
+export function setTreeDetailFull(on, camWorld, worldGroup) {
+  treeFull = !!on;
+  _lodPrev.set(1e9, 1e9, 1e9);          // заставляем пересчитать
+  if (camWorld && worldGroup) updateTreeLod(camWorld, worldGroup, true);
+}
+
 export function updateTreeLod(camWorld, worldGroup, force) {
   if (!treeLod || !treeLod.length) return false;
   if (!force && camWorld.distanceToSquared(_lodPrev) < CONFIG.TREE_LOD.step ** 2) return false;
@@ -448,7 +462,7 @@ export function updateTreeLod(camWorld, worldGroup, force) {
       const d2 = dx * dx + dy * dy + dz * dz;
       const src = k * 16, srcC = k * 3;
       let dst, dstC, arr, arrC;
-      if (d2 < near2) { dst = a * 16; dstC = a * 3; arr = mA; arrC = cA; a++; }
+      if (treeFull || d2 < near2) { dst = a * 16; dstC = a * 3; arr = mA; arrC = cA; a++; }
       else if (d2 < mid2) { dst = b * 16; dstC = b * 3; arr = mB; arrC = cB; b++; }
       else { dst = c * 16; dstC = c * 3; arr = mC; arrC = cC; c++; }
       for (let j = 0; j < 16; j++) arr[dst + j] = mats16[src + j];
@@ -739,6 +753,28 @@ export function buildWorld(group, renderer, quality) {
     return false;
   };
 
+  /* В воде ничего не растёт. Отсев по руслам шёл через веса зон, а озёра
+     лежат посреди парков и полей — про них зоны не знают, и сто шестьдесят
+     крон стояли прямо в воде.
+
+     Форма та же, что продавила низину: овал со своей вытянутостью и
+     поворотом. Проверять по кругу нельзя — у берега вытянутого озера круг
+     промахнётся в обе стороны. */
+  const inPond = (t, z, r) => {
+    for (const pd of ponds) {
+      const dt0 = ((t - pd.t + Math.PI) % TAU + TAU) % TAU - Math.PI;
+      let dx = dt0 * R, dz = z - pd.z;
+      if (pd.ax && pd.ax !== 1) {
+        const cs = Math.cos(pd.rot), sn = Math.sin(pd.rot);
+        const px = dx * cs + dz * sn, py = -dx * sn + dz * cs;
+        dx = px / pd.ax; dz = py * pd.ax;
+      }
+      /* запас на берег: крона не должна свешиваться над водой */
+      if (Math.hypot(dx, dz) < pd.r + r + CONFIG.HILL.shore) return true;
+    }
+    return false;
+  };
+
   /* Улица — полоса шириной CITY.street по краю каждой ячейки сетки. Дерево
      считается стоящим на ней, если его крона задевает полосу. */
   const CT = CONFIG.CITY;
@@ -770,6 +806,7 @@ export function buildWorld(group, renderer, quality) {
          квартала, и дерево посреди неё выглядит ошибкой, а не задумкой.
          Раньше туда попадало пять сотен крон из шести. */
       if (zoneAt(t / D2R) === 'city' && onStreet(t, z, r)) continue;
+      if (inPond(t, z, r)) continue;
       out.push([t, z, r]);
       if (claim) taken.push([t, z, r]);
     }

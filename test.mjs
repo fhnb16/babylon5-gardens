@@ -1498,6 +1498,25 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   /* Выход обязан снять ВСЁ: раньше он гасил только экранные лучи, а
      трассировка пути продолжала считать, и её кадр оставался на канвасе. */
   ok(/function exitPhotoModes/.test(msrc), 'Выход снимает все режимы съёмки разом');
+
+  /* На время съёмки все деревья идут на полной детализации: сцена
+     неподвижна, а крест из плоскостей выдаёт себя на снимке. */
+  const wsrc2 = readFileSync(new URL('./js/world.js', import.meta.url), 'utf8');
+  ok(/export function setTreeDetailFull/.test(wsrc2), 'Полная детализация включается разом');
+  ok(/if \(treeFull \|\| d2 < near2\)/.test(wsrc2),
+     'В раскладке она перебивает расстояние');
+  ok(/_lodPrev\.set\(1e9, 1e9, 1e9\)/.test(wsrc2),
+     'Переключение заставляет пересчитать: иначе порог сдвига камеры отложил бы его');
+  ok(/setTreeDetailFull\(true, camera\.position, worldGroup\);\s*\n\s*startTrace/.test(msrc),
+     'Экранная трассировка включает её перед стартом');
+  const iFull = msrc.indexOf("setTreeDetailFull(true, camera.position, worldGroup);",
+    msrc.indexOf("showTrace('загрузка библиотеки…')"));
+  const iStart = msrc.indexOf('await startPath(', iFull);
+  ok(iFull > 0 && iFull < iStart,
+     'Путь — тоже, и ДО постройки дерева обхода: оно строится по видимой в этот момент геометрии');
+  const exitBody = msrc.slice(msrc.indexOf('function exitPhotoModes'));
+  ok(/setTreeDetailFull\(false/.test(exitBody.slice(0, exitBody.indexOf('\n}'))),
+     'Выход возвращает уровни детализации');
   for (const call of ['setTrace\\(false\\)', 'stopPath\\(\\)', 'forcePost\\(renderer, false\\)',
     'setDenoise\\(false\\)', 'setTraceDebug\\(0\\)']) {
     const body = msrc.slice(msrc.indexOf('function exitPhotoModes'));
@@ -3495,6 +3514,39 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
     }
   }
   ok(onRoad === 0, `На проезжей части ничего не растёт (${onRoad} из ${inCity} в городе)`);
+
+  /* И в воде. Отсев по руслам шёл через веса зон, а озёра лежат посреди
+     парков и полей — про них зоны не знают, и сто шестьдесят крон стояли
+     прямо в воде. */
+  const gHills = new THREE.CylinderGeometry(CONFIG.R, CONFIG.R, CONFIG.L,
+    CONFIG.HULL_SEG, 96, true);
+  const hillList = displaceHills(gHills, CONFIG.R, CONFIG.L, mulberry32(CONFIG.SEED + 404));
+  const pondList = hillList.filter(h => h.dip)
+    .map(h => ({ t: h.t, z: h.z, r: h.r * 0.62, ax: h.ax, rot: h.rot }));
+  let inWater = 0, plants = 0;
+  for (const o of g5.children) {
+    if (!o.isInstancedMesh || !o.instanceColor) continue;
+    for (let k = 0; k < o.count; k++) {
+      o.getMatrixAt(k, m5); m5.decompose(p5, q5, s5);
+      plants++;
+      const tt = Math.atan2(p5.x, p5.y);
+      for (const pd of pondList) {
+        const dt0 = ((tt - pd.t + Math.PI) % TAU + TAU) % TAU - Math.PI;
+        let dx = dt0 * CONFIG.R, dz = p5.z - pd.z;
+        if (pd.ax && pd.ax !== 1) {
+          const cs = Math.cos(pd.rot), sn = Math.sin(pd.rot);
+          const px = dx * cs + dz * sn, py = -dx * sn + dz * cs;
+          dx = px / pd.ax; dz = py * pd.ax;
+        }
+        if (Math.hypot(dx, dz) < pd.r) { inWater++; break; }
+      }
+    }
+  }
+  ok(inWater === 0, `В воде ничего не растёт (${inWater} из ${plants})`);
+  ok(/if \(inPond\(t, z, r\)\) continue;/.test(wsrc), 'Отсев идёт при расстановке');
+  ok(/dx = px \/ pd\.ax; dz = py \* pd\.ax;/.test(wsrc),
+     'Проверяется овалом, а не кругом: у берега вытянутого озера круг промахнётся в обе стороны');
+  ok(CONFIG.HILL.shore > 0, `Запас берега ${CONFIG.HILL.shore}: крона не свешивается над водой`);
   ok(/if \(zoneAt\(t \/ D2R\) === 'city' && onStreet\(t, z, r\)\) continue;/.test(wsrc),
      'Отсев идёт при расстановке, а не потом');
   ok(/const halfT = CT\.street \/ R \+ r \/ R;/.test(wsrc),
