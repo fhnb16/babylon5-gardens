@@ -43,6 +43,9 @@ export const hullU = {
   uHullL: { value: CONFIG.L }, uSunGlow: { value: 3.2 },
   uCamObj: { value: new THREE.Vector3() },
   uCityGlow: { value: CONFIG.DAY.cityGlow },
+  /* Отсвет за краем застройки: без него город светился пятном, а трава
+     в двух шагах от фонаря оставалась чёрной. */
+  uCitySpill: { value: CONFIG.CITY.spill },
   uWaterTint: { value: new THREE.Color(CONFIG.DAY.waterTint) }
 };
 export const windU = { uTime: hullU.uTime, uWind: { value: 1 } };
@@ -75,6 +78,7 @@ function patchHullMaterial(mat, nArm, nSpar) {
         uniform sampler2D uMask;
         uniform sampler2D uDetail;
         uniform float uTime, uDetailRep, uArmW, uSparZW, uSparShade, uCityGlow, uFlow;
+        uniform float uCitySpill;
         uniform float uMirror, uSunR, uHullR, uHullL, uSunGlow, uFoam, uRipple;
         uniform vec3 uCamObj;   // камера в системе станции
         uniform float uArm[${nArm}];
@@ -113,22 +117,37 @@ function patchHullMaterial(mat, nArm, nSpar) {
         float zt = 0.0;
         for ( int j = 0; j < ${nSpar}; j++ )
           zt = max( zt, 1.0 - smoothstep( 0.0, uSparZW, abs( vZo - uSparZ[j] ) ) );
-        float shade = 1.0;
-        for ( int i = 0; i < ${nArm}; i++ ) {
-          float d = vTh - uArm[i];
-          d = mod( d + PI, 2.0 * PI ) - PI;
-          shade -= uSparShade * zt * ( 1.0 - smoothstep( 0.0, uArmW, abs( d ) ) );
-        }
-        diffuseColor.rgb *= clamp( shade, 0.25, 1.0 );`)
+
+        /* Второй цикл нужен только там, где тень вообще может лечь. Полосы
+           узкие, и на подавляющем большинстве пикселей zt равен нулю — а
+           раньше двенадцать итераций отрабатывали на КАЖДОМ пикселе экрана,
+           который корпус закрывает целиком. На мощном мониторе это выходило
+           сто семьдесят миллионов итераций за кадр, и потому ПК оказывался
+           медленнее телефона: пикселей больше, а цена пикселя та же. */
+        if ( zt > 0.002 ) {
+          float shade = 1.0;
+          for ( int i = 0; i < ${nArm}; i++ ) {
+            float d = vTh - uArm[i];
+            d = mod( d + PI, 2.0 * PI ) - PI;
+            shade -= uSparShade * zt * ( 1.0 - smoothstep( 0.0, uArmW, abs( d ) ) );
+          }
+          diffuseColor.rgb *= clamp( shade, 0.25, 1.0 );
+        }`)
 
       /* --- ночью улицы и площади светятся сами: огни видно, а не только окна --- */
       .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
         // Фонарь освещает покрытие, а не подменяет его цвет: множим на
         // альбедо, иначе улица превращается в ровное светящееся пятно и
         // разметка на ней пропадает.
-        float lamps = smoothstep( 0.34, 0.92, hullMask.b );
-        totalEmissiveRadiance += uCityGlow * lamps * diffuseColor.rgb
-          * ( 0.5 + 0.8 * dPave ) * vec3( 1.0, 0.86, 0.66 );`)
+        /* Фонарь освещает не только покрытие. Прежде свечение бралось по
+           резкому порогу маски: асфальт светился сам, а трава в двух шагах
+           оставалась чёрной — город выделялся пятном. Порог смягчён, и за
+           краем застройки остаётся отсвет, спадающий к нулю. */
+        float lamps = smoothstep( 0.10, 0.75, hullMask.b );
+        float spill = smoothstep( 0.02, 0.30, hullMask.b ) * uCitySpill;
+        totalEmissiveRadiance += uCityGlow * diffuseColor.rgb
+          * ( lamps * ( 0.5 + 0.8 * dPave ) + spill )
+          * vec3( 1.0, 0.86, 0.66 );`)
 
       /* --- вода зеркальна --- */
       .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
@@ -608,7 +627,7 @@ export function displaceHills(geo, R, L, rnd) {
    ═══════════════════════════════════════════════════════════════════════════ */
 export const worldMats = { bld: [], nav: null, blob: null, print: null,
   hull: null, waterRough: null, waterNormal: null,
-  trafficBody: null, trafficLamp: null, trafficMesh: null };
+  trafficBody: null, trafficLamp: null, trafficRear: null, trafficMesh: null };
 const _lodPrev = new THREE.Vector3(1e9, 1e9, 1e9), _lodLocal = new THREE.Vector3();
 let sceneParts = [];
 let traffic = null;
@@ -618,7 +637,8 @@ export function disposeWorld(group) {
   sceneParts = [];
   worldMats.bld = []; worldMats.nav = null; worldMats.blob = null;
   worldMats.print = null; worldMats.trafficBody = null;
-  worldMats.trafficLamp = null; worldMats.trafficMesh = null; traffic = null;
+  worldMats.trafficLamp = null; worldMats.trafficRear = null;
+  worldMats.trafficMesh = null; traffic = null;
 }
 
 export function buildWorld(group, renderer, quality) {
@@ -773,8 +793,11 @@ export function buildWorld(group, renderer, quality) {
         const px = dx * cs + dz * sn, py = -dx * sn + dz * cs;
         dx = px / pd.ax; dz = py * pd.ax;
       }
-      /* запас на берег: крона не должна свешиваться над водой */
-      if (Math.hypot(dx, dz) < pd.r + r + CONFIG.HILL.shore) return true;
+      /* Запас берега считается от ВСЕЙ чаши, а не от кромки воды. Вода
+         занимает середину низины, но склоны у неё пологие, и дерево на
+         половине спуска читается стоящим в озере: глаз видит впадину
+         целиком, а не уровень воды в ней. */
+      if (Math.hypot(dx, dz) < pd.r / CONFIG.HILL.pondFill + r + CONFIG.HILL.shore) return true;
     }
     return false;
   };
@@ -1274,33 +1297,39 @@ export function buildWorld(group, renderer, quality) {
         emissiveMap: makeCarWindows(), emissive: 0xffffff, emissiveIntensity: 0
       });
 
-      /* фары спереди, габариты сзади — цвет в вершинах, яркость в материале */
-      const lampParts = [];
-      const lampCol = [];
-      const addLamp = (x, z, col) => {
-        const g0 = rod(T2.w * 0.24, T2.h * 0.2, 0.06, x, T2.h * 0.34, z);
-        lampParts.push(g0);
-        for (let k = 0; k < g0.attributes.position.count; k++) lampCol.push(...col);
-      };
-      addLamp(-T2.w * 0.32, T2.len * 0.5, [1, 0.96, 0.85]);
-      addLamp(T2.w * 0.32, T2.len * 0.5, [1, 0.96, 0.85]);
-      /* Габариты гасим В САМОМ ЦВЕТЕ. Яркость материала 3.2 умножает все
-         каналы, и (1, 0.16, 0.1) превращалось в (3.2, 0.51, 0.32) — после
-         ограничения единицей это оранжево-белый, а не красный. */
-      /* Значения ЛИНЕЙНЫЕ, а на экран идёт sRGB: 0.096 линейно превращается в
-         0.34 на экране, и красный уходил в оранжево-белый. Чтобы после
-         перевода зелень и синь остались около десятой, в линейном они должны
-         быть около сотой. */
-      addLamp(-T2.w * 0.32, -T2.len * 0.5, [0.4, 0.004, 0.0015]);
-      addLamp(T2.w * 0.32, -T2.len * 0.5, [0.4, 0.004, 0.0015]);
-      const lampGeo = mergeGeos(lampParts);
-      lampGeo.setAttribute('color', new THREE.Float32BufferAttribute(lampCol, 3));
+      /* Фары спереди, габариты сзади — ДВА МАТЕРИАЛА, а не вершинные цвета.
+         Вершинный цвет в three умножает диффузную составляющую, а не
+         эмиссию: в трассировке лампа заменяется светящимся материалом, и
+         красный терялся целиком — все огни выходили белыми. С отдельными
+         материалами цвет живёт там, где его читают оба конвейера.
+
+         Значения ЛИНЕЙНЫЕ, а на экран идёт sRGB: 0.096 линейно превращается
+         в 0.34 на экране, и красный уходил в оранжево-белый. */
+      const front = [], rear = [];
+      const addLamp = (list, x, z) =>
+        list.push(rod(T2.w * 0.24, T2.h * 0.2, 0.06, x, T2.h * 0.34, z));
+      addLamp(front, -T2.w * 0.32, T2.len * 0.5);
+      addLamp(front, T2.w * 0.32, T2.len * 0.5);
+      addLamp(rear, -T2.w * 0.32, -T2.len * 0.5);
+      addLamp(rear, T2.w * 0.32, -T2.len * 0.5);
+
+      const gF = mergeGeos(front), gR = mergeGeos(rear);
+      const nF = gF.index.count;
+      const lampGeo = mergeGeos([gF, gR]);
+      lampGeo.clearGroups();
+      lampGeo.addGroup(0, nF, 0);                              // фары
+      lampGeo.addGroup(nF, lampGeo.index.count - nF, 1);       // габариты
+
       worldMats.trafficLamp = new THREE.MeshBasicMaterial({
-        vertexColors: true, toneMapped: false, color: new THREE.Color(0, 0, 0)
+        toneMapped: false, color: new THREE.Color(1, 0.96, 0.85)
+      });
+      worldMats.trafficRear = new THREE.MeshBasicMaterial({
+        toneMapped: false, color: new THREE.Color(0.4, 0.004, 0.0015)
       });
 
       const bodies = new THREE.InstancedMesh(bodyGeo, worldMats.trafficBody, n);
-      const lamps = new THREE.InstancedMesh(lampGeo, worldMats.trafficLamp, n);
+      const lamps = new THREE.InstancedMesh(lampGeo,
+        [worldMats.trafficLamp, worldMats.trafficRear], n);
       bodies.frustumCulled = lamps.frustumCulled = false;
       const tint = [0x9aa4b0, 0x6f7b88, 0x8a5a4e, 0x40566e, 0xb4b0a6, 0x55606c];
       for (let k = 0; k < n; k++) {

@@ -12,10 +12,12 @@ import { ctl, isMobile, initControls, updateControls, syncFromCamera, resetStick
   stationUp, setCollider } from './controls.js';
 import { audio, startAudio, updateAudio, setVolume, setEnabled, suspendAudio } from './audio.js';
 import { pt, startPath, pathStep, stopPath, pathLabel, pathCameraMoved,
-  setPaused, setPathScale, setNoiseTarget, samplesNeeded } from './pathtrace.js';
+  setPaused, setPathScale, setNoiseTarget, samplesNeeded, pathClock,
+  noiseNow } from './pathtrace.js';
 import { trace, startTrace, traceStep, stopTrace,
   setPost, setSunScreen, resizePost, renderFrame, composite, setDenoise, forcePost,
   setBrightScale, setDenoiseGuide, renderGuide, setDenoiseMode, setSharpen,
+  setUpscaleFrom, denoisePasses,
   setTraceDebug, DEBUG_NAMES, setAmbientShare, setHullRef } from './photo.js';
 
 const $ = id => document.getElementById(id);
@@ -232,8 +234,13 @@ function applyPalette(ph) {
     worldMats.trafficBody.emissiveIntensity = lerp(CONFIG.TRAFFIC.win, 0.05, daylight);
   }
   if (worldMats.trafficLamp) {
+    /* Яркость меняем МНОЖИТЕЛЕМ к собственному цвету материала, а не заменой
+       цвета: замена стирала красный у габаритов. */
     const b = lerp(CONFIG.TRAFFIC.lamp, 0.12, daylight);
-    worldMats.trafficLamp.color.setRGB(b, b, b);
+    worldMats.trafficLamp.color.setRGB(1 * b, 0.96 * b, 0.85 * b);
+    if (worldMats.trafficRear) {
+      worldMats.trafficRear.color.setRGB(0.4 * b, 0.004 * b, 0.0015 * b);
+    }
   }
   if (worldMats.nav) {
     worldMats.nav.opacity = clamp(f('navInt'), 0, 1);
@@ -472,6 +479,12 @@ function updateRide() {
    preserveDrawingBuffer, который стоит производительности всё время.
    ═══════════════════════════════════════════════════════════════════════════ */
 let cleanView = false, shotPending = false, omegaSaved = 0;
+/* Текущий порог шума: сводка читает его снаружи, а регулятор живёт
+   внутри построения интерфейса. */
+let noiseWant = 3;
+/* Заданная вручную доля масштабирования. Ноль — за неё отвечает
+   адаптация по времени кадра. */
+let fsrFixed = 0;
 
 function setClean(on) {
   cleanView = on;
@@ -529,6 +542,44 @@ function showTrace(text) {
   const el = $('traceInfo');
   el.textContent = text;
   el.classList.add('show');
+}
+
+/** Развёрнутая сводка о съёмке. Одной строки не хватало: там уживались
+    прогресс, шум, время дерева и способ очистки, и прочитать её на ходу было
+    нельзя. Здесь по строке на смысл. */
+function traceReport() {
+  const rows = [];
+  const secs = pathClock() / 1000;
+
+  if (pt.active) {
+    rows.push(pt.ready
+      ? `путь · шум ${noiseNow().toFixed(2)}% из ${noiseWant}%`
+      : 'строится дерево обхода…');
+    if (pt.ready) {
+      rows.push(`выборок ${pt.samples | 0} из ${samplesNeeded()} · ${secs.toFixed(0)} с`);
+      if (pt.buildMs) {
+        rows.push(`дерево ${(pt.buildMs / 1000).toFixed(1)} с${pt.threaded ? ' в потоке' : ''}`
+          + ` · отскоков ${CONFIG.PATH.bounces}`);
+      }
+    }
+    if (pt.paused) rows.push('пауза · счёт остановлен');
+  } else if (trace.active) {
+    rows.push(`лучи · ${(trace.sample / Math.max(1, trace.total) * 100) | 0}%`);
+    rows.push(`выборок ${trace.sample} из ${trace.total} · ${trace.rays} лучей`);
+  }
+
+  /* Разрешения: на чём считаем, что видит экран, во что растянули. */
+  const s = renderer.getDrawingBufferSize(new THREE.Vector2());
+  const css = `${innerWidth | 0}×${innerHeight | 0}`;
+  rows.push(`счёт ${s.x | 0}×${s.y | 0} · экран ${css}`);
+
+  const dn = denoisePasses();
+  const r = renderer.info.render;
+  rows.push(`граней ${(r.triangles / 1000) | 0}k · вызовов ${r.calls}`
+    + (dn ? ` · очистка ×${dn}` : ''));
+
+  if (pt.error) rows.push(`отказ: ${pt.error}`);
+  return rows.join('\n');
 }
 
 function setTrace(on) {
@@ -638,10 +689,16 @@ function initUI() {
     const on = !pt.paused && !traceHeld;
     if (pt.active) setPaused(on);
     traceHeld = pt.active ? false : on;
+    /* Цепочка обязана существовать и здесь. При экранной трассировке
+       forcePost не вызывался, буферов очистки не было вовсе — и фильтр
+       молча не выполнялся ни разу. */
+    if (on) forcePost(renderer, true);
     /* Направляющий кадр снимаем один раз при включении: сцена неподвижна,
-       пересчитывать его каждый кадр незачем. */
+       пересчитывать его каждый кадр незачем. Порядок важен: до forcePost
+       материала фильтра ещё нет, и кадр было бы некуда положить. */
     setDenoiseGuide(on ? renderGuide(renderer, scene, camera) : null);
     setDenoise(on);
+    if (!on && !pt.active) forcePost(renderer, false);
     bPause.classList.toggle('on', on);
   };
 
@@ -777,6 +834,83 @@ function initUI() {
   const sAAon = $('sAAon'), sAAv = $('sAAv'), sAAcost = $('sAAcost');
   const sMsaa = $('sMsaa'), sFilter = $('sFilter'), sScale = $('sScale');
 
+  /* Масштабирование обычного кадра. «Авто» оставляет долю за адаптацией по
+     времени кадра, остальные значения задают её жёстко. */
+  const sFsr = $('sFsr');
+  for (const it of CONFIG.POST.FSR) {
+    const op = document.createElement('option');
+    op.value = String(it.v); op.textContent = it.label;
+    sFsr.appendChild(op);
+  }
+  sFsr.value = String(prefs.get('fsr', 0));
+  const showFsr = () => {
+    const v = parseFloat(sFsr.value);
+    fsrFixed = v > 0 ? v : 0;
+    const it = CONFIG.POST.FSR.find(x => x.v === v);
+    $('sFsrV').textContent = it ? it.label.toLowerCase() : '';
+    applyDpr();
+  };
+  sFsr.onchange = () => { prefs.set('fsr', parseFloat(sFsr.value)); showFsr(); };
+  showFsr();
+
+  /* ─── Глубокие настройки трассировки ───
+     Их держит человек: у каждой своя цена, и «правильного» значения нет —
+     оно зависит от того, что снимают. */
+  const pick2 = (id, valId, list, key, def, fmt) => {
+    const el = $(id);
+    if (!el) return;
+    for (const v of list) {
+      const op = document.createElement('option');
+      op.value = String(v); op.textContent = fmt(v);
+      el.appendChild(op);
+    }
+    el.value = String(prefs.get(key, def));
+    const show = () => {
+      const v = parseFloat(el.value);
+      CONFIG.PATH[key] = v;
+      if ($(valId)) $(valId).textContent = fmt(v);
+    };
+    el.onchange = () => { prefs.set(key, parseFloat(el.value)); show(); };
+    show();
+  };
+  pick2('sBounce', 'sBounceV', CONFIG.PATH.BOUNCES, 'bounces', CONFIG.PATH.bounces,
+    v => `${v}`);
+  pick2('sRaysN', 'sRaysV', [2, 4, 8, 16], 'rays', CONFIG.PATH.rays,
+    v => `${v}`);
+  pick2('sRef', 'sRefV', CONFIG.PATH.REF_STEPS, 'refSteps', CONFIG.PHOTO.refSteps,
+    v => `${v} шагов`);
+
+  /* ползунки: экспозиция трассировки и яркость трубы */
+  const slide = (id, valId, key, scale, fmt) => {
+    const el = $(id);
+    if (!el) return;
+    el.value = String(Math.round(prefs.get(key, CONFIG.PATH[key]) * scale));
+    const show = () => {
+      const v = parseFloat(el.value) / scale;
+      CONFIG.PATH[key] = v;
+      if ($(valId)) $(valId).textContent = fmt(v);
+    };
+    el.oninput = show;
+    el.onchange = () => { prefs.set(key, parseFloat(el.value) / scale); show(); };
+    show();
+  };
+  slide('sPtExp', 'sPtExpV', 'exposure', 100, v => `×${v.toFixed(2)}`);
+  slide('sSunEmit', 'sSunEmitV', 'sunEmit', 10, v => v.toFixed(1));
+
+  /* Отражения в полёте: аналитические, по трубе и корпусу. Всё, что не
+     описывается уравнением цилиндра, они не отражают. */
+  const swMirror = $('sMirror');
+  if (swMirror) {
+    let on = prefs.get('mirror', 1) ? 1 : 0;
+    const paint = () => {
+      swMirror.classList.toggle('on', !!on);
+      mirrorOn = on;
+      hullU.uMirror.value = on;
+    };
+    swMirror.onclick = () => { on = on ? 0 : 1; prefs.set('mirror', on); paint(); };
+    paint();
+  }
+
   /* Порог шума. Предела в выборках нет: их число выводится из порога,
      потому что шум падает как единица на корень из выборок. */
   const sNoise = $('sNoise');
@@ -787,7 +921,8 @@ function initUI() {
   }
   sNoise.value = String(prefs.get('noise', CONFIG.PATH.noise));
   const showNoise = () => {
-    setNoiseTarget(parseFloat(sNoise.value));
+    noiseWant = parseFloat(sNoise.value);
+    setNoiseTarget(noiseWant);
     $('sNoiseV').textContent = `${sNoise.value}% · ${samplesNeeded()} выборок`;
   };
   sNoise.onchange = () => { prefs.set('noise', parseFloat(sNoise.value)); showNoise(); };
@@ -834,6 +969,11 @@ function initUI() {
   const applyPt = () => {
     const v = parseFloat(sPt.value);
     setPathScale(v);
+    /* Растягиваем с сохранением кромок, потом подчёркиваем резкостью — это и
+       есть пространственная половина FSR. Временные варианты (DLSS, XeSS,
+       FSR 2) в WebGL недоступны: им нужны либо тензорные ядра, либо
+       вычислительные шейдеры WebGPU. */
+    setUpscaleFrom(v);
     setSharpen(v < 0.999 ? CONFIG.POST.sharpen * (1 - v) / 0.65 : 0);
     showPt();
   };
@@ -1082,7 +1222,27 @@ let glowOn = false, raysOn = false, trafficOn = true;
 const renderScale = () => Math.min(
   CONFIG.SSAA_MAX * CONFIG.SHOT.max,
   Math.min(devicePixelRatio || 1, CONFIG.DPR_STEPS[dprIndex]) * ssaa * shotBoost);
-const applyDpr = () => renderer.setPixelRatio(renderScale());
+/** Задать плотность пикселей и подстроить растяжение под неё.
+
+    Адаптация плотности в проекте была и раньше: при просадке кадра она
+    падала на ступень. Но падала молча — картинка просто размывалась
+    билинейно. Теперь та же ступень включает масштабирование с сохранением
+    кромок и резкость, а на родной плотности они выключены.
+
+    Это и есть пространственная половина FSR: считать меньше пикселей и
+    растянуть с сохранением кромок дешевле, чем считать все. Временные
+    варианты (DLSS, XeSS, FSR 2) в браузере недоступны — им нужны либо
+    тензорные ядра, либо вычислительные шейдеры WebGPU. */
+const applyDpr = () => {
+  const native = Math.min(devicePixelRatio || 1, CONFIG.DPR_STEPS[dprCap]);
+  /* Заданная вручную доля перебивает адаптацию: человек попросил явно. */
+  const want = fsrFixed > 0 ? native * fsrFixed : renderScale();
+  renderer.setPixelRatio(want);
+  /* доля от родной плотности: по ней и решаем, растягивать ли */
+  const frac = Math.min(1, want / Math.max(0.001, native));
+  setUpscaleFrom(frac);
+  setSharpen(frac < 0.999 ? CONFIG.POST.sharpen * (1 - frac) / 0.65 : 0);
+};
 
 /* Размер берём у самого контейнера, а не у окна. При входе в полноэкранный
    режим окно ещё не пересчитано в момент события resize, и рендер оставался
@@ -1119,7 +1279,7 @@ function loop() {
       pathCameraMoved();
     }
     pathStep();
-    showTrace(pathLabel());
+    showTrace(traceReport());
     /* Затвор обязан работать и здесь. Раньше ветка возвращалась раньше его
        обработки, и снимок во время трассировки не делался вовсе — это
        выглядело как «интерфейс заблокирован нагрузкой», хотя поток свободен. */

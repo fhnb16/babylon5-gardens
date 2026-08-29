@@ -634,6 +634,91 @@ const DENOISE_FRAG = `
    Контрастно-адаптивная резкость поднимает перепад там, где он есть, и не
    трогает ровные места: там подъём дал бы только шум.
    ═══════════════════════════════════════════════════════════════════════════ */
+/* ═══════════════════════════════════════════════════════════════════════════
+   МАСШТАБИРОВАНИЕ С СОХРАНЕНИЕМ КРОМОК
+
+   Из семейства DLSS/XeSS/FSR в WebGL переносится только FSR 1.0: остальные
+   требуют либо драйвера с тензорными ядрами, либо вычислительных шейдеров
+   WebGPU. FSR 1.0 чисто пространственный и состоит из двух проходов —
+   масштаба и резкости. Резкость у нас уже была; здесь недостающая половина.
+
+   Билинейное растяжение усредняет четыре соседних текселя одинаково и
+   размывает кромку. Здесь вес каждого соседа падает с расстоянием по
+   квадратичному ядру, а направление кромки определяется по перепаду яркости:
+   вдоль кромки соседи берутся охотнее, поперёк — почти не берутся.
+   ═══════════════════════════════════════════════════════════════════════════ */
+const UPSCALE_FRAG = `
+  precision highp float;
+  varying vec2 vUv;
+  uniform sampler2D tSrc;
+  uniform vec2 uSrcRes;
+
+  float lum( vec3 c ) { return dot( c, vec3( 0.2126, 0.7152, 0.0722 ) ); }
+
+  void main() {
+    vec2 px = 1.0 / uSrcRes;
+    vec2 sp = vUv * uSrcRes - 0.5;
+    vec2 base = ( floor( sp ) + 0.5 ) * px;
+    vec2 f = fract( sp );
+
+    /* Двенадцать текселей крестом 4×3: по четырём диагональ не из чего
+       восстановить, и наклонные кромки выходили ступеньками. Именно такую
+       окрестность берёт EASU. */
+    vec3 b = texture2D( tSrc, base + px * vec2( 0.0, -1.0 ) ).rgb;
+    vec3 c = texture2D( tSrc, base + px * vec2( 1.0, -1.0 ) ).rgb;
+    vec3 e = texture2D( tSrc, base + px * vec2( -1.0, 0.0 ) ).rgb;
+    vec3 fq = texture2D( tSrc, base ).rgb;
+    vec3 g = texture2D( tSrc, base + px * vec2( 1.0, 0.0 ) ).rgb;
+    vec3 h = texture2D( tSrc, base + px * vec2( 2.0, 0.0 ) ).rgb;
+    vec3 i = texture2D( tSrc, base + px * vec2( -1.0, 1.0 ) ).rgb;
+    vec3 j = texture2D( tSrc, base + px * vec2( 0.0, 1.0 ) ).rgb;
+    vec3 k = texture2D( tSrc, base + px * vec2( 1.0, 1.0 ) ).rgb;
+    vec3 l = texture2D( tSrc, base + px * vec2( 2.0, 1.0 ) ).rgb;
+    vec3 n = texture2D( tSrc, base + px * vec2( 0.0, 2.0 ) ).rgb;
+    vec3 o = texture2D( tSrc, base + px * vec2( 1.0, 2.0 ) ).rgb;
+
+    /* Направление кромки. Перепад считается по яркости в обе стороны от
+       центра: где он резче, туда весы и склоняются. */
+    float lb = lum( b ), lc = lum( c ), le = lum( e ), lf = lum( fq );
+    float lg = lum( g ), lh = lum( h ), li = lum( i ), lj = lum( j );
+    float lk = lum( k ), ll = lum( l ), ln = lum( n ), lo = lum( o );
+
+    vec2 dir = vec2( 0.0 );
+    float len = 0.0;
+    /* четыре подокна 2×2 — как в EASU, по одному на каждый угол */
+    for ( int q = 0; q < 4; q ++ ) {
+      float c0, c1, c2, c3, c4;
+      if ( q == 0 ) { c0 = lf; c1 = lb; c2 = le; c3 = lg; c4 = lj; }
+      else if ( q == 1 ) { c0 = lg; c1 = lc; c2 = lf; c3 = lh; c4 = lk; }
+      else if ( q == 2 ) { c0 = lj; c1 = lf; c2 = li; c3 = lk; c4 = ln; }
+      else { c0 = lk; c1 = lg; c2 = lj; c3 = ll; c4 = lo; }
+
+      float dx = c2 - c3;                 // перепад по горизонтали
+      float dy = c1 - c4;                 // по вертикали
+      float lenq = clamp( abs( dx ) + abs( dy ), 0.0, 1.0 );
+      lenq = 1.0 - lenq;
+      lenq = lenq * lenq;
+      dir += vec2( dx, dy );
+      len += lenq;
+    }
+    len *= 0.25;
+
+    /* Вдоль кромки соседи берутся охотнее, поперёк почти не берутся: на этом
+       и держится резкость наклонных границ. */
+    float dl = length( dir ) + 1e-5;
+    vec2 d = dir / dl;
+    float stretch = mix( 1.0, 0.28, clamp( dl * 2.0, 0.0, 1.0 ) );
+    vec2 w = mix( vec2( 1.0 ), vec2( stretch ), abs( d ) );
+
+    vec2 t = f * f * ( 3.0 - 2.0 * f );
+    t = mix( vec2( 0.5 ), t, mix( vec2( 1.0 ), w, 1.0 - len ) );
+
+    vec3 top = mix( fq, g, t.x );
+    vec3 bot = mix( j, k, t.x );
+    gl_FragColor = vec4( mix( top, bot, t.y ), 1.0 );
+  }
+`;
+
 const SHARP_FRAG = `
   precision highp float;
   varying vec2 vUv;
@@ -937,6 +1022,10 @@ let passCount = 0;
     не выполняется ли лишнего, когда эффект выключен. */
 export const postPasses = () => passCount;
 
+/** Сколько проходов очистки отработало. По нему видно, дошло ли дело до
+    фильтра вообще: без цепочки он молча пропускается. */
+export const denoisePasses = () => dnRan;
+
 export function setFxaa(renderer, on, filter = true) {
   fxOn = !!on;
   fxaaFilter = filter;
@@ -1009,8 +1098,8 @@ export function setSunScreen(camera, worldGroup) {
 
 function disposeFxaa() {
   for (const t of [fxRT, brRT, blRT, rayRT, ...dnRT, ...taaRT, ...smaaRT]) t?.dispose();
-  for (const mm of [dnMat, smartMat, emaMat, sharpMat]) mm?.dispose();
-  dnMat = smartMat = emaMat = sharpMat = null; dnRT = [];
+  for (const mm of [dnMat, smartMat, emaMat, sharpMat, upMat]) mm?.dispose();
+  dnMat = smartMat = emaMat = sharpMat = upMat = null; dnRT = [];
   guideRT?.dispose(); guideRT = null;
   guideMat?.dispose(); guideMat = null;
   smaaPass?.dispose?.();
@@ -1099,8 +1188,10 @@ export function resizePost(renderer) {
   }
 }
 
-let dnMat = null, smartMat = null, emaMat = null, sharpMat = null;
+let dnMat = null, smartMat = null, emaMat = null, sharpMat = null, upMat = null;
+let upFrom = 0;
 let sharpOn = 0;
+let dnRan = 0;   // сколько проходов очистки отработало в последнем кадре
 let dnRT = [], dnOn = false, dnMode = 'cross', emaHas = false, emaIdx = 0;
 let brightScale = 1;
 
@@ -1118,6 +1209,9 @@ export function setDenoiseMode(mode) { dnMode = mode || 'cross'; emaHas = false;
 
 /** Сила резкости при растяжении. Ноль — растягивать как есть. */
 export function setSharpen(k) { sharpOn = k > 0 ? k : 0; }
+
+/** Исходное разрешение, с которого растягиваем. Ноль — не растягиваем. */
+export function setUpscaleFrom(scale) { upFrom = scale > 0 && scale < 0.999 ? scale : 0; }
 
 let guideRT = null, guideMat = null;
 
@@ -1254,10 +1348,12 @@ export function composite(renderer, srcTexture, exposure) {
   /* Очистка идёт первой, до тонмаппинга: шум живёт в линейных значениях,
      и давить его после сжатия яркости поздно. */
   let src = srcTexture;
+  dnRan = 0;
   if (dnOn && dnMode === 'smart' && smartMat && dnRT.length) {
     smartMat.uniforms.tSrc.value = srcTexture;
     smartMat.uniforms.uRes.value.set(dnRT[0].width, dnRT[0].height);
     pass(smartMat, dnRT[0]);
+    dnRan = 1;
     src = dnRT[0].texture;
   } else if (dnOn && dnMode === 'temporal' && emaMat && dnRT.length) {
     /* Скользящее среднее с ПЕРЕСТАНОВКОЙ буферов. Прежняя версия писала
@@ -1269,6 +1365,7 @@ export function composite(renderer, srcTexture, exposure) {
     emaMat.uniforms.tPrev.value = emaHas ? hist.texture : null;
     emaMat.uniforms.uHasPrev.value = emaHas ? 1 : 0;
     pass(emaMat, dst);
+    dnRan = 1;
     src = dst.texture;
     emaIdx = 1 - emaIdx;
     emaHas = true;
@@ -1294,10 +1391,23 @@ export function composite(renderer, srcTexture, exposure) {
          начинают смешивать разные предметы и картинка мылится */
       dnMat.uniforms.uSigma.value = CONFIG.POST.denoiseSigma / (1 + k * 0.9);
       pass(dnMat, to);
+      dnRan++;
       src = to.texture;
       step *= 2;
     }
   }
+  /* Масштабирование идёт перед резкостью: сперва растянуть с сохранением
+     кромок, потом подчеркнуть то, что осталось. */
+  if (upFrom > 0 && upMat && dnRT.length) {
+    const to = src === dnRT[0].texture ? dnRT[1] : dnRT[0];
+    upMat.uniforms.tSrc.value = src;
+    upMat.uniforms.uSrcRes.value.set(
+      Math.max(1, Math.round(to.width * upFrom)),
+      Math.max(1, Math.round(to.height * upFrom)));
+    pass(upMat, to);
+    src = to.texture;
+  }
+
   /* Резкость идёт последней среди буферных проходов: подчёркивать надо уже
      очищенную картинку, иначе поднимется и зерно. */
   if (sharpOn > 0 && sharpMat && dnRT.length) {

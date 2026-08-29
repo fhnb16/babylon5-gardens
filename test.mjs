@@ -1749,16 +1749,26 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   /* Габариты гасим В САМОМ ЦВЕТЕ: яркость материала умножает все каналы, и
      (1, 0.16, 0.1) превращалось в (3.2, 0.51, 0.32) — после ограничения
      единицей это оранжево-белый, а не красный. */
-  const front = wsrc.match(/addLamp\(-T2\.w \* 0\.32, T2\.len \* 0\.5, \[([\d., ]+)\]/);
-  const rear = wsrc.match(/addLamp\(-T2\.w \* 0\.32, -T2\.len \* 0\.5, \[([\d., ]+)\]/);
-  ok(!!front && !!rear, 'Фары спереди и габариты сзади заданы');
-  const fc = front[1].split(',').map(Number), rc = rear[1].split(',').map(Number);
+  /* Фары и габариты — ДВА МАТЕРИАЛА, а не вершинные цвета: вершинный цвет
+     умножает диффузную составляющую, а не эмиссию, и в трассировке, где
+     лампа заменяется светящимся материалом, красный терялся целиком. */
+  const gW = new THREE.Group();
+  buildWorld(gW, fakeRenderer, 'HIGH');
+  const lampMesh = gW.children.find(o => o.isInstancedMesh
+    && Array.isArray(o.material) && o.material[0] === worldMats.trafficLamp);
+  ok(!!lampMesh, 'Фары спереди и габариты сзади заданы');
+  ok(lampMesh.geometry.groups.length === 2 && lampMesh.material.length === 2,
+     'Две группы граней и два материала');
+  ok(!lampMesh.material[0].vertexColors,
+     'Без вершинных цветов: они умножают диффузную составляющую, а не эмиссию');
+
+  /* Проверяем цвет НА ЭКРАНЕ, а не линейный: 0.096 линейно = 0.34 в sRGB. */
   const lampK = CONFIG.TRAFFIC.lamp;
-  ok(fc.every(v => v * lampK >= 1), `Спереди белые: ${fc.map(v => (v * lampK).toFixed(2))}`);
-  /* Проверяем цвет НА ЭКРАНЕ, а не линейный: 0.096 линейно = 0.34 в sRGB,
-     и красный уходил в оранжево-белый. */
   const toSrgb = v => v <= 0.0031308 ? v * 12.92 : 1.055 * Math.pow(v, 1 / 2.4) - 0.055;
-  const rs = rc.map(v => toSrgb(Math.min(1, v * lampK)));
+  const onScreen = mm => [mm.color.r, mm.color.g, mm.color.b]
+    .map(v => toSrgb(Math.min(1, v * lampK)));
+  const fs = onScreen(worldMats.trafficLamp), rs = onScreen(worldMats.trafficRear);
+  ok(fs.every(v => v > 0.9), `Спереди белые: ${fs.map(v => v.toFixed(2)).join(', ')}`);
   ok(rs[0] > 0.9 && rs[1] < 0.2 && rs[2] < 0.2,
      `Сзади красные и на экране: ${rs.map(v => v.toFixed(2)).join(', ')}`);
   ok(/traffic\.dir\[k\] < 0\) _tq\.multiply/.test(wsrc), 'Встречные машины развёрнуты');
@@ -1860,12 +1870,19 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
       && !['sAAcost', 'sAArow', 'sAArow2', 'sAArow3', 'sAAv'].includes(id));
   ok(controls.length >= 12, `Элементов управления в настройках: ${controls.length}`);
 
+  /* Часть настроек назначается общими помощниками (`pick2`, `slide`), где
+     обработчик вешается на переменную, а имя приходит аргументом. Такие
+     ищем по упоминанию имени в вызове помощника. */
+  const viaHelper = id =>
+    new RegExp(`(pick2|slide)\\('${id}'`).test(msrc);
   const dead = controls.filter(id => {
     const names = [id, ...(alias[id] || [])];
     const direct = new RegExp(`\\$\\('${id}'\\)\\.on\\w+\\s*=`).test(msrc);
-    return !direct && !names.some(v => new RegExp(`\\b${v}\\.on\\w+\\s*=`).test(msrc));
+    return !direct && !viaHelper(id)
+      && !names.some(v => new RegExp(`\\b${v}\\.on\\w+\\s*=`).test(msrc));
   });
-  ok(dead.length === 0, `У каждой настройки есть обработчик (мёртвых: ${dead.join(', ') || 'нет'})`);
+  ok(dead.length === 0,
+     `У каждой настройки есть обработчик (мёртвых: ${dead.join(', ')})`);
 
   /* каждое состояние сохраняется */
   const saved = new Set([...msrc.matchAll(/prefs\.set\('(\w+)'/g)].map(x => x[1]));
@@ -2443,7 +2460,9 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
 /* ══ 3h23. Порядок вкладок настроек ════════════════════════════════════ */
 {
   const html = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
-  const names = [...html.matchAll(/class="tabbtn[^"]*" data-tab="\d+">([^<]+)</g)].map(m => m[1]);
+  /* Подпись теперь лежит в <span> под иконкой, а не текстом кнопки */
+  const names = [...html.matchAll(/class="tabbtn[^"]*" data-tab="\d+">[\s\S]*?<span>([^<]+)<\/span>/g)]
+    .map(m => m[1]);
   ok(names.length >= 4, `Вкладок: ${names.join(', ')}`);
   ok(/ГРАФИКА/i.test(names[0]), 'Графика — первая вкладка');
 
@@ -2713,9 +2732,11 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
      'Вкладки идут после панелей — то есть внизу шторки');
   ok(/\.tabs\{[^}]*position:sticky;bottom:0/.test(css),
      'Вкладки закреплены у нижнего края и не уезжают с прокруткой');
-  ok(/\.tabs\{[^}]*grid-template-columns:repeat\(5,1fr\)/.test(css),
-     'Пять вкладок в одну строку, без переноса и растягивания');
-  ok(/\.tabbtn\{[^}]*text-overflow:ellipsis/.test(css), 'Длинные подписи не ломают сетку');
+  ok(/\.tabs\{[^}]*grid-template-columns:repeat\(6,1fr\)/.test(css),
+     'Все вкладки в одну строку, без переноса и растягивания');
+  ok(/\.tabs\{[^}]*backdrop-filter:blur/.test(css),
+     'Полоса вкладок затемнена с размытием: подписи читаются на любом фоне');
+  ok(/\.tabbtn span\{[^}]*text-overflow:ellipsis/.test(css), 'Длинные подписи не ломают сетку');
   ok(/\.row\{padding:8px 2px/.test(css), 'Строки уплотнены, чтобы список влезал');
 
   /* кабина: борт закрыт по всей высоте */
@@ -3037,6 +3058,26 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   ok(CONFIG.PATH.waterCoatRough < 0.1, 'И она гладкая: иначе отражение размажется');
   ok(/hullMat\.clearcoat = CONFIG\.PATH\.waterCoat/.test(src),
      'Слой ставится на время съёмки');
+
+  /* Без карты плёнка кроет ВЕСЬ корпус: у него один материал на воду, дороги
+     и поля, и на матовом асфальте появлялись глянцевые полосы. */
+  ok(/hullMat\.clearcoatMap = roughMap;/.test(src),
+     'У плёнки есть карта: иначе она легла бы и на дороги с полями');
+  ok(/s\.mat\.clearcoatMap = s\.coatMap;/.test(src), 'И карта снимается вместе со слоем');
+  const tsrc3 = readFileSync(new URL('./js/textures.js', import.meta.url), 'utf8');
+  ok(/px\[i\] = Math\.round\(s \* 255\);/.test(tsrc3),
+     'Доля воды пишется в КРАСНЫЙ канал: оттуда её читает карта плёнки');
+  ok(/px\[i \+ 1\] = Math\.round\(\(0\.95 - s \* 0\.90\) \* 255\);/.test(tsrc3),
+     'А шероховатость в зелёный: одна текстура на две роли');
+  {
+    /* численно: на суше плёнки нет вовсе */
+    const coat = w => {
+      const wet = Math.min(1, Math.max(0, (w - 0.04) / 0.10));
+      return wet * wet * (3 - 2 * wet);
+    };
+    ok(coat(0.02) < 0.01, `На суше плёнки нет (${coat(0.02).toFixed(2)})`);
+    ok(coat(1.0) > 0.95, `На воде есть (${coat(1.0).toFixed(2)})`);
+  }
   ok(/s\.mat\.clearcoat = s\.coat;/.test(src), 'И снимается после');
 
   /* Гладкость воды не зависит от глубины */
@@ -3706,6 +3747,127 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
      'Обычный кадр её не видит');
 }
 
+/* ══ 3h42. Цена пикселя и растяжение ═══════════════════════════════════ */
+{
+  const wsrc = readFileSync(new URL('./js/world.js', import.meta.url), 'utf8');
+  const psrc = readFileSync(new URL('./js/photo.js', import.meta.url), 'utf8');
+  const msrc = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+
+  /* Корпус закрывает весь экран, и всё, что в его шейдере, платится за
+     КАЖДЫЙ пиксель кадра. Цикл теней от опор отрабатывал двенадцать
+     итераций везде, хотя полосы теней занимают шестую часть длины. */
+  ok(/if \( zt > 0\.002 \) \{/.test(wsrc),
+     'Цикл теней от опор идёт только там, где тень может лечь');
+  const A = CONFIG.AXIS;
+  const iters = A.spars.length * A.sparArms;
+  ok(iters >= 6, `Итераций в цикле ${iters} — довод в пользу раннего выхода`);
+
+  /* Растяжение с сохранением кромок */
+  ok(/const UPSCALE_FRAG/.test(psrc), 'Проход масштабирования есть');
+  ok(/float dx = c2 - c3;/.test(psrc) && /float dy = c1 - c4;/.test(psrc),
+     'Направление кромки определяется по перепаду яркости, иначе вышло бы билинейное размытие');
+  ok((psrc.slice(psrc.indexOf('const UPSCALE_FRAG'),
+    psrc.indexOf('const SHARP_FRAG')).match(/texture2D/g) || []).length === 12,
+     'Двенадцать текселей крестом 4×3: по четырём диагональ не восстановить');
+  ok(/for \( int q = 0; q < 4; q \+\+ \)/.test(psrc),
+     'Четыре подокна 2×2 — по одному на каждый угол, как в EASU');
+  ok(/export function setUpscaleFrom/.test(psrc), 'И включается долей');
+  ok(/if \(upFrom > 0 && upMat && dnRT\.length\)/.test(psrc), 'Проход выполняется по надобности');
+  const iUp = psrc.indexOf('if (upFrom > 0 && upMat');
+  const iSharp = psrc.indexOf('if (sharpOn > 0 && sharpMat');
+  ok(iUp > 0 && iUp < iSharp,
+     'Масштаб идёт перед резкостью: сперва растянуть, потом подчеркнуть оставшееся');
+
+  /* Существующая адаптация плотности теперь включает растяжение */
+  ok(/const applyDpr = \(\) => \{/.test(msrc),
+     'Адаптация плотности не продублирована новым механизмом, а доучена');
+  ok(/setUpscaleFrom\(frac\)/.test(msrc) && /setSharpen\(frac < 0\.999/.test(msrc),
+     'Просадка плотности включает растяжение и резкость, а не размывает картинку молча');
+  ok(!/DYNRES/.test(msrc), 'Второго механизма адаптации нет');
+}
+
+/* ══ 3h43. Вкладки, FSR в настройках, пустые инстансы ══════════════════ */
+{
+  const html = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
+  const css = readFileSync(new URL('./style.css', import.meta.url), 'utf8');
+  const msrc = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+  const ptsrc = readFileSync(new URL('./js/pathtrace.js', import.meta.url), 'utf8');
+
+  /* Вкладки как нижняя панель: иконка, под ней подпись, выбранное
+     подсвечено. Ряд одинаковых надписей глазу не за что зацепить. */
+  const tabs = [...html.matchAll(/class="tabbtn[^"]*" data-tab="\d+">([\s\S]*?)<\/button>/g)]
+    .map(m => m[1]);
+  ok(tabs.length === 6, `Вкладок: ${tabs.length}`);
+  ok(tabs.every(b => /<svg/.test(b)), 'У каждой есть иконка');
+  ok(tabs.every(b => /<span>/.test(b)), 'И подпись под ней');
+  ok(/\.tabbtn\{[^}]*flex-direction:column/.test(css), 'Иконка над подписью');
+  ok(/\.tabbtn\.on\{[^}]*background:rgba\(255,217,160/.test(css),
+     'Выбранная отличается фоном, а не только цветом');
+  ok(/\.tabbtn\.on\{[^}]*border-color/.test(css), 'И рамкой: подписи мелкие, одного цвета мало');
+
+  /* FSR виден в настройках, а не только в автоматике */
+  ok(html.includes('id="sFsr"'), 'Масштабирование есть в настройках');
+  ok(Array.isArray(CONFIG.POST.FSR) && CONFIG.POST.FSR.length >= 4,
+     `Ступеней FSR: ${CONFIG.POST.FSR.map(x => x.label.split(' ')[0]).join(', ')}`);
+  ok(CONFIG.POST.FSR[0].v === 0, 'Первая — авто, доля остаётся за адаптацией');
+  ok(CONFIG.POST.FSR.some(x => x.v === 1), 'Есть и явное «выкл»');
+  ok(/fsrFixed > 0 \? native \* fsrFixed : renderScale\(\)/.test(msrc),
+     'Заданная вручную доля перебивает адаптацию: человек попросил явно');
+  ok(/prefs\.set\('fsr'/.test(msrc), 'Выбор сохраняется');
+
+  /* Пустой меш в дереве обхода — трата на его обход */
+  ok(/o\.isInstancedMesh && o\.visible && o\.count === 0/.test(ptsrc),
+     'Пустые инстансы скрываются от сборщика: заготовки уровней детализации');
+}
+
+/* ══ 3h44. Глубокие настройки и очистка ════════════════════════════════ */
+{
+  const html = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
+  const msrc = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+  const psrc = readFileSync(new URL('./js/photo.js', import.meta.url), 'utf8');
+  const wsrc = readFileSync(new URL('./js/world.js', import.meta.url), 'utf8');
+
+  /* Отдельная вкладка: у каждой из этих настроек своя цена, и «правильного»
+     значения нет — оно зависит от того, что снимают. */
+  for (const id of ['sBounce', 'sRaysN', 'sRef', 'sMirror', 'sPtExp', 'sSunEmit']) {
+    ok(html.includes(`id="${id}"`), `Настройка ${id} есть`);
+  }
+  ok(/data-tab="5"/.test(html), 'И живут они на своей вкладке');
+  ok(CONFIG.PATH.BOUNCES.length >= 5, `Ступеней отскоков: ${CONFIG.PATH.BOUNCES.join(', ')}`);
+  ok(CONFIG.PATH.REF_STEPS.length >= 4, `Ступеней марша: ${CONFIG.PATH.REF_STEPS.join(', ')}`);
+
+  /* Очистке нужна цепочка: при экранной трассировке forcePost не вызывался,
+     буферов не было вовсе, и фильтр молча не выполнялся ни разу. */
+  ok(/if \(on\) forcePost\(renderer, true\);/.test(msrc),
+     'Очистка поднимает цепочку сама: без неё фильтру негде выполниться');
+  const iForce = msrc.indexOf('if (on) forcePost(renderer, true);');
+  const iGuide = msrc.indexOf('setDenoiseGuide(on ?', iForce - 400);
+  ok(iForce > 0 && iForce < iGuide,
+     'И поднимает ДО съёмки направляющего кадра: раньше материала фильтра ещё нет');
+  ok(/export const denoisePasses/.test(psrc),
+     'Число проходов очистки доступно: по нему видно, дошло ли дело до фильтра');
+  ok(/dn \? ` · очистка ×\$\{dn\}` : ''/.test(msrc),
+     'И показывается в сводке');
+  /* Одной строки не хватало: там уживались прогресс, шум, время дерева и
+     способ очистки — прочитать её на ходу было нельзя. */
+  ok(/function traceReport/.test(msrc), 'Сводка о съёмке развёрнута по строкам');
+  ok(/rows\.join\('\\n'\)/.test(msrc), 'Каждый смысл на своей строке');
+  ok(/счёт \$\{s\.x \| 0\}×\$\{s\.y \| 0\} · экран/.test(msrc),
+     'Видно, на чём считаем и что видит экран');
+  ok(/граней \$\{\(r\.triangles \/ 1000\) \| 0\}k · вызовов/.test(msrc),
+     'И сколько геометрии ушло на кадр');
+  const ptsrc2 = readFileSync(new URL('./js/pathtrace.js', import.meta.url), 'utf8');
+  ok(/export function pathClock/.test(ptsrc2), 'Таймер счёта есть');
+  ok(/pathClock\(pt\.paused \? 'pause' : 'resume'\)/.test(ptsrc2),
+     'Пауза его останавливает: иначе он показывал бы не работу, а время в режиме');
+
+  /* Растения отступают от ВСЕЙ чаши низины, а не от кромки воды */
+  ok(/pd\.r \/ CONFIG\.HILL\.pondFill \+ r \+ CONFIG\.HILL\.shore/.test(wsrc),
+     'Отступ считается от всей чаши: склон пологий, и дерево на спуске читается стоящим в озере');
+  ok(CONFIG.HILL.pondFill > 0 && CONFIG.HILL.pondFill < 1,
+     `Вода занимает ${(CONFIG.HILL.pondFill * 100) | 0}% чаши`);
+}
+
 /* ══ 3i. Звук реагирует на то, где находится камера ════════════════════ */
 {
   /* Решения о громкости вынесены в чистые функции — их можно проверить
@@ -3830,8 +3992,12 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   /* Эмиссия не освещается: ночью она обязана быть слабее отражённого света,
      иначе улицы светятся сами и красят пол в кремовый. */
   const src2 = readFileSync(new URL('./js/world.js', import.meta.url), 'utf8');
-  ok(/smoothstep\(\s*0\.34,\s*0\.92,\s*hullMask\.b\s*\)/.test(src2),
+  ok(/smoothstep\(\s*0\.10,\s*0\.75,\s*hullMask\.b\s*\)/.test(src2),
      'Фонари зажигаются мягким порогом по B, а не по всей заливке');
+  /* Прежний порог 0.34…0.92 давал резкий край: асфальт светился сам, а
+     трава в двух шагах оставалась чёрной — город выделялся пятном. */
+  ok(/float spill = smoothstep\(\s*0\.02,\s*0\.30,\s*hullMask\.b\s*\)\s*\*\s*uCitySpill/.test(src2),
+     'За краем застройки остаётся отсвет, спадающий к нулю');
   /* фонари горят на всех улицах, а не только на магистралях, поэтому
      площадь свечения выросла и яркость должна была упасть */
   const tsrc2 = readFileSync(new URL('./js/textures.js', import.meta.url), 'utf8');
@@ -3845,7 +4011,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
      сравнивать его с абсолютной яркостью света больше нельзя. Проверяем
      то, что важно, — фонарь освещает покрытие, поэтому разметка видна. */
   const wsrc2 = readFileSync(new URL('./js/world.js', import.meta.url), 'utf8');
-  ok(/totalEmissiveRadiance \+= uCityGlow \* lamps \* diffuseColor\.rgb/.test(wsrc2),
+  ok(/totalEmissiveRadiance \+= uCityGlow \* diffuseColor\.rgb/.test(wsrc2),
      'Свет фонарей множится на альбедо — разметка дороги видна ночью');
   ok(N.cityGlow <= 1.0, `Фонарь не ярче самой поверхности (множитель ${N.cityGlow})`);
   ok(D.cityGlow === 0, 'Днём фонари выключены');

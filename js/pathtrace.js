@@ -279,6 +279,15 @@ function cloneMat(mat) {
 function expandInstances(scene) {
   const src = [];
   scene.traverse(o => { if (o.isInstancedMesh && o.visible && o.count > 0) src.push(o); });
+  /* Пустые инстансы (count === 0) сюда не попадают — это заготовки уровней
+     детализации. Но сам сборщик их всё равно перебирает, поэтому скрываем:
+     пустой меш в дереве обхода — это чистая трата на его обход. */
+  scene.traverse(o => {
+    if (o.isInstancedMesh && o.visible && o.count === 0) {
+      hidden.push(o);
+      o.visible = false;
+    }
+  });
 
   const m = new THREE.Matrix4();
   const col = new THREE.Color();
@@ -432,8 +441,13 @@ function waterForPath(hullMat, roughMap, normalMap) {
   if (roughMap && CONFIG.PATH.waterCoat > 0) {
     waterSaved.coat = hullMat.clearcoat;
     waterSaved.coatRough = hullMat.clearcoatRoughness;
+    waterSaved.coatMap = hullMat.clearcoatMap;
     hullMat.clearcoat = CONFIG.PATH.waterCoat;
     hullMat.clearcoatRoughness = CONFIG.PATH.waterCoatRough;
+    /* КАРТА обязательна: без неё плёнка кроет весь корпус — воду, дороги и
+       поля одинаково, и на матовом асфальте появляются глянцевые полосы.
+       Красный канал той же текстуры хранит долю воды. */
+    hullMat.clearcoatMap = roughMap;
   }
   /* Металличность воде противопоказана: металл красит отражение в свой цвет,
      а альбедо реки тёмно-синее — получалось чёрное пятно вместо зеркала.
@@ -454,6 +468,7 @@ function restoreWater() {
   if (s.coat !== undefined) {
     s.mat.clearcoat = s.coat;
     s.mat.clearcoatRoughness = s.coatRough;
+    s.mat.clearcoatMap = s.coatMap;
   }
   if (s.scale) s.mat.normalScale.copy(s.scale);
   s.mat.needsUpdate = true;
@@ -697,6 +712,7 @@ export async function startPath(renderer, scene, camera, wind, mobile, onPhase, 
     pt.build = 1;
     pt.ready = true;
     starting = false;
+    pathClock('start');
     return true;
   } catch (e) {
     starting = false;
@@ -814,6 +830,7 @@ export function setPathScale(v) {
 
 export function setPaused(on) {
   pt.paused = !!on;
+  pathClock(pt.paused ? 'pause' : 'resume');
   if (tracer) tracer.renderToCanvas = true;
   return pt.paused;
 }
@@ -828,6 +845,18 @@ export function stopPath() {
 
 /** Сообщение для индикатора: постройка дерева и накопление — разные фазы,
     и путать их нельзя. Дерево может строиться десятки секунд. */
+/** Сколько времени идёт счёт. Пауза его останавливает: иначе таймер
+    показывал бы не работу, а время, проведённое в режиме. */
+let runMs = 0, runFrom = 0;
+
+export function pathClock(tick) {
+  const now = (typeof performance !== 'undefined' ? performance : Date).now();
+  if (tick === 'start') { runMs = 0; runFrom = now; return 0; }
+  if (tick === 'pause') { if (runFrom) runMs += now - runFrom; runFrom = 0; return runMs; }
+  if (tick === 'resume') { runFrom = now; return runMs; }
+  return runMs + (runFrom ? now - runFrom : 0);
+}
+
 export function pathLabel() {
   if (pt.error) return `путь недоступен · ${pt.error}`;
   /* Постройка дерева блокирует поток: честно предупреждаем, что это надолго,
