@@ -133,7 +133,11 @@ function patchHullMaterial(mat, nArm, nSpar) {
       /* --- вода зеркальна --- */
       .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
         float wFar = smoothstep( 25.0, 90.0, length( vViewPosition ) );
-        roughnessFactor = mix( roughnessFactor, mix( 0.045, 0.20, wFar ), hullMask.r );`)
+        /* Гладкость не зависит от глубины: вода на отмели такая же гладкая,
+           как на стрежне. Прежде смешивание шло по hullMask.r, и у берега
+           поверхность выходила матовой — отражения там пропадали. */
+        float wet = smoothstep( 0.04, 0.14, hullMask.r );
+        roughnessFactor = mix( roughnessFactor, mix( 0.045, 0.20, wFar ), wet );`)
 
       /* --- рябь на воде: возмущаем нормаль, блик солнца сам поедет --- */
       .replace('#include <normal_fragment_maps>', `#include <normal_fragment_maps>

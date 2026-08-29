@@ -423,6 +423,18 @@ function waterForPath(hullMat, roughMap, normalMap) {
      трассировщик не видит, и вода выходила зеркально-гладкой. */
   if (normalMap) hullMat.normalMap = normalMap;
   if (roughMap) { hullMat.roughnessMap = roughMap; hullMat.roughness = 1; }
+
+  /* Плёнка поверх воды. Вода с показателем преломления 1.33 отражает в лоб
+     всего два процента — это правда жизни, но смотрим мы на неё чаще сверху,
+     и силуэты тонут. Clearcoat — физически честная добавка: отдельный
+     зеркальный слой поверх диффузного, он не меняет цвет воды, а лишь
+     поднимает долю отражённого. Трассировщик его читает. */
+  if (roughMap && CONFIG.PATH.waterCoat > 0) {
+    waterSaved.coat = hullMat.clearcoat;
+    waterSaved.coatRough = hullMat.clearcoatRoughness;
+    hullMat.clearcoat = CONFIG.PATH.waterCoat;
+    hullMat.clearcoatRoughness = CONFIG.PATH.waterCoatRough;
+  }
   /* Металличность воде противопоказана: металл красит отражение в свой цвет,
      а альбедо реки тёмно-синее — получалось чёрное пятно вместо зеркала.
      Вода диэлектрик: гладкая поверхность и без металличности отражает по
@@ -439,6 +451,10 @@ function restoreWater() {
   s.mat.roughness = s.roughVal;
   s.mat.metalness = s.metal;
   s.mat.normalMap = s.normal;
+  if (s.coat !== undefined) {
+    s.mat.clearcoat = s.coat;
+    s.mat.clearcoatRoughness = s.coatRough;
+  }
   if (s.scale) s.mat.normalScale.copy(s.scale);
   s.mat.needsUpdate = true;
   waterSaved = null;

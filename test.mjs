@@ -3030,6 +3030,32 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   ok(/hullMat\.normalScale\?\.multiplyScalar/.test(src),
      'Рельеф усиливается: рябь из патча шейдера трассировщику не видна');
   ok(/function restoreWater/.test(src), 'После съёмки материал возвращается');
+
+  /* Вода с показателем преломления 1.33 отражает в лоб два процента — это
+     правда жизни, но смотрим мы чаще сверху, и силуэты тонут. */
+  ok(CONFIG.PATH.waterCoat > 0.5, `Зеркальная плёнка поверх воды ${CONFIG.PATH.waterCoat}`);
+  ok(CONFIG.PATH.waterCoatRough < 0.1, 'И она гладкая: иначе отражение размажется');
+  ok(/hullMat\.clearcoat = CONFIG\.PATH\.waterCoat/.test(src),
+     'Слой ставится на время съёмки');
+  ok(/s\.mat\.clearcoat = s\.coat;/.test(src), 'И снимается после');
+
+  /* Гладкость воды не зависит от глубины */
+  const tsrc2 = readFileSync(new URL('./js/textures.js', import.meta.url), 'utf8');
+  ok(/const wet = Math\.min\(1, Math\.max\(0, \(water - 0\.04\) \/ 0\.10\)\)/.test(tsrc2),
+     'Шероховатость не выводится из глубины: вода на отмели такая же гладкая, как на стрежне');
+  const wsrc3 = readFileSync(new URL('./js/world.js', import.meta.url), 'utf8');
+  ok(/float wet = smoothstep\( 0\.04, 0\.14, hullMask\.r \)/.test(wsrc3),
+     'В обычном кадре то же самое: прежде у берега поверхность выходила матовой');
+  {
+    /* численно: на отмели гладкость та же, что на стрежне */
+    const rough = w => {
+      const wet = Math.min(1, Math.max(0, (w - 0.04) / 0.10));
+      return 0.95 - wet * wet * (3 - 2 * wet) * 0.90;
+    };
+    ok(Math.abs(rough(0.16) - rough(1.0)) < 0.01,
+       `Отмель ${rough(0.16).toFixed(2)} и стрежень ${rough(1.0).toFixed(2)} одинаково гладкие`);
+    ok(rough(0.02) > 0.9, 'А суша осталась шершавой');
+  }
   /* Металл красит отражение в свой цвет, а альбедо реки тёмно-синее —
      выходило чёрное пятно. Вода диэлектрик. */
   ok(/hullMat\.metalness = 0;/.test(src), 'Вода отражает как диэлектрик, без металличности');
@@ -3310,14 +3336,18 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   const tsrc = readFileSync(new URL('./js/textures.js', import.meta.url), 'utf8');
   ok(/─── ПРУДЫ ───/.test(tsrc), 'Пруд рисуется в тот же канал маски, что и река');
   const pondBlock = tsrc.slice(tsrc.indexOf('─── ПРУДЫ ───'));
-  ok(/ellipse\(m, M\.c\.width, 0\.5, '#ff0000'\)/.test(pondBlock),
+  ok(/band\(m, M\.c\.width, 1\.0, 0\.42, \[40, 0, 0\], \[255, 0, 0\], 14\)/.test(pondBlock),
      'В канал воды: весь водный шейдер достаётся пруду даром');
   /* Сложение оставляло зелёный канал на месте, и трава ложилась поверх
      воды — озера не было видно вовсе. */
   ok(!/globalCompositeOperation/.test(pondBlock.slice(0, pondBlock.indexOf('\n  }\n'))),
      'Пруд заливается как река, а не складывается с фоном');
-  ok(/ellipse\(m, M\.c\.width, 1\.0, '#330000'\)/.test(pondBlock),
-     'Глубина растёт к середине — тремя проходами, как у русла');
+  /* Пять сплошных колец читались плоским ореолом, наклеенным поверх травы:
+     у настоящего берега нет резких границ. */
+  ok(/const band = \(ctx, size, from, to, colFrom, colTo, steps\)/.test(pondBlock),
+     'Берег и глубина — плавным переходом, а не ступенями');
+  ok(/ctx\.globalAlpha = 0\.5;/.test(pondBlock),
+     'Кольца накладываются полупрозрачно: холст не умеет заливать градиентом по повёрнутому эллипсу');
 
   /* и вода в низине действительно появляется */
   const g3 = new THREE.Group();
