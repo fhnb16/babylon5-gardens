@@ -231,7 +231,11 @@ body.clean #rideBar{display:none}
 .tabs{
   position:sticky;bottom:0;z-index:2;
   display:grid;grid-template-columns:repeat(6,1fr);gap:2px;
-  margin:12px -2px 0;padding:6px 2px calc(4px + var(--sab));
+  /* Отрицательные поля ровно по отступам шторки: она даёт 16 по бокам и 18
+     снизу, а полоса вычитала только 2 — оттого висела в воздухе, не касаясь
+     краёв. Внутренние отступы возвращают содержимому прежнее положение. */
+  margin:12px calc(-16px - var(--sar)) calc(-18px - var(--sab)) calc(-16px - var(--sal));
+  padding:8px calc(16px + var(--sar)) calc(10px + var(--sab)) calc(16px + var(--sal));
   /* Затемнение с размытием: сквозь панель видно, что список продолжается,
      но подписи вкладок при этом читаются на любом фоне. */
   background:rgba(9,14,22,.72);
@@ -348,7 +352,7 @@ body.clean #rideBar{display:none}
   .sheet h2{margin-bottom:8px}
   .row{padding:8px 2px}
   #help .cols{grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:14px}
-  .tabs{grid-template-columns:repeat(6,1fr);padding:6px 2px calc(2px + var(--sab))}
+  .tabs{padding:6px calc(16px + var(--sar)) calc(6px + var(--sab)) calc(16px + var(--sal))}
   .tabbtn{padding:7px 2px;font-size:8px}
   .row{padding:6px 2px}
 
