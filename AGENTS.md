@@ -11,7 +11,7 @@ Babylon.js). R = 50, L = 300 units, **1 unit = 10 m**. Everything is
 procedural: Canvas2D textures, primitive-built structures, WebAudio sound —
 scene assets are generated. The packaged app also ships launcher artwork and licensed OIDN weights.
 
-Current state (v2.13.0): three.js r187. The app shell is TypeScript in `app/`
+Current state (v2.13.1): three.js r187. The app shell is TypeScript in `app/`
 (entry `app/main.ts`, loaded by `index.html`). **The world is built by
 `core/` `buildScene()` + `backends/three` `createThreeWorld()`**; the legacy
 `js/world.js`, `structures.js`, `textures.js`, `util.js` and `app/lights.ts`

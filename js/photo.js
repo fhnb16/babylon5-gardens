@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { CONFIG } from './config.js';
+import { renderWithoutContactShadows } from '../backends/three/post/contactShadows.ts';
 /* SMAA берём готовым проходом three. Своя копия таблиц и шейдеров прожила
    недолго и дважды подвела: сперва я забыл перенести `defines`, и шейдер не
    компилировался, потом разошлась версия зависимости. Здесь всё это чинится
@@ -519,7 +520,7 @@ export function traceStep() {
 
   /* сам кадр — в линейном пространстве, без тонмаппинга */
   R.setRenderTarget(rtBeauty);
-  R.render(S, C);
+  renderWithoutContactShadows(S, () => R.render(S, C));
 
   /* Труба-солнце в видовых координатах. Ось станции неподвижна относительно
      вращения мира (вращение идёт вокруг неё же), поэтому достаточно перевести

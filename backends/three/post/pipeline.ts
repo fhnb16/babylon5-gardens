@@ -21,6 +21,7 @@ import {
 } from 'three/tsl';
 import { denoise } from 'three/addons/tsl/display/DenoiseNode.js';
 import { screenRays } from './screenRays.ts';
+import { renderWithoutContactShadows } from './contactShadows.ts';
 import { fxaa } from 'three/addons/tsl/display/FXAANode.js';
 import { smaa } from 'three/addons/tsl/display/SMAANode.js';
 import { bloom } from 'three/addons/tsl/display/BloomNode.js';
@@ -297,7 +298,8 @@ export function createRenderPipeline(renderer: THREE.WebGPURenderer, scene: THRE
       if (advanceFrame) advanceNodeFrame(renderer);
       renderer.getDrawingBufferSize(size);
       U.invOut.value.set(1 / Math.max(1, size.x), 1 / Math.max(1, size.y));
-      rp.render();
+      if (o.screenTrace >= 0 && !external) renderWithoutContactShadows(scene, () => rp.render());
+      else rp.render();
     },
     setSize(width, height, dpr) {
       renderer.setPixelRatio(dpr);
