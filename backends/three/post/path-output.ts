@@ -3,10 +3,16 @@ import { texture } from 'three/tsl';
 import type { PostPipeline } from './pipeline.ts';
 
 /** The tracer owns the GPU texture. three r187 samples it on the same device. */
-export function pathOutput(post: PostPipeline) {
+export function pathOutput(post: PostPipeline, rasterExposure: number) {
   let current: ExternalTexture | null = null;
+  let exposure = rasterExposure;
   return {
-    present(source: GPUTexture) {
+    present(source: GPUTexture, exposureMultiplier: number) {
+      const nextExposure = rasterExposure * exposureMultiplier;
+      if (exposure !== nextExposure) {
+        exposure = nextExposure;
+        post.setExposure(exposure);
+      }
       if (current?.sourceTexture !== source) {
         const previous = current;
         current = new ExternalTexture(source);
@@ -24,7 +30,7 @@ export function pathOutput(post: PostPipeline) {
     },
     dispose() {
       if (!current) return;
-      post.compositeExternal(null);
+      post.compositeExternal(null, rasterExposure);
       current.dispose();
       current = null;
     }

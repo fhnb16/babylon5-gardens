@@ -70,7 +70,7 @@ export interface StartPathOptions {
   /** WebGPU canvas the presenter draws into (createOverlayCanvas() for an overlay over the app canvas) */
   canvas: HTMLCanvasElement | OffscreenCanvas;
   /** Shared-device HDR sink. The canvas then supplies dimensions only. */
-  presentHdr?: (texture: GPUTexture) => void;
+  presentHdr?: (texture: GPUTexture, exposureMultiplier: number) => void;
   /** lighting: a LightingState or a phase number (tracerLightingAt); default DAY */
   lighting?: LightingState | number;
   /** device to use (shared with three later); default: a cached createDevice() */
@@ -209,8 +209,16 @@ function applyAdaptive(): void {
 function present(): void {
   if (!integ) return;
   const tex = pt.showing === 'oidn' && oidn ? oidn.output : pt.showing === 'atrous' && atrous ? atrous.output : integ.output;
-  if (startOpts?.presentHdr) startOpts.presentHdr(tex);
-  else presenter?.present(tex, { exposure: RASTER_TONE_EXPOSURE * (startOpts?.exposure ?? 1), mode: startOpts?.tone ?? PT_API.tone });
+  const exposure = startOpts?.exposure ?? 1;
+  if (startOpts?.presentHdr) startOpts.presentHdr(tex, exposure);
+  else presenter?.present(tex, { exposure: RASTER_TONE_EXPOSURE * exposure, mode: startOpts?.tone ?? PT_API.tone });
+}
+
+/** Re-present the accumulated image with a new display exposure. */
+export function setPathExposure(exposure: number): void {
+  if (!startOpts || startOpts.exposure === exposure) return;
+  startOpts = { ...startOpts, exposure };
+  if (pt.samples > 0) present();
 }
 
 function fail(e: unknown): void {
@@ -315,11 +323,13 @@ export function pathCameraMoved(camera?: PathCamera): void {
 /** New lighting (phase number or state): accumulation restarts. */
 export function setPathLighting(l: LightingState | number): void {
   lightingNow = lightingOf(l);
+  cleanRequest++;
+  oidn?.cancel();
   if (!integ) return;
   const it = integ;
   const run = () => {
     if (it !== integ) return;
-    it.setLighting(lightingNow!); applyAdaptive(); pt.samples = 0; pt.noise = 100;
+    it.setLighting(lightingNow!); applyAdaptive(); pt.samples = 0; pt.noise = 100; pt.showing = 'raw';
   };
   if (inflight) void inflight.then(run); else run();
 }

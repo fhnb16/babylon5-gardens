@@ -37,6 +37,7 @@ export function setTraceDebug(v) {
 let R = null, S = null, C = null;                    // renderer, scene, camera
 let rtNormal, rtBeauty, accum = [], quad, aoMat, showMat, qCam, qScene;
 let hidden = [], savedWind = 1, normalMat = null;
+const traceSize = new THREE.Vector2();
 
 /* Гальтоново-подобная последовательность для субпиксельного смещения:
    равномернее случайной и не даёт «комков» при малом числе кадров */
@@ -324,7 +325,9 @@ const AO_FRAG = `
           : vec3( 0.0 );
       }
     }
-    gl_FragColor = vec4( mix( texture2D( tPrev, vUv ).rgb, cur, uBlend ), 1.0 );
+    /* Первый кадр начинает историю, в том числе после смены размера. */
+    if ( uBlend < 1.0 ) cur = mix( texture2D( tPrev, vUv ).rgb, cur, uBlend );
+    gl_FragColor = vec4( cur, 1.0 );
   }
 `;
 
@@ -372,8 +375,10 @@ function makeTargets(w, h) {
     depthTexture: depth, depthBuffer: true,
     minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter
   });
+  /* Цвет и глубина берутся из одной субпиксельной выборки. Сглаживание
+     набирается смещением камеры, без отдельного MSAA-буфера цвета. */
   rtBeauty = new THREE.WebGLRenderTarget(w, h, {
-    type: THREE.HalfFloatType, depthBuffer: true, samples: CONFIG.MSAA_SAMPLES,
+    type: THREE.HalfFloatType, depthBuffer: true,
     minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter
   });
   accum = [0, 1].map(() => new THREE.WebGLRenderTarget(w, h, {
@@ -423,9 +428,8 @@ export function startTrace(renderer, scene, camera, windUniform, mobile = false)
 
   /* Плотность пикселей задаёт main: во время съёмки он поднимает её до
      масштаба снимка, и буферы здесь просто повторяют текущий размер. */
-  const size = new THREE.Vector2();
-  renderer.getDrawingBufferSize(size);
-  makeTargets(size.x, size.y);
+  renderer.getDrawingBufferSize(traceSize);
+  makeTargets(traceSize.x, traceSize.y);
 
   /* мир должен замереть: любое движение обнуляет накопленное */
   savedWind = windUniform.value;
@@ -440,7 +444,7 @@ export function startTrace(renderer, scene, camera, windUniform, mobile = false)
       tBeauty: { value: rtBeauty.texture }, tNormal: { value: rtNormal.texture },
       tDepth: { value: rtNormal.depthTexture }, tPrev: { value: accum[1].texture },
       uProj: { value: new THREE.Matrix4() }, uProjInv: { value: new THREE.Matrix4() },
-      uRes: { value: new THREE.Vector2(size.x, size.y) },
+      uRes: { value: traceSize },
       uRadius: { value: P.radius }, uIntensity: { value: P.intensity },
       uBias: { value: P.bias }, uSeed: { value: 0 }, uBlend: { value: 1 },
       uFogD: { value: 0 }, uBounce: { value: P.bounce },
@@ -482,7 +486,14 @@ export function startTrace(renderer, scene, camera, windUniform, mobile = false)
 /** Один шаг накопления. Возвращает долю готовности 0…1 */
 export function traceStep() {
   if (!trace.active) return 1;
-  const P = CONFIG.PHOTO;
+  R.getDrawingBufferSize(traceSize);
+  const { x: w, y: h } = traceSize;
+  /* При повороте экрана или смене DPR все проходы переходят на одну
+     сетку пикселей. История прежнего ракурса больше не совпадает с ней. */
+  if (rtBeauty.width !== w || rtBeauty.height !== h) {
+    for (const target of [rtNormal, rtBeauty, ...accum]) target.setSize(w, h);
+    trace.sample = 0;
+  }
   const n = trace.sample;
 
   /* набрали нужное — дальше только показываем, не жжём кадры впустую */
@@ -492,7 +503,6 @@ export function traceStep() {
   }
 
   /* субпиксельное смещение — оно же даёт сглаживание */
-  const w = R.domElement.width, h = R.domElement.height;
   C.setViewOffset(w, h, halton(n + 1, 2) - 0.5, halton(n + 1, 3) - 0.5, w, h);
   C.updateProjectionMatrix();
 

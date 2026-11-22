@@ -18,7 +18,7 @@ import javax.net.ssl.HttpsURLConnection
 object Updates {
     private const val DAY = 24L * 60 * 60 * 1000
     private const val MAX_APK = 256L * 1024 * 1024
-    private const val FEED = "https://api.github.com/repos/fhnb16/babylon5-gardens/releases/latest"
+    private const val RELEASES = "https://api.github.com/repos/fhnb16/babylon5-gardens/releases"
     private const val RELEASE_PACKAGE = "io.github.fhnb16.babylon5gardens"
     private const val ASSET = "babylon5-gardens.apk"
     private const val JOB_ID = 21300
@@ -94,13 +94,14 @@ object Updates {
         }
     }
 
-    fun check(context: Context, manual: Boolean, done: (Boolean, String) -> Unit) {
+    fun check(context: Context, manual: Boolean, cancelled: () -> Boolean = { false }, done: (Boolean, String) -> Unit) {
         val c = context.applicationContext
         if (!supported(c)) {
             done(false, "Обновления из GitHub доступны для релизной сборки")
             return
         }
         executor.execute {
+            if (cancelled()) return@execute
             val p = prefs(c)
             try {
                 val target = apk(c)
@@ -123,9 +124,14 @@ object Updates {
                     done(false, "Проверка уже выполнена")
                     return@execute
                 }
-                val release = request(FEED) { conn ->
-                    if (conn.responseCode == 404) null
-                    else conn.inputStream.bufferedReader().use { JSONObject(it.readText()) }
+                val release = request("$RELEASES/latest") { conn ->
+                    if (conn.responseCode == 404) {
+                        // GitHub returns 404 both for a private repo and for a public repo with no release.
+                        request("$RELEASES?per_page=1") { list ->
+                            check(list.responseCode == 200) { "Публичная лента релизов недоступна" }
+                        }
+                        null
+                    } else conn.inputStream.bufferedReader().use { JSONObject(it.readText()) }
                 }
                 if (release == null || release.getBoolean("draft") || release.getBoolean("prerelease") ||
                     versionCode(release.getString("tag_name")) <= current) {
@@ -142,13 +148,14 @@ object Updates {
                 val code = versionCode(release.getString("tag_name"))
                 val digest = asset.getString("digest")
                 require(Regex("sha256:[0-9a-f]{64}").matches(digest)) { "GitHub не предоставил контрольную сумму APK" }
-                val temp = File(c.cacheDir, "$ASSET.part")
+                val temp = File(c.cacheDir, "download-$ASSET")
                 try {
                     request(asset.getString("browser_download_url")) { conn ->
                         conn.inputStream.buffered().use { input -> temp.outputStream().buffered().use { out ->
                             var count = 0L
                             val buf = ByteArray(DEFAULT_BUFFER_SIZE)
                             while (true) {
+                                if (cancelled()) throw java.util.concurrent.CancellationException()
                                 val size = input.read(buf)
                                 if (size < 0) break
                                 count += size
@@ -252,11 +259,26 @@ object Updates {
 }
 
 class ReleaseJob : JobService() {
+    @Volatile private var active: JobParameters? = null
+    private val main = android.os.Handler(android.os.Looper.getMainLooper())
+
     override fun onStartJob(params: JobParameters): Boolean {
-        Updates.check(this, false) { _, _ -> jobFinished(params, false) }
+        active = params
+        Updates.check(this, false, { active !== params }) { _, _ ->
+            main.post {
+                if (active === params) {
+                    active = null
+                    jobFinished(params, false)
+                }
+            }
+        }
         return true
     }
-    override fun onStopJob(params: JobParameters) = true
+
+    override fun onStopJob(params: JobParameters): Boolean {
+        active = null
+        return true
+    }
 }
 
 class InstallResult : BroadcastReceiver() {

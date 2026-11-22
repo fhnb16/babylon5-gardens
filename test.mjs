@@ -1831,7 +1831,11 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   /* antialias у рендерера действует только на канвас: буферам нужен samples */
   ok(/samples: taaOn \? 0 : samples/.test(psrc),
      'У буфера кадра число сэмплов задаётся выбранным режимом');
-  ok(/samples: CONFIG\.MSAA_SAMPLES/.test(psrc), 'Буфер кадра трассировки многосэмпловый');
+  const traceTargets = psrc.slice(psrc.indexOf('function makeTargets('), psrc.indexOf('function dispose()'));
+  ok(traceTargets.includes('rtBeauty = new THREE.WebGLRenderTarget(w, h') &&
+    traceTargets.includes('rtNormal = new THREE.WebGLRenderTarget(w, h') &&
+    !/samples\s*:/.test(traceTargets) && /C\.setViewOffset\(w, h, halton\(n \+ 1/.test(psrc),
+    'Цвет и нормали трассировки используют одну субпиксельную выборку Halton');
   ok(CONFIG.MSAA_SAMPLES >= 2, 'Сэмплов достаточно, чтобы края читались');
   ok(/if \(!fxOn \|\| !fxRT\)/.test(psrc), 'Без FXAA лишнего прохода нет');
   ok(/resizePost\(renderer\)/.test(msrc), 'Буфер FXAA пересоздаётся при изменении размера');

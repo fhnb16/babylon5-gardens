@@ -3,6 +3,7 @@ import { app, camera, renderer, world, worldGroup } from './state.ts';
 import { photoScene, photoImages } from './scene.ts';
 import { ride } from './ride.ts';
 import { snapshotForPath } from '../pathtracer/scene-snapshot.ts';
+import { tracerLightingAt } from '../pathtracer/config.ts';
 import { pathSurface } from './boot.ts';
 import { pathOutput } from '../backends/three/post/path-output.ts';
 import { createDevice, type PtDevice } from '../pathtracer/device.ts';
@@ -18,6 +19,7 @@ let sink: ReturnType<typeof pathOutput> | null = null;
 let generation = 0;
 let scale = 0;
 let noise = CONFIG.PATH.noise;
+let pathPhase = 0;
 export let pathStarting = false;
 export let pt: Tracer['pt'] | typeof legacy.pt = legacy.pt;
 
@@ -44,6 +46,21 @@ export function setPathScale(value: number) {
   scale = value;
   legacy.setPathScale(value);
   tracer?.setPathScale(value);
+}
+function pathExposure() {
+  return CONFIG.PATH.exposure / CONFIG.PATH.exposureReference;
+}
+function pathLighting() {
+  const lighting = tracerLightingAt(pathPhase);
+  lighting.phys.tubeNits *= CONFIG.PATH.sunEmit / CONFIG.PATH.sunEmitReference;
+  return lighting;
+}
+export function setPathExposure() {
+  active?.setPathExposure(pathExposure());
+}
+export function setPathSun() {
+  if (active) active.setPathLighting(pathLighting());
+  else legacy.updatePathSun();
 }
 function readCamera() {
   return { position: camera.position.toArray(), orientation: camera.quaternion.toArray(), rotation: worldGroup.rotation.z, fov: camera.fov };
@@ -89,10 +106,11 @@ export async function startModern(onPhase: (msg: string) => void): Promise<boole
     const t = tracer ??= await import('../pathtracer/index.ts');
     if (gen !== generation) return false;
     active = t;
+    pathPhase = phase;
     pt = t.pt;
     t.setNoiseTarget(noise);
     t.setPathScale(scale);
-    if (shared) sink = pathOutput(shared.post);
+    if (shared) sink = pathOutput(shared.post, renderer.toneMappingExposure);
     else {
       overlay = t.createOverlayCanvas(renderer.domElement.parentElement!);
       overlay.width = renderer.domElement.width;
@@ -100,7 +118,8 @@ export async function startModern(onPhase: (msg: string) => void): Promise<boole
     }
     const result = await t.startPath(scene, pathCamera(t, frame), {
       canvas: overlay ?? renderer.domElement, device, presentHdr: sink?.present,
-      images: photoImages, lighting: phase, onPhase, maxDepth: isMobile ? CONFIG.PATH.mobileBounces : CONFIG.PATH.bounces,
+      images: photoImages, lighting: pathLighting(), exposure: pathExposure(), onPhase,
+      maxDepth: isMobile ? CONFIG.PATH.mobileBounces : CONFIG.PATH.bounces,
       oidn: { load: () => import('oidn-webgpu'), weightsUrl:
         new URL('oidn/' + (isMobile ? 'rt_hdr_alb_nrm_small.tza' : 'rt_hdr_alb_nrm.tza'), document.baseURI).href }
     });

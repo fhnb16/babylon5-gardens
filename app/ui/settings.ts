@@ -7,7 +7,7 @@ import { applyDpr, resetDpr, resize } from '../perf.ts';
 import { TAU } from '../../core/math/scalar.ts';
 import { ctl, syncFromCamera } from '../../js/controls.js';
 import { setVolume } from '../../js/audio.js';
-import { setPathScale, setNoiseTarget, samplesNeeded } from '../path-session.ts';
+import { setPathScale, setPathExposure, setPathSun, setNoiseTarget, samplesNeeded } from '../path-session.ts';
 import { setPost, setDenoiseMode, setSharpen, setUpscaleFrom } from '../../js/photo.js';
 import {
   isClassic, rendererInfo, rendererFromUrl, setPostOptions, wantedRendererMode, RENDERER_LABELS
@@ -157,7 +157,8 @@ export function initSettings() {
     v => `${v} шагов`);
 
   /* ползунки: экспозиция трассировки и яркость трубы */
-  const slide = (id: string, valId: string, key: string, scale: number, fmt: (v: number) => string) => {
+  const slide = (id: string, valId: string, key: string, scale: number, fmt: (v: number) => string,
+    update: () => void, updateOnInput = false) => {
     const el = $(id);
     if (!el) return;
     el.value = String(Math.round(prefs.get(key, CONFIG.PATH[key]) * scale));
@@ -166,12 +167,12 @@ export function initSettings() {
       CONFIG.PATH[key] = v;
       if ($(valId)) $(valId).textContent = fmt(v);
     };
-    el.oninput = show;
-    el.onchange = () => { prefs.set(key, parseFloat(el.value) / scale); show(); };
+    el.oninput = () => { show(); if (updateOnInput) update(); };
+    el.onchange = () => { prefs.set(key, parseFloat(el.value) / scale); show(); update(); };
     show();
   };
-  slide('sPtExp', 'sPtExpV', 'exposure', 100, v => `×${v.toFixed(2)}`);
-  slide('sSunEmit', 'sSunEmitV', 'sunEmit', 10, v => v.toFixed(1));
+  slide('sPtExp', 'sPtExpV', 'exposure', 100, v => `×${v.toFixed(2)}`, setPathExposure, true);
+  slide('sSunEmit', 'sSunEmitV', 'sunEmit', 10, v => v.toFixed(1), setPathSun);
 
   /* Отражения в полёте: аналитические, по трубе и корпусу. Всё, что не
      описывается уравнением цилиндра, они не отражают. */

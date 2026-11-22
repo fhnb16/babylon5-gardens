@@ -48,6 +48,7 @@ let subGeos = [];
 let normalized = [];
 let prevEnv = null, envTex = null, waterSaved = null;
 let emitSaved = [], rimAdded = [], axisSaved = [];
+let pathSun = null;
 
 /* ═══════════════════════════════════════════════════════════════════════════
    ПОСТРОЙКА ДЕРЕВА В ОТДЕЛЬНОМ ПОТОКЕ
@@ -486,6 +487,7 @@ function lightForPath(scene, sunMat, hemi, sunLevel = 1) {
       /* непрозрачный: прозрачное со сцены снимается, а источник должен остаться */
       transparent: false, side: THREE.DoubleSide
     });
+    pathSun = { material: lit, level: sunLevel, setting: CONFIG.PATH.sunEmit };
     clones.push(lit);
     scene.traverse(o => {
       if (o.isMesh && o.material === sunMat) {
@@ -611,6 +613,7 @@ function restoreLight(scene) {
   if (scene) scene.environment = prevEnv;
   envTex?.dispose();
   envTex = null;
+  pathSun = null;
 }
 
 /** Запустить трассировку. Возвращает false, если устройство не потянуло. */
@@ -705,6 +708,7 @@ export async function startPath(renderer, scene, camera, wind, mobile, onPhase, 
 
     pt.build = 1;
     pt.ready = true;
+    updatePathSun();
     starting = false;
     pathClock('start');
     return true;
@@ -733,6 +737,16 @@ export function pathCameraMoved() {
     tracer.updateCamera();
     pt.samples = 0;
   }
+}
+
+/** Загрузить новую яркость трубы в уже собранный материал трассировки. */
+export function updatePathSun() {
+  const setting = CONFIG.PATH.sunEmit;
+  if (!pt.ready || !tracer || !pathSun || pathSun.setting === setting) return;
+  pathSun.material.emissiveIntensity = setting * pathSun.level * CONFIG.PATH.emitBoost;
+  tracer.updateMaterials();
+  pathSun.setting = setting;
+  pt.samples = 0;
 }
 
 /** Один шаг накопления. Возвращает долю готовности 0…1.
