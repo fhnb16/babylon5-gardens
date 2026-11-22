@@ -6,7 +6,7 @@ import type { Integrator } from '../integrator.ts';
 import { uploadSceneDesc } from '../scene-upload.ts';
 import { createIntegrator } from '../integrator.ts';
 import { createPresenter } from '../three-interop.ts';
-import { cleanPath, pathIdle, pathStep, pt, setPaused, startPath, stopPath, type PathCamera, type StartPathOptions } from '../index.ts';
+import { cleanPath, pathIdle, pathStep, pt, setPathExposure, setPaused, startPath, stopPath, type PathCamera, type StartPathOptions } from '../index.ts';
 import { createOidnDenoiser } from '../oidn.ts';
 import { createAtrousDenoiser, type AtrousDenoiser } from '../denoise.ts';
 
@@ -60,9 +60,12 @@ it('presents raw and denoised HDR frames without configuring a second canvas', a
   expect(await startPath(scene, camera, options)).toBe(true);
   pathStep();
   await pathIdle();
-  expect(options.presentHdr).toHaveBeenLastCalledWith(integrator.output);
+  expect(options.presentHdr).toHaveBeenLastCalledWith(integrator.output, 1);
+  setPathExposure(2);
+  expect(options.presentHdr).toHaveBeenLastCalledWith(integrator.output, 2);
+  expect(pt.samples).toBe(1);
   expect(await cleanPath('oidn')).toBe(true);
-  expect(options.presentHdr).toHaveBeenLastCalledWith(clean.output);
+  expect(options.presentHdr).toHaveBeenLastCalledWith(clean.output, 2);
   expect(pt.showing).toBe('oidn');
   expect(createPresenter).not.toHaveBeenCalled();
 });
@@ -79,7 +82,7 @@ it('keeps the accumulation and falls back to à-trous if OIDN weights cannot loa
   setPaused(true, 'oidn');
   await vi.waitFor(() => expect(pt.showing).toBe('atrous'));
   expect(pt.samples).toBe(3);
-  expect(options.presentHdr).toHaveBeenLastCalledWith(atrous.output);
+  expect(options.presentHdr).toHaveBeenLastCalledWith(atrous.output, 1);
   setPaused(false);
-  expect(options.presentHdr).toHaveBeenLastCalledWith(integrator.output);
+  expect(options.presentHdr).toHaveBeenLastCalledWith(integrator.output, 1);
 });
