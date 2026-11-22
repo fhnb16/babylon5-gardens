@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PT output</title>
+  <link rel="icon" href="data:,">
+  <style>
+    :root { color-scheme: dark; }
+    body { margin: 0; padding: 12px; background: #0d0f12; color: #d8dde3; font: 13px/1.45 ui-monospace, Consolas, monospace; }
+    .row { display: flex; flex-wrap: wrap; gap: 8px; }
+    figure { margin: 0; }
+    figcaption { opacity: 0.7; }
+    canvas { display: block; background: #000; max-width: 100%; }
+    #status { font-weight: bold; margin: 8px 0; }
+    #status.pass { color: #6fdc8c; }
+    #status.fail { color: #ff6b6b; }
+    pre { white-space: pre-wrap; word-break: break-word; max-width: 1280px; }
+  </style>
+</head>
+<body>
+  <div class="row" id="views"></div>
+  <div id="status">running…</div>
+  <p>PT-P4 output side. Query: <code>mode=adaptive|rmse|sampler|stats</code>, <code>view=0</code>, <code>phase=0</code>,
+    <code>res=1</code> (× 960×540), <code>noise=3</code> (adaptive target %), <code>spp=64</code>, <code>ref=2048</code> (rmse),
+    <code>budget=30</code>.</p>
+  <pre id="log"></pre>
+  <script type="module" src="./pt-output.ts"></script>
+</body>
+</html>

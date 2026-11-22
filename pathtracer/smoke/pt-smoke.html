@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PT traversal smoke</title>
+  <link rel="icon" href="data:,">
+  <style>
+    :root { color-scheme: dark; }
+    body { margin: 0; padding: 16px; background: #111418; color: #d8dde3; font: 13px/1.45 ui-monospace, Consolas, monospace; }
+    h1 { font-size: 15px; margin: 0 0 8px; }
+    #status { font-weight: bold; margin: 8px 0; }
+    #status.pass { color: #6fdc8c; }
+    #status.fail { color: #ff6b6b; }
+    canvas { display: block; width: 100%; max-width: 960px; aspect-ratio: 16 / 9; background: #000; image-rendering: pixelated; }
+    pre { white-space: pre-wrap; word-break: break-word; max-width: 1200px; }
+  </style>
+</head>
+<body>
+  <h1>Path tracer — WGSL traversal vs CPU reference (f32)</h1>
+  <p>Query: <code>?bench=0</code> skips the throughput run; <code>?wg=128</code> sets the workgroup size.</p>
+  <div id="status">running…</div>
+  <canvas id="view" width="640" height="360"></canvas>
+  <pre id="log"></pre>
+  <script type="module" src="./pt-smoke.ts"></script>
+</body>
+</html>

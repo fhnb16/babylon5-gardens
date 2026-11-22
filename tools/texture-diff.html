@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Texture diff: Canvas2D vs core/raster</title>
+<style>
+  body { font: 14px/1.4 system-ui, sans-serif; margin: 16px; background: #1d2024; color: #dde; }
+  h1 { font-size: 18px; margin: 0 0 8px; }
+  .bar { margin: 0 0 16px; display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .scene { margin: 0 0 24px; }
+  .scene h2 { font-size: 15px; margin: 0 0 6px; }
+  .row { display: flex; gap: 10px; flex-wrap: wrap; }
+  figure { margin: 0; }
+  figcaption { font-size: 12px; color: #99a; }
+  canvas { image-rendering: pixelated; background: repeating-conic-gradient(#555 0 25%, #777 0 50%) 0 0 / 16px 16px; max-width: 100%; }
+  .good { color: #7c7; } .ok { color: #cc7; } .bad { color: #e77; }
+  table { border-collapse: collapse; margin-top: 8px; }
+  td, th { padding: 2px 10px; border-bottom: 1px solid #333; text-align: left; }
+</style>
+</head>
+<body>
+<h1>Canvas2D (browser) vs core/raster Context2D</h1>
+<div class="bar">
+  <label>diff gain <select id="gain"><option>1</option><option>4</option><option selected>8</option><option>32</option></select></label>
+  <label>zoom <select id="zoom"><option>1</option><option selected>2</option><option>4</option></select></label>
+  <span id="status"></span>
+</div>
+<table id="summary"><thead><tr><th>scene</th><th>size</th><th>PSNR dB</th><th>max |Δ|</th><th>browser ms</th><th>core ms</th></tr></thead><tbody></tbody></table>
+<div id="out"></div>
+<script type="module" src="./texture-diff.js"></script>
+</body>
+</html>

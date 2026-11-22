@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Post lab</title>
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #000; }
+    canvas { display: block; width: 100%; height: 100%; }
+    #hud { position: fixed; left: 8px; top: 8px; color: #cfe; font: 12px monospace; white-space: pre;
+           background: rgba(0, 0, 0, 0.55); padding: 4px 6px; pointer-events: none; }
+    #hud:empty { display: none; }
+  </style>
+</head>
+<body>
+  <!-- Standalone test bench of the WebGPU post pipeline (backends/three/post):
+       a WebGPURenderer (or its WebGL2 fallback) rendering a small scene with a
+       bright emissive tube, hard edges and fine detail. Dev server only
+       (npm run dev → /tools/post-lab.html). URL params:
+         backend=webgpu|webgl  msaa=0|2|4|8  aa=<CONFIG.AA_FILTER id>  ssaa=1..2.5
+         fsr=0.5..1  fsrImpl=b5|three  sharpen=<n>  bloom=0|1  bloomImpl=three|classic
+         rays=0|1  tonemap=b5|three|none  exposure=<n>  threshold glow radius
+         rayDensity rayDecay raySteps rayStrength brightScale div
+         anim=0|1 (rotate the test rig)  hud=0|1  frames=<n before 'ready'>
+       Browser test: tests/browser/post-pipeline.spec.ts (window.__postLab). -->
+  <div id="hud"></div>
+  <script type="module" src="./post-lab.ts"></script>
+</body>
+</html>

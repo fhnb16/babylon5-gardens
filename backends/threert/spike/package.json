@@ -1,0 +1,23 @@
+{
+  "name": "b5-threert-spike",
+  "private": true,
+  "version": "0.0.0",
+  "description": "ThreeRT M0 spike for babylon5-gardens (never published). The threert CLI bundles @threert/* from the SDK inside the pinned client (tsconfig paths). Do NOT npm-install @threert/* here or in any parent dir: esbuild then resolves node_modules first and the npm 0.1.1 build is older than the client SDK (no hud/host/input/audio; SkyAtmosphere -> 'unsupported environment').",
+  "type": "module",
+  "engines": {
+    "node": ">=24"
+  },
+  "threert": {
+    "client": "0.4.3",
+    "sdk": "%LOCALAPPDATA%/threert-portable/ThreeRT/Resources/sdk/engine",
+    "npmPinnedButNotInstalled": {
+      "@threert/scene": "0.1.1",
+      "@threert/gameplay": "0.1.1"
+    }
+  },
+  "scripts": {
+    "bench:node": "node tools/qjs-bench.mjs",
+    "png": "node tools/make-png.mjs",
+    "pngstat": "node tools/pngstat.mjs"
+  }
+}

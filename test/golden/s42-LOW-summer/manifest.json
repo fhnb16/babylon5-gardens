@@ -1,0 +1,7295 @@
+{
+ "format": 1,
+ "id": "s42-LOW-summer",
+ "seed": 42,
+ "quality": "LOW",
+ "season": "summer",
+ "full": true,
+ "three": "165",
+ "drawn": 52,
+ "hills": [
+  {
+   "t": 1.6455009919154848,
+   "z": -68.1971421788167,
+   "r": 5.514415077166632,
+   "h": 1.1772660091034415,
+   "dip": false,
+   "ax": 1.1504026474314741,
+   "rot": 4.5180293211875995
+  },
+  {
+   "t": 6.1722752570222434,
+   "z": -113.15050381367699,
+   "r": 6.747698440914974,
+   "h": 0.9416140663603385,
+   "dip": false,
+   "ax": 1.4439077684422956,
+   "rot": 2.8674116855147935
+  },
+  {
+   "t": 6.197069575290835,
+   "z": -30.90621701267355,
+   "r": 8.045992698520422,
+   "h": 1.3981020270109663,
+   "dip": false,
+   "ax": 0.9220289251185023,
+   "rot": 3.3495558475658527
+  },
+  {
+   "t": 6.0647361738849215,
+   "z": 85.35496789847353,
+   "r": 13.008946798276156,
+   "h": 2.5056121918932184,
+   "dip": true,
+   "ax": 1.2608302278444172,
+   "rot": 6.0092466363743835
+  },
+  {
+   "t": 3.0890297700089953,
+   "z": -47.87471139823109,
+   "r": 7.267755054403096,
+   "h": 1.496721943754067,
+   "dip": false,
+   "ax": 1.393534825136885,
+   "rot": 2.3723731206686725
+  },
+  {
+   "t": 3.9175876272266446,
+   "z": 72.74574195248324,
+   "r": 8.77384594315663,
+   "h": 1.8333795896729577,
+   "dip": false,
+   "ax": 0.7461027262383141,
+   "rot": 0.8947693056588146
+  },
+  {
+   "t": 1.6611578653442514,
+   "z": 67.79766715471666,
+   "r": 5.924013472395018,
+   "h": 1.2835249045778159,
+   "dip": true,
+   "ax": 1.3866453766124325,
+   "rot": 2.8755071845076783
+  },
+  {
+   "t": 3.728785301229075,
+   "z": -5.217739818529113,
+   "r": 5.4590954864397645,
+   "h": 0.8343789492565166,
+   "dip": true,
+   "ax": 1.0730695289326833,
+   "rot": 1.16780805216713
+  },
+  {
+   "t": 3.5661639423453018,
+   "z": 62.95881833899548,
+   "r": 8.086994621902704,
+   "h": 1.5030034927789264,
+   "dip": false,
+   "ax": 0.5410516193252988,
+   "rot": 4.961111681894986
+  },
+  {
+   "t": 5.488943059367665,
+   "z": -4.209123961110776,
+   "r": 8.863885424099863,
+   "h": 1.515443831740387,
+   "dip": false,
+   "ax": 1.3979801116394812,
+   "rot": 5.338784325933695
+  },
+  {
+   "t": 1.196975170088951,
+   "z": -58.270896133020315,
+   "r": 9.477752549340948,
+   "h": 1.4715259866207862,
+   "dip": true,
+   "ax": 0.5915978473727592,
+   "rot": 2.9735783276672962
+  },
+  {
+   "t": 0.9401128611427625,
+   "z": 3.651583869795373,
+   "r": 6.898027004674077,
+   "h": 0.9264117781201993,
+   "dip": true,
+   "ax": 0.5572938636294567,
+   "rot": 4.13367919927942
+  },
+  {
+   "t": 1.689699903240409,
+   "z": 13.576281650575433,
+   "r": 8.79883060278371,
+   "h": 1.8592014999415265,
+   "dip": true,
+   "ax": 1.2867004962055943,
+   "rot": 1.791418983311242
+  },
+  {
+   "t": 1.1399988206581568,
+   "z": -58.91941502914155,
+   "r": 12.493794769514352,
+   "h": 2.597457926233779,
+   "dip": false,
+   "ax": 0.49931254559196536,
+   "rot": 2.1809362064842155
+  },
+  {
+   "t": 1.7725576975486967,
+   "z": -72.04736464985574,
+   "r": 7.1964847857598215,
+   "h": 1.547242749048329,
+   "dip": false,
+   "ax": 1.1185777449281886,
+   "rot": 3.135340394803833
+  },
+  {
+   "t": 3.079308145407166,
+   "z": 49.52689780334991,
+   "r": 7.3644893248565495,
+   "h": 1.5867568195655943,
+   "dip": true,
+   "ax": 1.3228924641385675,
+   "rot": 2.671747400363367
+  },
+  {
+   "t": 4.106007422090257,
+   "z": -46.35328350319147,
+   "r": 7.562567397020757,
+   "h": 1.648125654489492,
+   "dip": false,
+   "ax": 1.686094753816724,
+   "rot": 0.29095512324303524
+  },
+  {
+   "t": 1.117308384859,
+   "z": -76.87892355488265,
+   "r": 10.126123355701566,
+   "h": 1.5041732532226886,
+   "dip": true,
+   "ax": 0.8634521221043543,
+   "rot": 5.433292605257162
+  },
+  {
+   "t": 5.93198021736932,
+   "z": 9.056089672293226,
+   "r": 13.835482081165537,
+   "h": 2.6721111093073096,
+   "dip": false,
+   "ax": 1.2199182445881889,
+   "rot": 3.4165581582981783
+  },
+  {
+   "t": 3.466047541695357,
+   "z": -75.05092932872752,
+   "r": 11.298950239550322,
+   "h": 2.4765547877975056,
+   "dip": false,
+   "ax": 1.6901489148382098,
+   "rot": 4.358364171567523
+  },
+  {
+   "t": 3.3899896612593476,
+   "z": -7.418563930008288,
+   "r": 8.731779124122113,
+   "h": 1.732386031523459,
+   "dip": false,
+   "ax": 1.7564090814907105,
+   "rot": 6.007413257698231
+  },
+  {
+   "t": 1.135480242681247,
+   "z": -70.13854258754688,
+   "r": 11.368803717195988,
+   "h": 1.3862582716454774,
+   "dip": false,
+   "ax": 1.3019852418685334,
+   "rot": 5.4653341289895225
+  },
+  {
+   "t": 3.1318585824809455,
+   "z": -33.005412063618714,
+   "r": 5.110576614737511,
+   "h": 0.9427239121351983,
+   "dip": true,
+   "ax": 1.6347752075060271,
+   "rot": 4.624568529076104
+  },
+  {
+   "t": 4.040036247703185,
+   "z": -24.315755207970728,
+   "r": 8.673841877607629,
+   "h": 1.14367756610649,
+   "dip": false,
+   "ax": 1.6902668944210746,
+   "rot": 1.1754922707599638
+  },
+  {
+   "t": 6.226011089301062,
+   "z": -65.22156009230329,
+   "r": 5.482514928327873,
+   "h": 0.8831064037761472,
+   "dip": false,
+   "ax": 0.5300995413330384,
+   "rot": 5.018965507144741
+  },
+  {
+   "t": 1.1413498869469194,
+   "z": -11.126203043117664,
+   "r": 11.993329111253843,
+   "h": 1.622264815804842,
+   "dip": false,
+   "ax": 1.5583739981171676,
+   "rot": 2.6517658865445415
+  },
+  {
+   "t": 3.094403869793251,
+   "z": -78.3939122319237,
+   "r": 10.401862137019634,
+   "h": 1.3346195830905174,
+   "dip": false,
+   "ax": 1.092768445168622,
+   "rot": 4.297601333717145
+  },
+  {
+   "t": 3.0705330273397045,
+   "z": -58.06942168853929,
+   "r": 6.9733338847290725,
+   "h": 1.0596277105200345,
+   "dip": true,
+   "ax": 1.667437672102824,
+   "rot": 4.230353409279736
+  },
+  {
+   "t": 1.6456109463012407,
+   "z": -65.15716522951962,
+   "r": 7.22625950188376,
+   "h": 1.3636514822199581,
+   "dip": false,
+   "ax": 1.332534095167648,
+   "rot": 6.2705919509814665
+  },
+  {
+   "t": 1.1096933988642674,
+   "z": 58.63454924428237,
+   "r": 12.120729775168002,
+   "h": 2.1716612336384813,
+   "dip": false,
+   "ax": 1.4240203662542628,
+   "rot": 0.4266044084145318
+  },
+  {
+   "t": 3.0652548554826606,
+   "z": -43.18288444953437,
+   "r": 6.974959814688191,
+   "h": 0.8837884224535424,
+   "dip": false,
+   "ax": 0.49091849222313616,
+   "rot": 2.5250886779531903
+  },
+  {
+   "t": 1.1752656457315502,
+   "z": -69.61365770739259,
+   "r": 5.625913181575015,
+   "h": 1.1797309673790475,
+   "dip": false,
+   "ax": 1.0312247624387965,
+   "rot": 0.0788320705064468
+  },
+  {
+   "t": 3.9331739543568744,
+   "z": 50.29463295549059,
+   "r": 8.500856421887875,
+   "h": 1.5858033551461992,
+   "dip": true,
+   "ax": 1.1253233581082895,
+   "rot": 0.4260608948492959
+  },
+  {
+   "t": 5.974471988144988,
+   "z": -71.6507155854964,
+   "r": 10.116454071830958,
+   "h": 1.223843659113948,
+   "dip": true,
+   "ax": 1.4692337796092034,
+   "rot": 4.684596638264941
+  },
+  {
+   "t": 6.004308611988704,
+   "z": 2.4208701167006463,
+   "r": 5.2637032945640385,
+   "h": 1.0374599385091694,
+   "dip": true,
+   "ax": 0.47248003830900415,
+   "rot": 4.263589026728036
+  },
+  {
+   "t": 3.4999436886002173,
+   "z": 62.15458152822806,
+   "r": 6.1715691038407385,
+   "h": 1.1685651589162394,
+   "dip": true,
+   "ax": 0.7626010324456729,
+   "rot": 5.208185181726555
+  },
+  {
+   "t": 3.5552574170047437,
+   "z": 75.92506181303271,
+   "r": 7.787031392334029,
+   "h": 1.6056596384629134,
+   "dip": true,
+   "ax": 0.5124294727225788,
+   "rot": 4.423943396554044
+  },
+  {
+   "t": 6.056880365241816,
+   "z": -12.890108392474321,
+   "r": 5.051332939649001,
+   "h": 1.0442155782555125,
+   "dip": true,
+   "ax": 1.6293144118390046,
+   "rot": 3.135170194525737
+  },
+  {
+   "t": 1.0986809012009653,
+   "z": 70.73289319384041,
+   "r": 11.110926075838506,
+   "h": 1.4480758925565518,
+   "dip": false,
+   "ax": 0.9663171885302291,
+   "rot": 1.4275277780562037
+  },
+  {
+   "t": 5.523264552629909,
+   "z": 65.74882296686627,
+   "r": 12.27892338251695,
+   "h": 1.9738680878153623,
+   "dip": false,
+   "ax": 0.4658596997964196,
+   "rot": 1.6242155484913285
+  },
+  {
+   "t": 3.6833006268155284,
+   "z": 7.369854619166202,
+   "r": 5.523446802049875,
+   "h": 1.1462213924288647,
+   "dip": true,
+   "ax": 0.9146299220505171,
+   "rot": 3.6772320359315023
+  },
+  {
+   "t": 4.047021646421651,
+   "z": -110.67374485038646,
+   "r": 7.516447735019028,
+   "h": 1.0760541345206958,
+   "dip": true,
+   "ax": 1.6547448424506002,
+   "rot": 2.1489268128216295
+  },
+  {
+   "t": 1.7194705231462246,
+   "z": 70.01900929354619,
+   "r": 7.742176658008248,
+   "h": 1.00293067451234,
+   "dip": false,
+   "ax": 1.13449392701732,
+   "rot": 3.6374045388763863
+  },
+  {
+   "t": 1.6988409775799895,
+   "z": 82.10477047326827,
+   "r": 7.338688427116722,
+   "h": 1.4408208907737479,
+   "dip": false,
+   "ax": 0.5531972632510588,
+   "rot": 1.3335884875534052
+  },
+  {
+   "t": 3.1409023493615655,
+   "z": 6.621615808817626,
+   "r": 9.909333573188633,
+   "h": 2.1725150686266024,
+   "dip": false,
+   "ax": 0.5041974513907918,
+   "rot": 2.9937081038447015
+  },
+  {
+   "t": 3.8252892860816874,
+   "z": 0.6374149870880114,
+   "r": 12.087586106033996,
+   "h": 1.762532245467675,
+   "dip": false,
+   "ax": 0.7676370982197114,
+   "rot": 0.02383496877640657
+  },
+  {
+   "t": 3.8202701575176934,
+   "z": -65.47788178894675,
+   "r": 11.02909553120844,
+   "h": 2.4166446804227664,
+   "dip": false,
+   "ax": 1.7662244099657982,
+   "rot": 0.8938322115393689
+  },
+  {
+   "t": 1.096777542375573,
+   "z": -79.14738367412902,
+   "r": 9.045474658254534,
+   "h": 1.4900395079536635,
+   "dip": false,
+   "ax": 0.8443764391355217,
+   "rot": 5.5486302354981305
+  },
+  {
+   "t": 4.132083246355861,
+   "z": 94.99867376878602,
+   "r": 6.4273706001695246,
+   "h": 1.0036673788355863,
+   "dip": false,
+   "ax": 1.0519852123456077,
+   "rot": 1.2642386555859686
+  },
+  {
+   "t": 1.5675827785377128,
+   "z": -67.11990375050279,
+   "r": 8.890074397670105,
+   "h": 1.1554288536145276,
+   "dip": false,
+   "ax": 1.387812144763302,
+   "rot": 5.556757743138589
+  },
+  {
+   "t": 1.285249295700607,
+   "z": -7.438938436153767,
+   "r": 11.941079287789762,
+   "h": 2.2492504875909356,
+   "dip": true,
+   "ax": 1.186949014593847,
+   "rot": 1.4295055101738277
+  },
+  {
+   "t": 3.0170378845837127,
+   "z": 107.19957717824568,
+   "r": 6.235700465738773,
+   "h": 1.0940894064224989,
+   "dip": true,
+   "ax": 1.6254916523233989,
+   "rot": 2.938977659896314
+  },
+  {
+   "t": 0.9949468138598486,
+   "z": -93.88084724119577,
+   "r": 8.22218942688778,
+   "h": 1.4786697984140111,
+   "dip": false,
+   "ax": 0.4619817369617522,
+   "rot": 0.5259900639288657
+  },
+  {
+   "t": 5.643505184997739,
+   "z": -69.18211699079485,
+   "r": 10.463012508582324,
+   "h": 1.6745703589775662,
+   "dip": false,
+   "ax": 1.3436504415934907,
+   "rot": 5.610349941731632
+  },
+  {
+   "t": 3.9742882838937286,
+   "z": 69.54876485454689,
+   "r": 6.197086500469595,
+   "h": 1.2311846401761244,
+   "dip": false,
+   "ax": 1.6687770504620858,
+   "rot": 4.38740313055101
+  },
+  {
+   "t": 3.8422007799990046,
+   "z": 62.964430128275914,
+   "r": 5.976784597849473,
+   "h": 0.793768652512651,
+   "dip": false,
+   "ax": 1.6579359225695953,
+   "rot": 2.1364720198352236
+  },
+  {
+   "t": 6.1186773647520365,
+   "z": -111.24124832877317,
+   "r": 8.1629043368157,
+   "h": 1.5051634651577936,
+   "dip": false,
+   "ax": 1.270954708987847,
+   "rot": 3.356721531919654
+  },
+  {
+   "t": 5.722574473522411,
+   "z": 61.733657328255255,
+   "r": 6.360350128263235,
+   "h": 0.8961442371197244,
+   "dip": true,
+   "ax": 0.7265430499683134,
+   "rot": 0.6800545765113581
+  },
+  {
+   "t": 3.8329360890817257,
+   "z": -70.51121924163341,
+   "r": 7.266026131808758,
+   "h": 1.5762130890617339,
+   "dip": true,
+   "ax": 1.4275103857973592,
+   "rot": 4.199016432746023
+  },
+  {
+   "t": 3.2952600541338324,
+   "z": 6.510816563517016,
+   "r": 12.446320394985378,
+   "h": 1.8871449768805617,
+   "dip": false,
+   "ax": 0.632279938494321,
+   "rot": 2.8703674017750966
+  },
+  {
+   "t": 5.420319636446653,
+   "z": 74.42381799918647,
+   "r": 8.854927772190422,
+   "h": 1.1390037798353463,
+   "dip": true,
+   "ax": 1.7988536602235399,
+   "rot": 1.723837462349628
+  },
+  {
+   "t": 4.05709934089522,
+   "z": -40.21093491138178,
+   "r": 10.251458360347897,
+   "h": 1.4264355489178118,
+   "dip": true,
+   "ax": 0.9812707387958655,
+   "rot": 0.10134293896304596
+  },
+  {
+   "t": 4.020021336927527,
+   "z": 89.3021943478275,
+   "r": 8.510596042498946,
+   "h": 1.8023553897956113,
+   "dip": false,
+   "ax": 1.3626506648026409,
+   "rot": 5.977221473917821
+  },
+  {
+   "t": 1.0937546576945782,
+   "z": 66.1920268070901,
+   "r": 11.966321609215811,
+   "h": 2.1619873264497937,
+   "dip": true,
+   "ax": 0.8906642837100662,
+   "rot": 2.1525028282913135
+  }
+ ],
+ "ponds": [
+  {
+   "t": 6.0647361738849215,
+   "z": 85.35496789847353,
+   "r": 8.065547014931218,
+   "ax": 1.2608302278444172,
+   "rot": 6.0092466363743835
+  },
+  {
+   "t": 1.6611578653442514,
+   "z": 67.79766715471666,
+   "r": 3.672888352884911,
+   "ax": 1.3866453766124325,
+   "rot": 2.8755071845076783
+  },
+  {
+   "t": 3.728785301229075,
+   "z": -5.217739818529113,
+   "r": 3.384639201592654,
+   "ax": 1.0730695289326833,
+   "rot": 1.16780805216713
+  },
+  {
+   "t": 1.196975170088951,
+   "z": -58.270896133020315,
+   "r": 5.876206580591388,
+   "ax": 0.5915978473727592,
+   "rot": 2.9735783276672962
+  },
+  {
+   "t": 0.9401128611427625,
+   "z": 3.651583869795373,
+   "r": 4.276776742897928,
+   "ax": 0.5572938636294567,
+   "rot": 4.13367919927942
+  },
+  {
+   "t": 1.689699903240409,
+   "z": 13.576281650575433,
+   "r": 5.4552749737259,
+   "ax": 1.2867004962055943,
+   "rot": 1.791418983311242
+  },
+  {
+   "t": 3.079308145407166,
+   "z": 49.52689780334991,
+   "r": 4.565983381411061,
+   "ax": 1.3228924641385675,
+   "rot": 2.671747400363367
+  },
+  {
+   "t": 1.117308384859,
+   "z": -76.87892355488265,
+   "r": 6.27819648053497,
+   "ax": 0.8634521221043543,
+   "rot": 5.433292605257162
+  },
+  {
+   "t": 3.1318585824809455,
+   "z": -33.005412063618714,
+   "r": 3.1685575011372564,
+   "ax": 1.6347752075060271,
+   "rot": 4.624568529076104
+  },
+  {
+   "t": 3.0705330273397045,
+   "z": -58.06942168853929,
+   "r": 4.323467008532025,
+   "ax": 1.667437672102824,
+   "rot": 4.230353409279736
+  },
+  {
+   "t": 3.9331739543568744,
+   "z": 50.29463295549059,
+   "r": 5.270530981570483,
+   "ax": 1.1253233581082895,
+   "rot": 0.4260608948492959
+  },
+  {
+   "t": 5.974471988144988,
+   "z": -71.6507155854964,
+   "r": 6.272201524535194,
+   "ax": 1.4692337796092034,
+   "rot": 4.684596638264941
+  },
+  {
+   "t": 6.004308611988704,
+   "z": 2.4208701167006463,
+   "r": 3.2634960426297037,
+   "ax": 0.47248003830900415,
+   "rot": 4.263589026728036
+  },
+  {
+   "t": 3.4999436886002173,
+   "z": 62.15458152822806,
+   "r": 3.826372844381258,
+   "ax": 0.7626010324456729,
+   "rot": 5.208185181726555
+  },
+  {
+   "t": 3.5552574170047437,
+   "z": 75.92506181303271,
+   "r": 4.827959463247098,
+   "ax": 0.5124294727225788,
+   "rot": 4.423943396554044
+  },
+  {
+   "t": 6.056880365241816,
+   "z": -12.890108392474321,
+   "r": 3.1318264225823804,
+   "ax": 1.6293144118390046,
+   "rot": 3.135170194525737
+  },
+  {
+   "t": 3.6833006268155284,
+   "z": 7.369854619166202,
+   "r": 3.424537017270923,
+   "ax": 0.9146299220505171,
+   "rot": 3.6772320359315023
+  },
+  {
+   "t": 4.047021646421651,
+   "z": -110.67374485038646,
+   "r": 4.660197595711797,
+   "ax": 1.6547448424506002,
+   "rot": 2.1489268128216295
+  },
+  {
+   "t": 1.285249295700607,
+   "z": -7.438938436153767,
+   "r": 7.403469158429653,
+   "ax": 1.186949014593847,
+   "rot": 1.4295055101738277
+  },
+  {
+   "t": 3.0170378845837127,
+   "z": 107.19957717824568,
+   "r": 3.8661342887580394,
+   "ax": 1.6254916523233989,
+   "rot": 2.938977659896314
+  },
+  {
+   "t": 5.722574473522411,
+   "z": 61.733657328255255,
+   "r": 3.9434170795232055,
+   "ax": 0.7265430499683134,
+   "rot": 0.6800545765113581
+  },
+  {
+   "t": 3.8329360890817257,
+   "z": -70.51121924163341,
+   "r": 4.50493620172143,
+   "ax": 1.4275103857973592,
+   "rot": 4.199016432746023
+  },
+  {
+   "t": 5.420319636446653,
+   "z": 74.42381799918647,
+   "r": 5.490055218758061,
+   "ax": 1.7988536602235399,
+   "rot": 1.723837462349628
+  },
+  {
+   "t": 4.05709934089522,
+   "z": -40.21093491138178,
+   "r": 6.355904183415696,
+   "ax": 0.9812707387958655,
+   "rot": 0.10134293896304596
+  },
+  {
+   "t": 1.0937546576945782,
+   "z": 66.1920268070901,
+   "r": 7.419119397713803,
+   "ax": 0.8906642837100662,
+   "rot": 2.1525028282913135
+  }
+ ],
+ "objects": [
+  {
+   "name": "hull",
+   "role": "hull",
+   "type": "Mesh",
+   "parent": null,
+   "visible": true,
+   "renderOrder": 0,
+   "frustumCulled": true,
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "quaternion": [
+    0,
+    0,
+    0,
+    1
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "geo": "g0",
+   "material": {
+    "type": "MeshStandardMaterial",
+    "color": "#ffffff",
+    "emissive": "#000000",
+    "roughness": 0.95,
+    "metalness": 0.02,
+    "emissiveIntensity": 1,
+    "opacity": 1,
+    "alphaTest": 0,
+    "transparent": false,
+    "vertexColors": false,
+    "flatShading": false,
+    "depthWrite": true,
+    "toneMapped": true,
+    "fog": true,
+    "side": 1,
+    "blending": 1,
+    "maps": [
+     "map"
+    ],
+    "normalScale": [
+     1,
+     1
+    ]
+   }
+  },
+  {
+   "name": "bld.0.s0",
+   "role": "bld.0",
+   "type": "Mesh",
+   "parent": null,
+   "visible": true,
+   "renderOrder": 0,
+   "frustumCulled": true,
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "quaternion": [
+    0,
+    0,
+    0,
+    1
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "geo": "g1",
+   "material": [
+    {
+     "type": "MeshStandardMaterial",
+     "color": "#ffffff",
+     "emissive": "#ffffff",
+     "roughness": 0.68,
+     "metalness": 0.1,
+     "emissiveIntensity": 0,
+     "opacity": 1,
+     "alphaTest": 0,
+     "transparent": false,
+     "vertexColors": false,
+     "flatShading": false,
+     "depthWrite": true,
+     "toneMapped": true,
+     "fog": true,
+     "side": 0,
+     "blending": 1,
+     "maps": [
+      "map",
+      "emissiveMap"
+     ],
+     "normalScale": [
+      1,
+      1
+     ]
+    },
+    {
+     "type": "MeshStandardMaterial",
+     "color": "#ffffff",
+     "emissive": "#000000",
+     "roughness": 0.92,
+     "metalness": 0.04,
+     "emissiveIntensity": 1,
+     "opacity": 1,
+     "alphaTest": 0,
+     "transparent": false,
+     "vertexColors": false,
+     "flatShading": false,
+     "depthWrite": true,
+     "toneMapped": true,
+     "fog": true,
+     "side": 0,
+     "blending": 1,
+     "maps": [
+      "map"
+     ],
+     "normalScale": [
+      0.8,
+      0.8
+     ]
+    }
+   ],
+   "count": 10,
+   "capacity": 10,
+   "instanceMatrix": {
+    "type": "f32",
+    "len": 160,
+    "exact": "293dec2a",
+    "quant": "27053ea4",
+    "off": 463720
+   },
+   "instanceColor": {
+    "type": "f32",
+    "len": 30,
+    "exact": "d458d588",
+    "quant": "7bb4da88",
+    "off": 464360
+   },
+   "boundingSphere": [
+    16.23506099622308,
+    46.19677462869147,
+    4.606366635165706,
+    135.21106731651633
+   ]
+  },
+  {
+   "name": "bld.0.s1",
+   "role": "bld.0",
+   "type": "Mesh",
+   "parent": null,
+   "visible": true,
+   "renderOrder": 0,
+   "frustumCulled": true,
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "quaternion": [
+    0,
+    0,
+    0,
+    1
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "geo": "g1",
+   "material": [
+    {
+     "type": "MeshStandardMaterial",
+     "color": "#ffffff",
+     "emissive": "#ffffff",
+     "roughness": 0.68,
+     "metalness": 0.1,
+     "emissiveIntensity": 0,
+     "opacity": 1,
+     "alphaTest": 0,
+     "transparent": false,
+     "vertexColors": false,
+     "flatShading": false,
+     "depthWrite": true,
+     "toneMapped": true,
+     "fog": true,
+     "side": 0,
+     "blending": 1,
+     "maps": [
+      "map",
+      "emissiveMap"
+     ],
+     "normalScale": [
+      1,
+      1
+     ]
+    },
+    {
+     "type": "MeshStandardMaterial",
+     "color": "#ffffff",
+     "emissive": "#000000",
+     "roughness": 0.92,
+     "metalness": 0.04,
+     "emissiveIntensity": 1,
+     "opacity": 1,
+     "alphaTest": 0,
+     "transparent": false,
+     "vertexColors": false,
+     "flatShading": false,
+     "depthWrite": true,
+     "toneMapped": true,
+     "fog": true,
+     "side": 0,
+     "blending": 1,
+     "maps": [
+      "map"
+     ],
+     "normalScale": [
+      0.8,
+      0.8
+     ]
+    }
+   ],
+   "count": 15,
+   "capacity": 15,
+   "instanceMatrix": {
+    "type": "f32",
+    "len": 240,
+    "exact": "e128460a",
+    "quant": "84b8e97a",
+    "off": 464480
+   },
+   "instanceColor": {
+    "type": "f32",
+    "len": 45,
+    "exact": "d91c4408",
+    "quant": "80690254",
+    "off": 465440
+   },
+   "boundingSphere": [
+    36.34845106504511,
+    -33.13599174250053,
+    9.254187656735262,
+    130.10061741483173
+   ]
+  },
+  {
+   "name": "bld.0.s2",
+   "role": "bld.0",
+   "type": "Mesh",
+   "parent": null,
+   "visible": true,
+   "renderOrder": 0,
+   "frustumCulled": true,
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "quaternion": [
+    0,
+    0,
+    0,
+    1
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "geo": "g1",
+   "material": [
+    {
+     "type": "MeshStandardMaterial",
+     "color": "#ffffff",
+     "emissive": "#ffffff",
+     "roughness": 0.68,
+     "metalness": 0.1,
+     "emissiveIntensity": 0,
+     "opacity": 1,
+     "alphaTest": 0,
+     "transparent": false,
+     "vertexColors": false,
+     "flatShading": false,
+     "depthWrite": true,
+     "toneMapped": true,
+     "fog": true,
+     "side": 0,
+     "blending": 1,
+     "maps": [
+      "map",
+      "emissiveMap"
+     ],
+     "normalScale": [
+      1,
+      1
+     ]
+    },
+    {
+     "type": "MeshStandardMaterial",
+     "color": "#ffffff",
+     "emissive": "#000000",
+     "roughness": 0.92,
+     "metalness": 0.04,
+     "emissiveIntensity": 1,
+     "opacity": 1,
+     "alphaTest": 0,
+     "transparent": false,
+     "vertexColors": false,
+     "flatShading": false,
+     "depthWrite": true,
+     "toneMapped": true,
+     "fog": true,
+     "side": 0,
+     "blending": 1,
+     "maps": [
+      "map"
+     ],
+     "normalScale": [
+      0.8,
+      0.8
+     ]
+    }
+   ],
+   "count": 10,
+   "capacity": 10,
+   "instanceMatrix": {
+    "type": "f32",
+    "len": 160,
+    "exact": "af35f06d",
+    "quant": "76d3c172",
+    "off": 465624
+   },
+   "instanceColor": {
+    "type": "f32",
+    "len": 30,
+    "exact": "5fae1001",
+    "quant": "679a0acb",
+    "off": 466264
+   },
+   "boundingSphere": [
+    -45.709860726880216,
+    -17.708093945025354,
+    -9.759456483257644,
+    111.42649801865159
+   ]
+  },
+  {
+   "name": "bld.0.s3",
+   "role": "bld.0",
+   "type": "Mesh",
+   "parent": null,
+   "visible": true,
+   "renderOrder": 0,
+   "frustumCulled": true,
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "quaternion": [
+    0,
+    0,
+    0,
+    1
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "geo": "g1",
+   "material": [
+    {
+     "type": "MeshStandardMaterial",
+     "color": "#ffffff",
+     "emissive": "#ffffff",
+     "roughness": 0.68,
+     "metalness": 0.1,
+     "emissiveIntensity": 0,
+     "opacity": 1,
+     "alphaTest": 0,
+     "transparent": false,
+     "vertexColors": false,
+     "flatShading": false,
+     "depthWrite": true,
+     "toneMapped": true,
+     "fog": true,
+     "side": 0,
+     "blending": 1,
+     "maps": [
+      "map",
+      "emissiveMap"
+     ],
+     "normalScale": [
+      1,
+      1
+     ]
+    },
+    {
+     "type": "MeshStandardMaterial",
+     "color": "#ffffff",
+     "emissive": "#000000",
+     "roughness": 0.92,
+     "metalness": 0.04,
+     "emissiveIntensity": 1,
+     "opacity": 1,
+     "alphaTest": 0,
+     "transparent": false,
+     "vertexColors": false,
+     "flatShading": false,
+     "depthWrite": true,
+     "toneMapped": true,
+     "fog": true,
+     "side": 0,
+     "blending": 1,
+     "maps": [
+      "map"
+     ],
+     "normalScale": [
+      0.8,
+      0.8
+     ]
+    }
+   ],
+   "count": 8,
+   "capacity": 8,
+   "instanceMatrix": {
+    "type": "f32",
+    "len": 128,
+    "exact": "f9bd0f60",
+    "quant": "7a297c42",
+    "off": 466384
+   },
+   "instanceColor": {
+    "type": "f32",
+    "len": 24,
+    "exact": "007edd0c",
+    "quant": "ac6e59ad",
+    "off": 466896
+   },
+   "boundingSphere": [
+    -48.949723891551145,
+    2.2020978688725235,
+    -27.93297248660169,
+    102.30182878873813
+   ]
+  },
+  {
+   "name": "bld.1.s0",
+   "role": "bld.1",
+   "type": "Mesh",
+   "parent": null,
+   "visible": true,
+   "renderOrder": 0,
+   "frustumCulled": true,
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "quaternion": [
+    0,
+    0,
+    0,
+    1
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "geo": "g2",
+   "material": [
+    {
+     "type": "MeshStandardMaterial",
+     "color": "#ffffff",
+     "emissive": "#ffffff",
+     "roughness": 0.68,
+     "metalness": 0.1,
+     "emissiveIntensity": 0,
+     "opacity": 1,
+     "alphaTest": 0,
+     "transparent": false,
+     "vertexColors": false,
+     "flatShading": false,
+     "depthWrite": true,
+     "toneMapped": true,
+     "fog": true,
+     "side": 0,
+     "blending": 1,
+     "maps": [
+      "map",
+      "emissiveMap"
+     ],
+     "normalScale": [
+      1,
+      1
+     ]
+    },
+    {
+     "type": "MeshStandardMaterial",
+     "color": "#ffffff",
+     "emissive": "#000000",
+     "roughness": 0.92,
+     "metalness": 0.04,
+     "emissiveIntensity": 1,
+     "opacity": 1,
+     "alphaTest": 0,
+     "transparent": false,
+     "vertexColors": false,
+     "flatShading": false,
+     "depthWrite": true,
+     "toneMapped": true,
+     "fog": true,
+     "side": 0,
+     "blending": 1,
+     "maps": [
+      "map"
+     ],
+     "normalScale": [
+      0.8,
+      0.8
+     ]
+    }
+   ],
+   "count": 15,
+   "capacity": 15,
+   "instanceMatrix": {
+    "type": "f32",
+    "len": 240,
+    "exact": "04f9ea08",
+    "quant": "13cd45c0",
+    "off": 472736
+   },
+   "instanceColor": {
+    "type": "f32",
+    "len": 45,
+    "exact": "065b7264",
+    "quant": "62858358",
+    "off": 473696
+   },
+   "boundingSphere": [
+    14.750044101745718,
+    46.89880743577739,
+    -4.5964748977364245,
+    135.86156451210798
+   ]
+  },
+  {
+   "name": "bld.1.s1",
+   "role": "bld.1",
+   "type": "Mesh",
+   "parent": null,
+   "visible": true,
+   "renderOrder": 0,
+   "frustumCulled": true,
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "quaternion": [
+    0,
+    0,
+    0,
+    1
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "geo": "g2",
+   "material": [
+    {
+     "type": "MeshStandardMaterial",
+     "color": "#ffffff",
+     "emissive": "#ffffff",
+     "roughness": 0.68,
+     "metalness": 0.1,
+     "emissiveIntensity": 0,
+     "opacity": 1,
+     "alphaTest": 0,
+     "transparent": false,
+     "vertexColors": false,
+     "flatShading": false,
+     "depthWrite": true,
+     "toneMapped": true,
+     "fog": true,
+     "side": 0,
+     "blending": 1,
+     "maps": [
+      "map",
+      "emissiveMap"
+     ],
+     "normalScale": [
+      1,
+      1
+     ]
+    },
+    {
+     "type": "MeshStandardMaterial",
+     "color": "#ffffff",
+     "emissive": "#000000",
+     "roughness": 0.92,
+     "metalness": 0.04,
+     "emissiveIntensity": 1,
+     "opacity": 1,
+     "alphaTest": 0,
+     "transparent": false,
+     "vertexColors": false,
+     "flatShading": false,
+     "depthWrite": true,
+     "toneMapped": true,
+     "fog": true,
+     "side": 0,
+     "blending": 1,
+     "maps": [
+      "map"
+     ],
+     "normalScale": [
+      0.8,
+      0.8
+     ]
+    }
+   ],
+   "count": 15,
+   "capacity": 15,
+   "instanceMatrix": {
+    "type": "f32",
+    "len": 240,
+    "exact": "32890adf",
+    "quant": "899de8e5",
+    "off": 473880
+   },
+   "instanceColor": {
+    "type": "f32",
+    "len": 45,
+    "exact": "2f6013fb",
+    "quant": "86b5fe87",
+    "off": 474840
+   },
+   "boundingSphere": [
+    33.759903131465904,
+    -35.09498658991107,
+    -4.257239126514687,
+    127.38012601290048
+   ]
+  },
+  {
+   "name": "bld.1.s2",
+   "role": "bld.1",
+   "type": "Mesh",
+   "parent": null,
+   "visible": true,
+   "renderOrder": 0,
+   "frustumCulled": true,
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "quaternion": [
+    0,
+    0,
+    0,
+    1
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "geo": "g2",
+   "material": [
+    {
+     "type": "MeshStandardMaterial",
+     "color": "#ffffff",
+     "emissive": "#ffffff",
+     "roughness": 0.68,
+     "metalness": 0.1,
+     "emissiveIntensity": 0,
+     "opacity": 1,
+     "alphaTest": 0,
+     "transparent": false,
+     "vertexColors": false,
+     "flatShading": false,
+     "depthWrite": true,
+     "toneMapped": true,
+     "fog": true,
+     "side": 0,
+     "blending": 1,
+     "maps": [
+      "map",
+      "emissiveMap"
+     ],
+     "normalScale": [
+      1,
+      1
+     ]
+    },
+    {
+     "type": "MeshStandardMaterial",
+     "color": "#ffffff",
+     "emissive": "#000000",
+     "roughness": 0.92,
+     "metalness": 0.04,
+     "emissiveIntensity": 1,
+     "opacity": 1,
+     "alphaTest": 0,
+     "transparent": false,
+     "vertexColors": false,
+     "flatShading": false,
+     "depthWrite": true,
+     "toneMapped": true,
+     "fog": true,
+     "side": 0,
+     "blending": 1,
+     "maps": [
+      "map"
+     ],
+     "normalScale": [
+      0.8,
+      0.8
+     ]
+    }
+   ],
+   "count": 8,
+   "capacity": 8,
+   "instanceMatrix": {
+    "type": "f32",
+    "len": 128,
+    "exact": "b4279f31",
+    "quant": "2c74c41f",
+    "off": 475024
+   },
+   "instanceColor": {
+    "type": "f32",
+    "len": 24,
+    "exact": "6eb7957a",
+    "quant": "5a3b5ef5",
+    "off": 475536
+   },
+   "boundingSphere": [
+    -45.65484758019132,
+    -17.686781946856772,
+    19.21656646178903,
+    103.00418344586015
+   ]
+  },
+  {
+   "name": "bld.1.s3",
+   "role": "bld.1",
+   "type": "Mesh",
+   "parent": null,
+   "visible": true,
+   "renderOrder": 0,
+   "frustumCulled": true,
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "quaternion": [
+    0,
+    0,
+    0,
+    1
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "geo": "g2",
+   "material": [
+    {
+     "type": "MeshStandardMaterial",
+     "color": "#ffffff",
+     "emissive": "#ffffff",
+     "roughness": 0.68,
+     "metalness": 0.1,
+     "emissiveIntensity": 0,
+     "opacity": 1,
+     "alphaTest": 0,
+     "transparent": false,
+     "vertexColors": false,
+     "flatShading": false,
+     "depthWrite": true,
+     "toneMapped": true,
+     "fog": true,
+     "side": 0,
+     "blending": 1,
+     "maps": [
+      "map",
+      "emissiveMap"
+     ],
+     "normalScale": [
+      1,
+      1
+     ]
+    },
+    {
+     "type": "MeshStandardMaterial",
+     "color": "#ffffff",
+     "emissive": "#000000",
+     "roughness": 0.92,
+     "metalness": 0.04,
+     "emissiveIntensity": 1,
+     "opacity": 1,
+     "alphaTest": 0,
+     "transparent": false,
+     "vertexColors": false,
+     "flatShading": false,
+     "depthWrite": true,
+     "toneMapped": true,
+     "fog": true,
+     "side": 0,
+     "blending": 1,
+     "maps": [
+      "map"
+     ],
+     "normalScale": [
+      0.8,
+      0.8
+     ]
+    }
+   ],
+   "count": 11,
+   "capacity": 11,
+   "instanceMatrix": {
+    "type": "f32",
+    "len": 176,
+    "exact": "1451f12a",
+    "quant": "bc56c8a6",
+    "off": 475632
+   },
+   "instanceColor": {
+    "type": "f32",
+    "len": 33,
+    "exact": "9fb43561",
+    "quant": "c43a2cfb",
+    "off": 476336
+   },
+   "boundingSphere": [
+    -49.05321749285414,
+    0.9464727496434393,
+    4.6236057434067686,
+    126.90752041750261
+   ]
+  },
+  {
+   "name": "bld.2.s0",
+   "role": "bld.2",
+   "type": "Mesh",
+   "parent": null,
+   "visible": true,
+   "renderOrder": 0,
+   "frustumCulled": true,
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "quaternion": [
+    0,
+    0,
+    0,
+    1
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "geo": "g3",
+   "material": [
+    {
+     "type": "MeshStandardMaterial",
+     "color": "#ffffff",
+     "emissive": "#ffffff",
+     "roughness": 0.68,
+     "metalness": 0.1,
+     "emissiveIntensity": 0,
+     "opacity": 1,
+     "alphaTest": 0,
+     "transparent": false,
+     "vertexColors": false,
+     "flatShading": false,
+     "depthWrite": true,
+     "toneMapped": true,
+     "fog": true,
+     "side": 0,
+     "blending": 1,
+     "maps": [
+      "map",
+      "emissiveMap"
+     ],
+     "normalScale": [
+      1,
+      1
+     ]
+    },
+    {
+     "type": "MeshStandardMaterial",
+     "color": "#ffffff",
+     "emissive": "#000000",
+     "roughness": 0.92,
+     "metalness": 0.04,
+     "emissiveIntensity": 1,
+     "opacity": 1,
+     "alphaTest": 0,
+     "transparent": false,
+     "vertexColors": false,
+     "flatShading": false,
+     "depthWrite": true,
+     "toneMapped": true,
+     "fog": true,
+     "side": 0,
+     "blending": 1,
+     "maps": [
+      "map"
+     ],
+     "normalScale": [
+      0.8,
+      0.8
+     ]
+    }
+   ],
+   "count": 15,
+   "capacity": 15,
+   "instanceMatrix": {
+    "type": "f32",
+    "len": 240,
+    "exact": "9a2db3d6",
+    "quant": "0795f3a5",
+    "off": 485976
+   },
+   "instanceColor": {
+    "type": "f32",
+    "len": 45,
+    "exact": "080d4590",
+    "quant": "22ff3476",
+    "off": 486936
+   },
+   "boundingSphere": [
+    15.464932841779625,
+    46.428616743633285,
+    -9.686623077825024,
+    120.4474122014129
+   ]
+  },
+  {
+   "name": "bld.2.s1",
+   "role": "bld.2",
+   "type": "Mesh",
+   "parent": null,
+   "visible": true,
+   "renderOrder": 0,
+   "frustumCulled": true,
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "quaternion": [
+    0,
+    0,
+    0,
+    1
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "geo": "g3",
+   "material": [
+    {
+     "type": "MeshStandardMaterial",
+     "color": "#ffffff",
+     "emissive": "#ffffff",
+     "roughness": 0.68,
+     "metalness": 0.1,
+     "emissiveIntensity": 0,
+     "opacity": 1,
+     "alphaTest": 0,
+     "transparent": false,
+     "vertexColors": false,
+     "flatShading": false,
+     "depthWrite": true,
+     "toneMapped": true,
+     "fog": true,
+     "side": 0,
+     "blending": 1,
+     "maps": [
+      "map",
+      "emissiveMap"
+     ],
+     "normalScale": [
+      1,
+      1
+     ]
+    },
+    {
+     "type": "MeshStandardMaterial",
+     "color": "#ffffff",
+     "emissive": "#000000",
+     "roughness": 0.92,
+     "metalness": 0.04,
+     "emissiveIntensity": 1,
+     "opacity": 1,
+     "alphaTest": 0,
+     "transparent": false,
+     "vertexColors": false,
+     "flatShading": false,
+     "depthWrite": true,
+     "toneMapped": true,
+     "fog": true,
+     "side": 0,
+     "blending": 1,
+     "maps": [
+      "map"
+     ],
+     "normalScale": [
+      0.8,
+      0.8
+     ]
+    }
+   ],
+   "count": 13,
+   "capacity": 13,
+   "instanceMatrix": {
+    "type": "f32",
+    "len": 208,
+    "exact": "a2778f9b",
+    "quant": "92910db4",
+    "off": 487120
+   },
+   "instanceColor": {
+    "type": "f32",
+    "len": 39,
+    "exact": "4b555e8d",
+    "quant": "ba18d22f",
+    "off": 487952
+   },
+   "boundingSphere": [
+    31.75196751984201,
+    -37.4303505271981,
+    18.92681053515471,
+    120.65157646064804
+   ]
+  },
+  {
+   "name": "bld.2.s2",
+   "role": "bld.2",
+   "type": "Mesh",
+   "parent": null,
+   "visible": true,
+   "renderOrder": 0,
+   "frustumCulled": true,
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "quaternion": [
+    0,
+    0,
+    0,
+    1
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "geo": "g3",
+   "material": [
+    {
+     "type": "MeshStandardMaterial",
+     "color": "#ffffff",
+     "emissive": "#ffffff",
+     "roughness": 0.68,
+     "metalness": 0.1,
+     "emissiveIntensity": 0,
+     "opacity": 1,
+     "alphaTest": 0,
+     "transparent": false,
+     "vertexColors": false,
+     "flatShading": false,
+     "depthWrite": true,
+     "toneMapped": true,
+     "fog": true,
+     "side": 0,
+     "blending": 1,
+     "maps": [
+      "map",
+      "emissiveMap"
+     ],
+     "normalScale": [
+      1,
+      1
+     ]
+    },
+    {
+     "type": "MeshStandardMaterial",
+     "color": "#ffffff",
+     "emissive": "#000000",
+     "roughness": 0.92,
+     "metalness": 0.04,
+     "emissiveIntensity": 1,
+     "opacity": 1,
+     "alphaTest": 0,
+     "transparent": false,
+     "vertexColors": false,
+     "flatShading": false,
+     "depthWrite": true,
+     "toneMapped": true,
+     "fog": true,
+     "side": 0,
+     "blending": 1,
+     "maps": [
+      "map"
+     ],
+     "normalScale": [
+      0.8,
+      0.8
+     ]
+    }
+   ],
+   "count": 8,
+   "capacity": 8,
+   "instanceMatrix": {
+    "type": "f32",
+    "len": 128,
+    "exact": "b615dc72",
+    "quant": "10d07736",
+    "off": 488112
+   },
+   "instanceColor": {
+    "type": "f32",
+    "len": 24,
+    "exact": "ed09dfd3",
+    "quant": "0444049e",
+    "off": 488624
+   },
+   "boundingSphere": [
+    -45.94749061469621,
+    -17.800151986458125,
+    23.4702506006918,
+    115.54637894029642
+   ]
+  },
+  {
+   "name": "bld.2.s3",
+   "role": "bld.2",
+   "type": "Mesh",
+   "parent": null,
+   "visible": true,
+   "renderOrder": 0,
+   "frustumCulled": true,
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "quaternion": [
+    0,
+    0,
+    0,
+    1
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "geo": "g3",
+   "material": [
+    {
+     "type": "MeshStandardMaterial",
+     "color": "#ffffff",
+     "emissive": "#ffffff",
+     "roughness": 0.68,
+     "metalness": 0.1,
+     "emissiveIntensity": 0,
+     "opacity": 1,
+     "alphaTest": 0,
+     "transparent": false,
+     "vertexColors": false,
+     "flatShading": false,
+     "depthWrite": true,
+     "toneMapped": true,
+     "fog": true,
+     "side": 0,
+     "blending": 1,
+     "maps": [
+      "map",
+      "emissiveMap"
+     ],
+     "normalScale": [
+      1,
+      1
+     ]
+    },
+    {
+     "type": "MeshStandardMaterial",
+     "color": "#ffffff",
+     "emissive": "#000000",
+     "roughness": 0.92,
+     "metalness": 0.04,
+     "emissiveIntensity": 1,
+     "opacity": 1,
+     "alphaTest": 0,
+     "transparent": false,
+     "vertexColors": false,
+     "flatShading": false,
+     "depthWrite": true,
+     "toneMapped": true,
+     "fog": true,
+     "side": 0,
+     "blending": 1,
+     "maps": [
+      "map"
+     ],
+     "normalScale": [
+      0.8,
+      0.8
+     ]
+    }
+   ],
+   "count": 13,
+   "capacity": 13,
+   "instanceMatrix": {
+    "type": "f32",
+    "len": 208,
+    "exact": "f5e278c0",
+    "quant": "f180df8f",
+    "off": 488720
+   },
+   "instanceColor": {
+    "type": "f32",
+    "len": 39,
+    "exact": "bb96b61c",
+    "quant": "fbfba965",
+    "off": 489552
+   },
+   "boundingSphere": [
+    -49.08989477342947,
+    1.531796220676469,
+    9.47481724927431,
+    129.67452939659395
+   ]
+  },
+  {
+   "name": "bld.3.s0",
+   "role": "bld.3",
+   "type": "Mesh",
+   "parent": null,
+   "visible": true,
+   "renderOrder": 0,
+   "frustumCulled": true,
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "quaternion": [
+    0,
+    0,
+    0,
+    1
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "geo": "g4",
+   "material": [
+    {
+     "type": "MeshStandardMaterial",
+     "color": "#ffffff",
+     "emissive": "#ffffff",
+     "roughness": 0.68,
+     "metalness": 0.1,
+     "emissiveIntensity": 0,
+     "opacity": 1,
+     "alphaTest": 0,
+     "transparent": false,
+     "vertexColors": false,
+     "flatShading": false,
+     "depthWrite": true,
+     "toneMapped": true,
+     "fog": true,
+     "side": 0,
+     "blending": 1,
+     "maps": [
+      "map",
+      "emissiveMap"
+     ],
+     "normalScale": [
+      1,
+      1
+     ]
+    },
+    {
+     "type": "MeshStandardMaterial",
+     "color": "#ffffff",
+     "emissive": "#000000",
+     "roughness": 0.92,
+     "metalness": 0.04,
+     "emissiveIntensity": 1,
+     "opacity": 1,
+     "alphaTest": 0,
+     "transparent": false,
+     "vertexColors": false,
+     "flatShading": false,
+     "depthWrite": true,
+     "toneMapped": true,
+     "fog": true,
+     "side": 0,
+     "blending": 1,
+     "maps": [
+      "map"
+     ],
+     "normalScale": [
+      0.8,
+      0.8
+     ]
+    }
+   ],
+   "count": 13,
+   "capacity": 13,
+   "instanceMatrix": {
+    "type": "f32",
+    "len": 208,
+    "exact": "1a128922",
+    "quant": "9e40b30e",
+    "off": 501616
+   },
+   "instanceColor": {
+    "type": "f32",
+    "len": 39,
+    "exact": "19e935e4",
+    "quant": "9de2a1e5",
+    "off": 502448
+   },
+   "boundingSphere": [
+    19.01087130300406,
+    45.08227757226368,
+    13.685251753790455,
+    125.92428725491948
+   ]
+  },
+  {
+   "name": "bld.3.s1",
+   "role": "bld.3",
+   "type": "Mesh",
+   "parent": null,
+   "visible": true,
+   "renderOrder": 0,
+   "frustumCulled": true,
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "quaternion": [
+    0,
+    0,
+    0,
+    1
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "geo": "g4",
+   "material": [
+    {
+     "type": "MeshStandardMaterial",
+     "color": "#ffffff",
+     "emissive": "#ffffff",
+     "roughness": 0.68,
+     "metalness": 0.1,
+     "emissiveIntensity": 0,
+     "opacity": 1,
+     "alphaTest": 0,
+     "transparent": false,
+     "vertexColors": false,
+     "flatShading": false,
+     "depthWrite": true,
+     "toneMapped": true,
+     "fog": true,
+     "side": 0,
+     "blending": 1,
+     "maps": [
+      "map",
+      "emissiveMap"
+     ],
+     "normalScale": [
+      1,
+      1
+     ]
+    },
+    {
+     "type": "MeshStandardMaterial",
+     "color": "#ffffff",
+     "emissive": "#000000",
+     "roughness": 0.92,
+     "metalness": 0.04,
+     "emissiveIntensity": 1,
+     "opacity": 1,
+     "alphaTest": 0,
+     "transparent": false,
+     "vertexColors": false,
+     "flatShading": false,
+     "depthWrite": true,
+     "toneMapped": true,
+     "fog": true,
+     "side": 0,
+     "blending": 1,
+     "maps": [
+      "map"
+     ],
+     "normalScale": [
+      0.8,
+      0.8
+     ]
+    }
+   ],
+   "count": 14,
+   "capacity": 14,
+   "instanceMatrix": {
+    "type": "f32",
+    "len": 224,
+    "exact": "c585ddc9",
+    "quant": "eba77446",
+    "off": 502608
+   },
+   "instanceColor": {
+    "type": "f32",
+    "len": 42,
+    "exact": "7c9db4aa",
+    "quant": "3b82a2ab",
+    "off": 503504
+   },
+   "boundingSphere": [
+    32.65797060738269,
+    -36.323209701701984,
+    -0.16779816430429406,
+    140.06050248846844
+   ]
+  },
+  {
+   "name": "bld.3.s2",
+   "role": "bld.3",
+   "type": "Mesh",
+   "parent": null,
+   "visible": true,
+   "renderOrder": 0,
+   "frustumCulled": true,
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "quaternion": [
+    0,
+    0,
+    0,
+    1
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "geo": "g4",
+   "material": [
+    {
+     "type": "MeshStandardMaterial",
+     "color": "#ffffff",
+     "emissive": "#ffffff",
+     "roughness": 0.68,
+     "metalness": 0.1,
+     "emissiveIntensity": 0,
+     "opacity": 1,
+     "alphaTest": 0,
+     "transparent": false,
+     "vertexColors": false,
+     "flatShading": false,
+     "depthWrite": true,
+     "toneMapped": true,
+     "fog": true,
+     "side": 0,
+     "blending": 1,
+     "maps": [
+      "map",
+      "emissiveMap"
+     ],
+     "normalScale": [
+      1,
+      1
+     ]
+    },
+    {
+     "type": "MeshStandardMaterial",
+     "color": "#ffffff",
+     "emissive": "#000000",
+     "roughness": 0.92,
+     "metalness": 0.04,
+     "emissiveIntensity": 1,
+     "opacity": 1,
+     "alphaTest": 0,
+     "transparent": false,
+     "vertexColors": false,
+     "flatShading": false,
+     "depthWrite": true,
+     "toneMapped": true,
+     "fog": true,
+     "side": 0,
+     "blending": 1,
+     "maps": [
+      "map"
+     ],
+     "normalScale": [
+      0.8,
+      0.8
+     ]
+    }
+   ],
+   "count": 16,
+   "capacity": 16,
+   "instanceMatrix": {
+    "type": "f32",
+    "len": 256,
+    "exact": "2273f096",
+    "quant": "377a6ab0",
+    "off": 503672
+   },
+   "instanceColor": {
+    "type": "f32",
+    "len": 48,
+    "exact": "988a84e7",
+    "quant": "224ef982",
+    "off": 504696
+   },
+   "boundingSphere": [
+    -46.02199077651713,
+    -17.7953628182517,
+    -0.2996427032928099,
+    130.3542656676817
+   ]
+  },
+  {
+   "name": "bld.3.s3",
+   "role": "bld.3",
+   "type": "Mesh",
+   "parent": null,
+   "visible": true,
+   "renderOrder": 0,
+   "frustumCulled": true,
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "quaternion": [
+    0,
+    0,
+    0,
+    1
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "geo": "g4",
+   "material": [
+    {
+     "type": "MeshStandardMaterial",
+     "color": "#ffffff",
+     "emissive": "#ffffff",
+     "roughness": 0.68,
+     "metalness": 0.1,
+     "emissiveIntensity": 0,
+     "opacity": 1,
+     "alphaTest": 0,
+     "transparent": false,
+     "vertexColors": false,
+     "flatShading": false,
+     "depthWrite": true,
+     "toneMapped": true,
+     "fog": true,
+     "side": 0,
+     "blending": 1,
+     "maps": [
+      "map",
+      "emissiveMap"
+     ],
+     "normalScale": [
+      1,
+      1
+     ]
+    },
+    {
+     "type": "MeshStandardMaterial",
+     "color": "#ffffff",
+     "emissive": "#000000",
+     "roughness": 0.92,
+     "metalness": 0.04,
+     "emissiveIntensity": 1,
+     "opacity": 1,
+     "alphaTest": 0,
+     "transparent": false,
+     "vertexColors": false,
+     "flatShading": false,
+     "depthWrite": true,
+     "toneMapped": true,
+     "fog": true,
+     "side": 0,
+     "blending": 1,
+     "maps": [
+      "map"
+     ],
+     "normalScale": [
+      0.8,
+      0.8
+     ]
+    }
+   ],
+   "count": 12,
+   "capacity": 12,
+   "instanceMatrix": {
+    "type": "f32",
+    "len": 192,
+    "exact": "3b8d8ab6",
+    "quant": "9c0909f5",
+    "off": 504888
+   },
+   "instanceColor": {
+    "type": "f32",
+    "len": 36,
+    "exact": "b7bfd1da",
+    "quant": "b5c5e8f6",
+    "off": 505656
+   },
+   "boundingSphere": [
+    -49.19534060177965,
+    2.5818415983956364,
+    -9.438269412234789,
+    130.37826628087976
+   ]
+  },
+  {
+   "name": "cars.parked.s0",
+   "role": "cars.parked",
+   "type": "Mesh",
+   "parent": null,
+   "visible": true,
+   "renderOrder": 0,
+   "frustumCulled": true,
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "quaternion": [
+    0,
+    0,
+    0,
+    1
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "geo": "g5",
+   "material": {
+    "type": "MeshStandardMaterial",
+    "color": "#ffffff",
+    "emissive": "#000000",
+    "roughness": 0.42,
+    "metalness": 0.35,
+    "emissiveIntensity": 1,
+    "opacity": 1,
+    "alphaTest": 0,
+    "transparent": false,
+    "vertexColors": false,
+    "flatShading": false,
+    "depthWrite": true,
+    "toneMapped": true,
+    "fog": true,
+    "side": 0,
+    "blending": 1,
+    "maps": [],
+    "normalScale": [
+     1,
+     1
+    ]
+   },
+   "count": 44,
+   "capacity": 44,
+   "instanceMatrix": {
+    "type": "f32",
+    "len": 704,
+    "exact": "33a02d79",
+    "quant": "f1aed17d",
+    "off": 507480
+   },
+   "instanceColor": {
+    "type": "f32",
+    "len": 132,
+    "exact": "e16fd8dc",
+    "quant": "3a3ba8e0",
+    "off": 510296
+   },
+   "boundingSphere": [
+    12.887979337582419,
+    48.07706303519372,
+    -18.29411476352649,
+    92.86503904812895
+   ]
+  },
+  {
+   "name": "cars.parked.s1",
+   "role": "cars.parked",
+   "type": "Mesh",
+   "parent": null,
+   "visible": true,
+   "renderOrder": 0,
+   "frustumCulled": true,
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "quaternion": [
+    0,
+    0,
+    0,
+    1
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "geo": "g5",
+   "material": {
+    "type": "MeshStandardMaterial",
+    "color": "#ffffff",
+    "emissive": "#000000",
+    "roughness": 0.42,
+    "metalness": 0.35,
+    "emissiveIntensity": 1,
+    "opacity": 1,
+    "alphaTest": 0,
+    "transparent": false,
+    "vertexColors": false,
+    "flatShading": false,
+    "depthWrite": true,
+    "toneMapped": true,
+    "fog": true,
+    "side": 0,
+    "blending": 1,
+    "maps": [],
+    "normalScale": [
+     1,
+     1
+    ]
+   },
+   "count": 46,
+   "capacity": 46,
+   "instanceMatrix": {
+    "type": "f32",
+    "len": 736,
+    "exact": "dbd40b1d",
+    "quant": "e53a5e0a",
+    "off": 510824
+   },
+   "instanceColor": {
+    "type": "f32",
+    "len": 138,
+    "exact": "60eb2fcb",
+    "quant": "4f0caf50",
+    "off": 513768
+   },
+   "boundingSphere": [
+    33.65928974122332,
+    -36.504078500569776,
+    -56.48594285900506,
+    81.96231870584378
+   ]
+  },
+  {
+   "name": "cars.parked.s2",
+   "role": "cars.parked",
+   "type": "Mesh",
+   "parent": null,
+   "visible": true,
+   "renderOrder": 0,
+   "frustumCulled": true,
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "quaternion": [
+    0,
+    0,
+    0,
+    1
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "geo": "g5",
+   "material": {
+    "type": "MeshStandardMaterial",
+    "color": "#ffffff",
+    "emissive": "#000000",
+    "roughness": 0.42,
+    "metalness": 0.35,
+    "emissiveIntensity": 1,
+    "opacity": 1,
+    "alphaTest": 0,
+    "transparent": false,
+    "vertexColors": false,
+    "flatShading": false,
+    "depthWrite": true,
+    "toneMapped": true,
+    "fog": true,
+    "side": 0,
+    "blending": 1,
+    "maps": [],
+    "normalScale": [
+     1,
+     1
+    ]
+   },
+   "count": 14,
+   "capacity": 14,
+   "instanceMatrix": {
+    "type": "f32",
+    "len": 224,
+    "exact": "77baae51",
+    "quant": "25f1d99c",
+    "off": 514320
+   },
+   "instanceColor": {
+    "type": "f32",
+    "len": 42,
+    "exact": "745c0085",
+    "quant": "edf0e6bf",
+    "off": 515216
+   },
+   "boundingSphere": [
+    -48.81568640400288,
+    -9.954381899453143,
+    -0.9168853117808523,
+    82.3945390768207
+   ]
+  },
+  {
+   "name": "cars.parked.s3",
+   "role": "cars.parked",
+   "type": "Mesh",
+   "parent": null,
+   "visible": true,
+   "renderOrder": 0,
+   "frustumCulled": true,
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "quaternion": [
+    0,
+    0,
+    0,
+    1
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "geo": "g5",
+   "material": {
+    "type": "MeshStandardMaterial",
+    "color": "#ffffff",
+    "emissive": "#000000",
+    "roughness": 0.42,
+    "metalness": 0.35,
+    "emissiveIntensity": 1,
+    "opacity": 1,
+    "alphaTest": 0,
+    "transparent": false,
+    "vertexColors": false,
+    "flatShading": false,
+    "depthWrite": true,
+    "toneMapped": true,
+    "fog": true,
+    "side": 0,
+    "blending": 1,
+    "maps": [],
+    "normalScale": [
+     1,
+     1
+    ]
+   },
+   "count": 13,
+   "capacity": 13,
+   "instanceMatrix": {
+    "type": "f32",
+    "len": 208,
+    "exact": "f4eb3939",
+    "quant": "01f86803",
+    "off": 515384
+   },
+   "instanceColor": {
+    "type": "f32",
+    "len": 39,
+    "exact": "bacc53d5",
+    "quant": "a74c5682",
+    "off": 516216
+   },
+   "boundingSphere": [
+    -48.99620085667222,
+    9.084359637920253,
+    -51.44304675105321,
+    39.37019008728093
+   ]
+  },
+  {
+   "name": "trunks.s0",
+   "role": "trunks",
+   "type": "Mesh",
+   "parent": null,
+   "visible": true,
+   "renderOrder": 0,
+   "frustumCulled": true,
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "quaternion": [
+    0,
+    0,
+    0,
+    1
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "geo": "g6",
+   "material": {
+    "type": "MeshStandardMaterial",
+    "color": "#6b5236",
+    "emissive": "#000000",
+    "roughness": 1,
+    "metalness": 0,
+    "emissiveIntensity": 1,
+    "opacity": 1,
+    "alphaTest": 0,
+    "transparent": false,
+    "vertexColors": true,
+    "flatShading": false,
+    "depthWrite": true,
+    "toneMapped": true,
+    "fog": true,
+    "side": 0,
+    "blending": 1,
+    "maps": [],
+    "normalScale": [
+     1,
+     1
+    ]
+   },
+   "count": 395,
+   "capacity": 395,
+   "instanceMatrix": {
+    "type": "f32",
+    "len": 6320,
+    "exact": "36bc44c6",
+    "quant": "d86b83f8",
+    "off": 518280
+   },
+   "instanceColor": null,
+   "boundingSphere": [
+    39.65374863820646,
+    24.081688937197924,
+    -0.3405609327088528,
+    152.92666100901027
+   ]
+  },
+  {
+   "name": "trunks.s1",
+   "role": "trunks",
+   "type": "Mesh",
+   "parent": null,
+   "visible": true,
+   "renderOrder": 0,
+   "frustumCulled": true,
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "quaternion": [
+    0,
+    0,
+    0,
+    1
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "geo": "g6",
+   "material": {
+    "type": "MeshStandardMaterial",
+    "color": "#6b5236",
+    "emissive": "#000000",
+    "roughness": 1,
+    "metalness": 0,
+    "emissiveIntensity": 1,
+    "opacity": 1,
+    "alphaTest": 0,
+    "transparent": false,
+    "vertexColors": true,
+    "flatShading": false,
+    "depthWrite": true,
+    "toneMapped": true,
+    "fog": true,
+    "side": 0,
+    "blending": 1,
+    "maps": [],
+    "normalScale": [
+     1,
+     1
+    ]
+   },
+   "count": 346,
+   "capacity": 346,
+   "instanceMatrix": {
+    "type": "f32",
+    "len": 5536,
+    "exact": "6518dae4",
+    "quant": "d479cf4a",
+    "off": 543560
+   },
+   "instanceColor": null,
+   "boundingSphere": [
+    36.99896163060009,
+    -22.21322258446082,
+    1.2257445727681475,
+    149.32622666351796
+   ]
+  },
+  {
+   "name": "trunks.s2",
+   "role": "trunks",
+   "type": "Mesh",
+   "parent": null,
+   "visible": true,
+   "renderOrder": 0,
+   "frustumCulled": true,
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "quaternion": [
+    0,
+    0,
+    0,
+    1
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "geo": "g6",
+   "material": {
+    "type": "MeshStandardMaterial",
+    "color": "#6b5236",
+    "emissive": "#000000",
+    "roughness": 1,
+    "metalness": 0,
+    "emissiveIntensity": 1,
+    "opacity": 1,
+    "alphaTest": 0,
+    "transparent": false,
+    "vertexColors": true,
+    "flatShading": false,
+    "depthWrite": true,
+    "toneMapped": true,
+    "fog": true,
+    "side": 0,
+    "blending": 1,
+    "maps": [],
+    "normalScale": [
+     1,
+     1
+    ]
+   },
+   "count": 113,
+   "capacity": 113,
+   "instanceMatrix": {
+    "type": "f32",
+    "len": 1808,
+    "exact": "5043f9a5",
+    "quant": "0cb98bdd",
+    "off": 565704
+   },
+   "instanceColor": null,
+   "boundingSphere": [
+    -21.58267909481427,
+    -41.525101231416855,
+    -0.5010830552786228,
+    148.16684360791754
+   ]
+  },
+  {
+   "name": "trunks.s3",
+   "role": "trunks",
+   "type": "Mesh",
+   "parent": null,
+   "visible": true,
+   "renderOrder": 0,
+   "frustumCulled": true,
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "quaternion": [
+    0,
+    0,
+    0,
+    1
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "geo": "g6",
+   "material": {
+    "type": "MeshStandardMaterial",
+    "color": "#6b5236",
+    "emissive": "#000000",
+    "roughness": 1,
+    "metalness": 0,
+    "emissiveIntensity": 1,
+    "opacity": 1,
+    "alphaTest": 0,
+    "transparent": false,
+    "vertexColors": true,
+    "flatShading": false,
+    "depthWrite": true,
+    "toneMapped": true,
+    "fog": true,
+    "side": 0,
+    "blending": 1,
+    "maps": [],
+    "normalScale": [
+     1,
+     1
+    ]
+   },
+   "count": 646,
+   "capacity": 646,
+   "instanceMatrix": {
+    "type": "f32",
+    "len": 10336,
+    "exact": "43f58a1f",
+    "quant": "27eac6c0",
+    "off": 572936
+   },
+   "instanceColor": null,
+   "boundingSphere": [
+    -31.08803721299609,
+    37.142000067775555,
+    1.2871042747725063,
+    148.5453153568245
+   ]
+  },
+  {
+   "name": "crowns.lod0.s0",
+   "role": "crowns.lod0",
+   "type": "Mesh",
+   "parent": null,
+   "visible": true,
+   "renderOrder": 0,
+   "frustumCulled": true,
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "quaternion": [
+    0,
+    0,
+    0,
+    1
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "geo": "g7",
+   "material": {
+    "type": "MeshStandardMaterial",
+    "color": "#ffffff",
+    "emissive": "#000000",
+    "roughness": 0.9,
+    "metalness": 0,
+    "emissiveIntensity": 1,
+    "opacity": 1,
+    "alphaTest": 0,
+    "transparent": false,
+    "vertexColors": true,
+    "flatShading": true,
+    "depthWrite": true,
+    "toneMapped": true,
+    "fog": true,
+    "side": 0,
+    "blending": 1,
+    "maps": [],
+    "normalScale": [
+     1.1,
+     1.1
+    ]
+   },
+   "count": 395,
+   "capacity": 395,
+   "instanceMatrix": {
+    "type": "f32",
+    "len": 6320,
+    "exact": "f9a55fe1",
+    "quant": "63395611",
+    "off": 616920
+   },
+   "instanceColor": {
+    "type": "f32",
+    "len": 1185,
+    "exact": "b49d4bf3",
+    "quant": "4fbc6f6f",
+    "off": 642200
+   },
+   "boundingSphere": [
+    41.49162122604433,
+    20.741463117401196,
+    -3.468347087972879,
+    160.62039156212077
+   ]
+  },
+  {
+   "name": "crowns.lod1.s0",
+   "role": "crowns.lod1",
+   "type": "Mesh",
+   "parent": null,
+   "visible": true,
+   "renderOrder": 0,
+   "frustumCulled": true,
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "quaternion": [
+    0,
+    0,
+    0,
+    1
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "geo": "g8",
+   "material": {
+    "type": "MeshStandardMaterial",
+    "color": "#ffffff",
+    "emissive": "#000000",
+    "roughness": 0.9,
+    "metalness": 0,
+    "emissiveIntensity": 1,
+    "opacity": 1,
+    "alphaTest": 0,
+    "transparent": false,
+    "vertexColors": true,
+    "flatShading": true,
+    "depthWrite": true,
+    "toneMapped": true,
+    "fog": true,
+    "side": 0,
+    "blending": 1,
+    "maps": [],
+    "normalScale": [
+     1.1,
+     1.1
+    ]
+   },
+   "count": 0,
+   "capacity": 395,
+   "instanceMatrix": {
+    "type": "f32",
+    "len": 6320,
+    "exact": "3787a865",
+    "quant": "eff7eb65",
+    "off": 649584
+   },
+   "instanceColor": {
+    "type": "f32",
+    "len": 1185,
+    "exact": "f5ce5715",
+    "quant": "f5ce5715",
+    "off": 674864
+   },
+   "boundingSphere": [
+    41.49162122604433,
+    20.741463117401196,
+    -3.468347087972879,
+    160.62039156212077
+   ]
+  },
+  {
+   "name": "crowns.lod2.s0",
+   "role": "crowns.lod2",
+   "type": "Mesh",
+   "parent": null,
+   "visible": true,
+   "renderOrder": 0,
+   "frustumCulled": true,
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "quaternion": [
+    0,
+    0,
+    0,
+    1
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "geo": "g9",
+   "material": {
+    "type": "MeshStandardMaterial",
+    "color": "#ffffff",
+    "emissive": "#000000",
+    "roughness": 0.95,
+    "metalness": 0,
+    "emissiveIntensity": 1,
+    "opacity": 1,
+    "alphaTest": 0.5,
+    "transparent": false,
+    "vertexColors": true,
+    "flatShading": false,
+    "depthWrite": true,
+    "toneMapped": true,
+    "fog": true,
+    "side": 2,
+    "blending": 1,
+    "maps": [
+     "map"
+    ],
+    "normalScale": [
+     1,
+     1
+    ]
+   },
+   "count": 0,
+   "capacity": 395,
+   "instanceMatrix": {
+    "type": "f32",
+    "len": 6320,
+    "exact": "3787a865",
+    "quant": "eff7eb65",
+    "off": 680176
+   },
+   "instanceColor": {
+    "type": "f32",
+    "len": 1185,
+    "exact": "f5ce5715",
+    "quant": "f5ce5715",
+    "off": 705456
+   },
+   "boundingSphere": [
+    41.49162122604433,
+    20.741463117401196,
+    -3.468347087972879,
+    160.62039156212077
+   ]
+  },
+  {
+   "name": "crowns.lod0.s1",
+   "role": "crowns.lod0",
+   "type": "Mesh",
+   "parent": null,
+   "visible": true,
+   "renderOrder": 0,
+   "frustumCulled": true,
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "quaternion": [
+    0,
+    0,
+    0,
+    1
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "geo": "g7",
+   "material": {
+    "type": "MeshStandardMaterial",
+    "color": "#ffffff",
+    "emissive": "#000000",
+    "roughness": 0.9,
+    "metalness": 0,
+    "emissiveIntensity": 1,
+    "opacity": 1,
+    "alphaTest": 0,
+    "transparent": false,
+    "vertexColors": true,
+    "flatShading": true,
+    "depthWrite": true,
+    "toneMapped": true,
+    "fog": true,
+    "side": 0,
+    "blending": 1,
+    "maps": [],
+    "normalScale": [
+     1.1,
+     1.1
+    ]
+   },
+   "count": 346,
+   "capacity": 346,
+   "instanceMatrix": {
+    "type": "f32",
+    "len": 5536,
+    "exact": "9c6f69d3",
+    "quant": "37542525",
+    "off": 710200
+   },
+   "instanceColor": {
+    "type": "f32",
+    "len": 1038,
+    "exact": "077b86a1",
+    "quant": "0ff5082d",
+    "off": 732344
+   },
+   "boundingSphere": [
+    42.24430817597697,
+    -17.424948085018084,
+    -1.5400520445782202,
+    157.39178013511508
+   ]
+  },
+  {
+   "name": "crowns.lod1.s1",
+   "role": "crowns.lod1",
+   "type": "Mesh",
+   "parent": null,
+   "visible": true,
+   "renderOrder": 0,
+   "frustumCulled": true,
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "quaternion": [
+    0,
+    0,
+    0,
+    1
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "geo": "g8",
+   "material": {
+    "type": "MeshStandardMaterial",
+    "color": "#ffffff",
+    "emissive": "#000000",
+    "roughness": 0.9,
+    "metalness": 0,
+    "emissiveIntensity": 1,
+    "opacity": 1,
+    "alphaTest": 0,
+    "transparent": false,
+    "vertexColors": true,
+    "flatShading": true,
+    "depthWrite": true,
+    "toneMapped": true,
+    "fog": true,
+    "side": 0,
+    "blending": 1,
+    "maps": [],
+    "normalScale": [
+     1.1,
+     1.1
+    ]
+   },
+   "count": 0,
+   "capacity": 346,
+   "instanceMatrix": {
+    "type": "f32",
+    "len": 5536,
+    "exact": "ef774485",
+    "quant": "f129bc85",
+    "off": 736496
+   },
+   "instanceColor": {
+    "type": "f32",
+    "len": 1038,
+    "exact": "8e388b25",
+    "quant": "8e388b25",
+    "off": 758640
+   },
+   "boundingSphere": [
+    42.24430817597697,
+    -17.424948085018084,
+    -1.5400520445782202,
+    157.39178013511508
+   ]
+  },
+  {
+   "name": "crowns.lod2.s1",
+   "role": "crowns.lod2",
+   "type": "Mesh",
+   "parent": null,
+   "visible": true,
+   "renderOrder": 0,
+   "frustumCulled": true,
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "quaternion": [
+    0,
+    0,
+    0,
+    1
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "geo": "g9",
+   "material": {
+    "type": "MeshStandardMaterial",
+    "color": "#ffffff",
+    "emissive": "#000000",
+    "roughness": 0.95,
+    "metalness": 0,
+    "emissiveIntensity": 1,
+    "opacity": 1,
+    "alphaTest": 0.5,
+    "transparent": false,
+    "vertexColors": true,
+    "flatShading": false,
+    "depthWrite": true,
+    "toneMapped": true,
+    "fog": true,
+    "side": 2,
+    "blending": 1,
+    "maps": [
+     "map"
+    ],
+    "normalScale": [
+     1,
+     1
+    ]
+   },
+   "count": 0,
+   "capacity": 346,
+   "instanceMatrix": {
+    "type": "f32",
+    "len": 5536,
+    "exact": "ef774485",
+    "quant": "f129bc85",
+    "off": 762792
+   },
+   "instanceColor": {
+    "type": "f32",
+    "len": 1038,
+    "exact": "8e388b25",
+    "quant": "8e388b25",
+    "off": 784936
+   },
+   "boundingSphere": [
+    42.24430817597697,
+    -17.424948085018084,
+    -1.5400520445782202,
+    157.39178013511508
+   ]
+  },
+  {
+   "name": "crowns.lod0.s2",
+   "role": "crowns.lod0",
+   "type": "Mesh",
+   "parent": null,
+   "visible": true,
+   "renderOrder": 0,
+   "frustumCulled": true,
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "quaternion": [
+    0,
+    0,
+    0,
+    1
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "geo": "g7",
+   "material": {
+    "type": "MeshStandardMaterial",
+    "color": "#ffffff",
+    "emissive": "#000000",
+    "roughness": 0.9,
+    "metalness": 0,
+    "emissiveIntensity": 1,
+    "opacity": 1,
+    "alphaTest": 0,
+    "transparent": false,
+    "vertexColors": true,
+    "flatShading": true,
+    "depthWrite": true,
+    "toneMapped": true,
+    "fog": true,
+    "side": 0,
+    "blending": 1,
+    "maps": [],
+    "normalScale": [
+     1.1,
+     1.1
+    ]
+   },
+   "count": 113,
+   "capacity": 113,
+   "instanceMatrix": {
+    "type": "f32",
+    "len": 1808,
+    "exact": "b2799fe3",
+    "quant": "a56202b4",
+    "off": 789088
+   },
+   "instanceColor": {
+    "type": "f32",
+    "len": 339,
+    "exact": "b6c65b4b",
+    "quant": "01d2863c",
+    "off": 796320
+   },
+   "boundingSphere": [
+    -30.43656738052501,
+    -35.07805901299328,
+    5.119594578017385,
+    155.25669992046477
+   ]
+  },
+  {
+   "name": "crowns.lod1.s2",
+   "role": "crowns.lod1",
+   "type": "Mesh",
+   "parent": null,
+   "visible": true,
+   "renderOrder": 0,
+   "frustumCulled": true,
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "quaternion": [
+    0,
+    0,
+    0,
+    1
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "geo": "g8",
+   "material": {
+    "type": "MeshStandardMaterial",
+    "color": "#ffffff",
+    "emissive": "#000000",
+    "roughness": 0.9,
+    "metalness": 0,
+    "emissiveIntensity": 1,
+    "opacity": 1,
+    "alphaTest": 0,
+    "transparent": false,
+    "vertexColors": true,
+    "flatShading": true,
+    "depthWrite": true,
+    "toneMapped": true,
+    "fog": true,
+    "side": 0,
+    "blending": 1,
+    "maps": [],
+    "normalScale": [
+     1.1,
+     1.1
+    ]
+   },
+   "count": 0,
+   "capacity": 113,
+   "instanceMatrix": {
+    "type": "f32",
+    "len": 1808,
+    "exact": "519379a5",
+    "quant": "060044a5",
+    "off": 797680
+   },
+   "instanceColor": {
+    "type": "f32",
+    "len": 339,
+    "exact": "52c363b5",
+    "quant": "52c363b5",
+    "off": 804912
+   },
+   "boundingSphere": [
+    -30.43656738052501,
+    -35.07805901299328,
+    5.119594578017385,
+    155.25669992046477
+   ]
+  },
+  {
+   "name": "crowns.lod2.s2",
+   "role": "crowns.lod2",
+   "type": "Mesh",
+   "parent": null,
+   "visible": true,
+   "renderOrder": 0,
+   "frustumCulled": true,
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "quaternion": [
+    0,
+    0,
+    0,
+    1
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "geo": "g9",
+   "material": {
+    "type": "MeshStandardMaterial",
+    "color": "#ffffff",
+    "emissive": "#000000",
+    "roughness": 0.95,
+    "metalness": 0,
+    "emissiveIntensity": 1,
+    "opacity": 1,
+    "alphaTest": 0.5,
+    "transparent": false,
+    "vertexColors": true,
+    "flatShading": false,
+    "depthWrite": true,
+    "toneMapped": true,
+    "fog": true,
+    "side": 2,
+    "blending": 1,
+    "maps": [
+     "map"
+    ],
+    "normalScale": [
+     1,
+     1
+    ]
+   },
+   "count": 0,
+   "capacity": 113,
+   "instanceMatrix": {
+    "type": "f32",
+    "len": 1808,
+    "exact": "519379a5",
+    "quant": "060044a5",
+    "off": 806272
+   },
+   "instanceColor": {
+    "type": "f32",
+    "len": 339,
+    "exact": "52c363b5",
+    "quant": "52c363b5",
+    "off": 813504
+   },
+   "boundingSphere": [
+    -30.43656738052501,
+    -35.07805901299328,
+    5.119594578017385,
+    155.25669992046477
+   ]
+  },
+  {
+   "name": "crowns.lod0.s3",
+   "role": "crowns.lod0",
+   "type": "Mesh",
+   "parent": null,
+   "visible": true,
+   "renderOrder": 0,
+   "frustumCulled": true,
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "quaternion": [
+    0,
+    0,
+    0,
+    1
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "geo": "g7",
+   "material": {
+    "type": "MeshStandardMaterial",
+    "color": "#ffffff",
+    "emissive": "#000000",
+    "roughness": 0.9,
+    "metalness": 0,
+    "emissiveIntensity": 1,
+    "opacity": 1,
+    "alphaTest": 0,
+    "transparent": false,
+    "vertexColors": true,
+    "flatShading": true,
+    "depthWrite": true,
+    "toneMapped": true,
+    "fog": true,
+    "side": 0,
+    "blending": 1,
+    "maps": [],
+    "normalScale": [
+     1.1,
+     1.1
+    ]
+   },
+   "count": 646,
+   "capacity": 646,
+   "instanceMatrix": {
+    "type": "f32",
+    "len": 10336,
+    "exact": "0fe4b3b6",
+    "quant": "60463e6f",
+    "off": 814864
+   },
+   "instanceColor": {
+    "type": "f32",
+    "len": 1938,
+    "exact": "aef1d2df",
+    "quant": "c50824f9",
+    "off": 856208
+   },
+   "boundingSphere": [
+    -27.00260803330939,
+    38.48450374907309,
+    -2.3471235906751753,
+    154.76720713949518
+   ]
+  },
+  {
+   "name": "crowns.lod1.s3",
+   "role": "crowns.lod1",
+   "type": "Mesh",
+   "parent": null,
+   "visible": true,
+   "renderOrder": 0,
+   "frustumCulled": true,
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "quaternion": [
+    0,
+    0,
+    0,
+    1
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "geo": "g8",
+   "material": {
+    "type": "MeshStandardMaterial",
+    "color": "#ffffff",
+    "emissive": "#000000",
+    "roughness": 0.9,
+    "metalness": 0,
+    "emissiveIntensity": 1,
+    "opacity": 1,
+    "alphaTest": 0,
+    "transparent": false,
+    "vertexColors": true,
+    "flatShading": true,
+    "depthWrite": true,
+    "toneMapped": true,
+    "fog": true,
+    "side": 0,
+    "blending": 1,
+    "maps": [],
+    "normalScale": [
+     1.1,
+     1.1
+    ]
+   },
+   "count": 0,
+   "capacity": 646,
+   "instanceMatrix": {
+    "type": "f32",
+    "len": 10336,
+    "exact": "dff0bb05",
+    "quant": "99176305",
+    "off": 863960
+   },
+   "instanceColor": {
+    "type": "f32",
+    "len": 1938,
+    "exact": "aabef665",
+    "quant": "aabef665",
+    "off": 905304
+   },
+   "boundingSphere": [
+    -27.00260803330939,
+    38.48450374907309,
+    -2.3471235906751753,
+    154.76720713949518
+   ]
+  },
+  {
+   "name": "crowns.lod2.s3",
+   "role": "crowns.lod2",
+   "type": "Mesh",
+   "parent": null,
+   "visible": true,
+   "renderOrder": 0,
+   "frustumCulled": true,
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "quaternion": [
+    0,
+    0,
+    0,
+    1
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "geo": "g9",
+   "material": {
+    "type": "MeshStandardMaterial",
+    "color": "#ffffff",
+    "emissive": "#000000",
+    "roughness": 0.95,
+    "metalness": 0,
+    "emissiveIntensity": 1,
+    "opacity": 1,
+    "alphaTest": 0.5,
+    "transparent": false,
+    "vertexColors": true,
+    "flatShading": false,
+    "depthWrite": true,
+    "toneMapped": true,
+    "fog": true,
+    "side": 2,
+    "blending": 1,
+    "maps": [
+     "map"
+    ],
+    "normalScale": [
+     1,
+     1
+    ]
+   },
+   "count": 0,
+   "capacity": 646,
+   "instanceMatrix": {
+    "type": "f32",
+    "len": 10336,
+    "exact": "dff0bb05",
+    "quant": "99176305",
+    "off": 913056
+   },
+   "instanceColor": {
+    "type": "f32",
+    "len": 1938,
+    "exact": "aabef665",
+    "quant": "aabef665",
+    "off": 954400
+   },
+   "boundingSphere": [
+    -27.00260803330939,
+    38.48450374907309,
+    -2.3471235906751753,
+    154.76720713949518
+   ]
+  },
+  {
+   "name": "tufts.s0",
+   "role": "tufts",
+   "type": "Mesh",
+   "parent": null,
+   "visible": true,
+   "renderOrder": 0,
+   "frustumCulled": true,
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "quaternion": [
+    0,
+    0,
+    0,
+    1
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "geo": "g10",
+   "material": {
+    "type": "MeshStandardMaterial",
+    "color": "#5c8a3c",
+    "emissive": "#000000",
+    "roughness": 1,
+    "metalness": 0,
+    "emissiveIntensity": 1,
+    "opacity": 1,
+    "alphaTest": 0,
+    "transparent": false,
+    "vertexColors": false,
+    "flatShading": true,
+    "depthWrite": true,
+    "toneMapped": true,
+    "fog": true,
+    "side": 2,
+    "blending": 1,
+    "maps": [],
+    "normalScale": [
+     1,
+     1
+    ]
+   },
+   "count": 395,
+   "capacity": 395,
+   "instanceMatrix": {
+    "type": "f32",
+    "len": 6320,
+    "exact": "c887bd5c",
+    "quant": "af727e68",
+    "off": 963584
+   },
+   "instanceColor": null,
+   "boundingSphere": [
+    39.73802225954782,
+    24.173997156600326,
+    -0.23750802466142895,
+    152.63264666466057
+   ]
+  },
+  {
+   "name": "tufts.s1",
+   "role": "tufts",
+   "type": "Mesh",
+   "parent": null,
+   "visible": true,
+   "renderOrder": 0,
+   "frustumCulled": true,
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "quaternion": [
+    0,
+    0,
+    0,
+    1
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "geo": "g10",
+   "material": {
+    "type": "MeshStandardMaterial",
+    "color": "#5c8a3c",
+    "emissive": "#000000",
+    "roughness": 1,
+    "metalness": 0,
+    "emissiveIntensity": 1,
+    "opacity": 1,
+    "alphaTest": 0,
+    "transparent": false,
+    "vertexColors": false,
+    "flatShading": true,
+    "depthWrite": true,
+    "toneMapped": true,
+    "fog": true,
+    "side": 2,
+    "blending": 1,
+    "maps": [],
+    "normalScale": [
+     1,
+     1
+    ]
+   },
+   "count": 346,
+   "capacity": 346,
+   "instanceMatrix": {
+    "type": "f32",
+    "len": 5536,
+    "exact": "6c1ee88c",
+    "quant": "74d3f9c4",
+    "off": 988864
+   },
+   "instanceColor": null,
+   "boundingSphere": [
+    37.087424363952984,
+    -22.289045746936523,
+    1.2037623435422464,
+    148.9730532794713
+   ]
+  },
+  {
+   "name": "tufts.s2",
+   "role": "tufts",
+   "type": "Mesh",
+   "parent": null,
+   "visible": true,
+   "renderOrder": 0,
+   "frustumCulled": true,
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "quaternion": [
+    0,
+    0,
+    0,
+    1
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "geo": "g10",
+   "material": {
+    "type": "MeshStandardMaterial",
+    "color": "#5c8a3c",
+    "emissive": "#000000",
+    "roughness": 1,
+    "metalness": 0,
+    "emissiveIntensity": 1,
+    "opacity": 1,
+    "alphaTest": 0,
+    "transparent": false,
+    "vertexColors": false,
+    "flatShading": true,
+    "depthWrite": true,
+    "toneMapped": true,
+    "fog": true,
+    "side": 2,
+    "blending": 1,
+    "maps": [],
+    "normalScale": [
+     1,
+     1
+    ]
+   },
+   "count": 113,
+   "capacity": 113,
+   "instanceMatrix": {
+    "type": "f32",
+    "len": 1808,
+    "exact": "7183fb72",
+    "quant": "341ff2b9",
+    "off": 1011008
+   },
+   "instanceColor": null,
+   "boundingSphere": [
+    -21.639528472179332,
+    -41.620256988665055,
+    -0.49697968865704323,
+    147.71884972651287
+   ]
+  },
+  {
+   "name": "tufts.s3",
+   "role": "tufts",
+   "type": "Mesh",
+   "parent": null,
+   "visible": true,
+   "renderOrder": 0,
+   "frustumCulled": true,
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "quaternion": [
+    0,
+    0,
+    0,
+    1
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "geo": "g10",
+   "material": {
+    "type": "MeshStandardMaterial",
+    "color": "#5c8a3c",
+    "emissive": "#000000",
+    "roughness": 1,
+    "metalness": 0,
+    "emissiveIntensity": 1,
+    "opacity": 1,
+    "alphaTest": 0,
+    "transparent": false,
+    "vertexColors": false,
+    "flatShading": true,
+    "depthWrite": true,
+    "toneMapped": true,
+    "fog": true,
+    "side": 2,
+    "blending": 1,
+    "maps": [],
+    "normalScale": [
+     1,
+     1
+    ]
+   },
+   "count": 646,
+   "capacity": 646,
+   "instanceMatrix": {
+    "type": "f32",
+    "len": 10336,
+    "exact": "8410c217",
+    "quant": "94bed337",
+    "off": 1018240
+   },
+   "instanceColor": null,
+   "boundingSphere": [
+    -31.181964104885296,
+    37.22981012231623,
+    1.2800691361387755,
+    148.27464199169742
+   ]
+  },
+  {
+   "name": "bushes.s0",
+   "role": "bushes",
+   "type": "Mesh",
+   "parent": null,
+   "visible": true,
+   "renderOrder": 0,
+   "frustumCulled": true,
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "quaternion": [
+    0,
+    0,
+    0,
+    1
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "geo": "g11",
+   "material": {
+    "type": "MeshStandardMaterial",
+    "color": "#ffffff",
+    "emissive": "#000000",
+    "roughness": 1,
+    "metalness": 0,
+    "emissiveIntensity": 1,
+    "opacity": 1,
+    "alphaTest": 0,
+    "transparent": false,
+    "vertexColors": true,
+    "flatShading": true,
+    "depthWrite": true,
+    "toneMapped": true,
+    "fog": true,
+    "side": 0,
+    "blending": 1,
+    "maps": [],
+    "normalScale": [
+     1,
+     1
+    ]
+   },
+   "count": 173,
+   "capacity": 173,
+   "instanceMatrix": {
+    "type": "f32",
+    "len": 2768,
+    "exact": "31f61224",
+    "quant": "2ec9bb2d",
+    "off": 1062224
+   },
+   "instanceColor": {
+    "type": "f32",
+    "len": 519,
+    "exact": "cce82c65",
+    "quant": "1197793d",
+    "off": 1073296
+   },
+   "boundingSphere": [
+    26.16867470633778,
+    27.475791160798707,
+    -0.5343193091234613,
+    149.65564071889065
+   ]
+  },
+  {
+   "name": "bushes.s1",
+   "role": "bushes",
+   "type": "Mesh",
+   "parent": null,
+   "visible": true,
+   "renderOrder": 0,
+   "frustumCulled": true,
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "quaternion": [
+    0,
+    0,
+    0,
+    1
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "geo": "g11",
+   "material": {
+    "type": "MeshStandardMaterial",
+    "color": "#ffffff",
+    "emissive": "#000000",
+    "roughness": 1,
+    "metalness": 0,
+    "emissiveIntensity": 1,
+    "opacity": 1,
+    "alphaTest": 0,
+    "transparent": false,
+    "vertexColors": true,
+    "flatShading": true,
+    "depthWrite": true,
+    "toneMapped": true,
+    "fog": true,
+    "side": 0,
+    "blending": 1,
+    "maps": [],
+    "normalScale": [
+     1,
+     1
+    ]
+   },
+   "count": 173,
+   "capacity": 173,
+   "instanceMatrix": {
+    "type": "f32",
+    "len": 2768,
+    "exact": "e7530c6f",
+    "quant": "7bd535e0",
+    "off": 1075376
+   },
+   "instanceColor": {
+    "type": "f32",
+    "len": 519,
+    "exact": "9ec6fd16",
+    "quant": "4ddafac0",
+    "off": 1086448
+   },
+   "boundingSphere": [
+    43.90487095836166,
+    -16.136374715280667,
+    2.519510164876297,
+    150.16329994507544
+   ]
+  },
+  {
+   "name": "bushes.s2",
+   "role": "bushes",
+   "type": "Mesh",
+   "parent": null,
+   "visible": true,
+   "renderOrder": 0,
+   "frustumCulled": true,
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "quaternion": [
+    0,
+    0,
+    0,
+    1
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "geo": "g11",
+   "material": {
+    "type": "MeshStandardMaterial",
+    "color": "#ffffff",
+    "emissive": "#000000",
+    "roughness": 1,
+    "metalness": 0,
+    "emissiveIntensity": 1,
+    "opacity": 1,
+    "alphaTest": 0,
+    "transparent": false,
+    "vertexColors": true,
+    "flatShading": true,
+    "depthWrite": true,
+    "toneMapped": true,
+    "fog": true,
+    "side": 0,
+    "blending": 1,
+    "maps": [],
+    "normalScale": [
+     1,
+     1
+    ]
+   },
+   "count": 82,
+   "capacity": 82,
+   "instanceMatrix": {
+    "type": "f32",
+    "len": 1312,
+    "exact": "518f4133",
+    "quant": "0d579685",
+    "off": 1088528
+   },
+   "instanceColor": {
+    "type": "f32",
+    "len": 246,
+    "exact": "25f5becb",
+    "quant": "a88748fa",
+    "off": 1093776
+   },
+   "boundingSphere": [
+    -25.13454787124192,
+    -40.60714334126218,
+    -0.02678417773774533,
+    143.5229202816435
+   ]
+  },
+  {
+   "name": "bushes.s3",
+   "role": "bushes",
+   "type": "Mesh",
+   "parent": null,
+   "visible": true,
+   "renderOrder": 0,
+   "frustumCulled": true,
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "quaternion": [
+    0,
+    0,
+    0,
+    1
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "geo": "g11",
+   "material": {
+    "type": "MeshStandardMaterial",
+    "color": "#ffffff",
+    "emissive": "#000000",
+    "roughness": 1,
+    "metalness": 0,
+    "emissiveIntensity": 1,
+    "opacity": 1,
+    "alphaTest": 0,
+    "transparent": false,
+    "vertexColors": true,
+    "flatShading": true,
+    "depthWrite": true,
+    "toneMapped": true,
+    "fog": true,
+    "side": 0,
+    "blending": 1,
+    "maps": [],
+    "normalScale": [
+     1,
+     1
+    ]
+   },
+   "count": 272,
+   "capacity": 272,
+   "instanceMatrix": {
+    "type": "f32",
+    "len": 4352,
+    "exact": "371cdffa",
+    "quant": "ddb93839",
+    "off": 1094760
+   },
+   "instanceColor": {
+    "type": "f32",
+    "len": 816,
+    "exact": "c27824e6",
+    "quant": "9ecf5f8b",
+    "off": 1112168
+   },
+   "boundingSphere": [
+    -26.298256575709917,
+    38.21526460265794,
+    -1.2041782188952523,
+    147.77114242856197
+   ]
+  },
+  {
+   "name": "blob.s0",
+   "role": "blob",
+   "type": "Mesh",
+   "parent": null,
+   "visible": true,
+   "renderOrder": 1,
+   "frustumCulled": true,
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "quaternion": [
+    0,
+    0,
+    0,
+    1
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "geo": "g12",
+   "material": {
+    "type": "MeshBasicMaterial",
+    "color": "#ffffff",
+    "opacity": 0.85,
+    "alphaTest": 0,
+    "transparent": true,
+    "vertexColors": false,
+    "depthWrite": false,
+    "toneMapped": true,
+    "fog": true,
+    "side": 0,
+    "blending": 1,
+    "maps": [
+     "map"
+    ]
+   },
+   "count": 448,
+   "capacity": 448,
+   "instanceMatrix": {
+    "type": "f32",
+    "len": 7168,
+    "exact": "85c6d351",
+    "quant": "eeb9336f",
+    "off": 1115576
+   },
+   "instanceColor": null,
+   "boundingSphere": [
+    39.76581853452876,
+    24.18960742885068,
+    -0.3313338537946904,
+    153.28532254089157
+   ]
+  },
+  {
+   "name": "blob.s1",
+   "role": "blob",
+   "type": "Mesh",
+   "parent": null,
+   "visible": true,
+   "renderOrder": 1,
+   "frustumCulled": true,
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "quaternion": [
+    0,
+    0,
+    0,
+    1
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "geo": "g12",
+   "material": {
+    "type": "MeshBasicMaterial",
+    "color": "#ffffff",
+    "opacity": 0.85,
+    "alphaTest": 0,
+    "transparent": true,
+    "vertexColors": false,
+    "depthWrite": false,
+    "toneMapped": true,
+    "fog": true,
+    "side": 0,
+    "blending": 1,
+    "maps": [
+     "map"
+    ]
+   },
+   "count": 403,
+   "capacity": 403,
+   "instanceMatrix": {
+    "type": "f32",
+    "len": 6448,
+    "exact": "4b92babe",
+    "quant": "0a0a9646",
+    "off": 1144248
+   },
+   "instanceColor": null,
+   "boundingSphere": [
+    37.13325193478264,
+    -22.29333517571845,
+    1.257466913272215,
+    149.6078532731571
+   ]
+  },
+  {
+   "name": "blob.s2",
+   "role": "blob",
+   "type": "Mesh",
+   "parent": null,
+   "visible": true,
+   "renderOrder": 1,
+   "frustumCulled": true,
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "quaternion": [
+    0,
+    0,
+    0,
+    1
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "geo": "g12",
+   "material": {
+    "type": "MeshBasicMaterial",
+    "color": "#ffffff",
+    "opacity": 0.85,
+    "alphaTest": 0,
+    "transparent": true,
+    "vertexColors": false,
+    "depthWrite": false,
+    "toneMapped": true,
+    "fog": true,
+    "side": 0,
+    "blending": 1,
+    "maps": [
+     "map"
+    ]
+   },
+   "count": 155,
+   "capacity": 155,
+   "instanceMatrix": {
+    "type": "f32",
+    "len": 2480,
+    "exact": "13c7ad10",
+    "quant": "94b58548",
+    "off": 1170040
+   },
+   "instanceColor": null,
+   "boundingSphere": [
+    -21.672412663963538,
+    -41.643803827415745,
+    -0.513688220046928,
+    148.49181489536238
+   ]
+  },
+  {
+   "name": "blob.s3",
+   "role": "blob",
+   "type": "Mesh",
+   "parent": null,
+   "visible": true,
+   "renderOrder": 1,
+   "frustumCulled": true,
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "quaternion": [
+    0,
+    0,
+    0,
+    1
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "geo": "g12",
+   "material": {
+    "type": "MeshBasicMaterial",
+    "color": "#ffffff",
+    "opacity": 0.85,
+    "alphaTest": 0,
+    "transparent": true,
+    "vertexColors": false,
+    "depthWrite": false,
+    "toneMapped": true,
+    "fog": true,
+    "side": 0,
+    "blending": 1,
+    "maps": [
+     "map"
+    ]
+   },
+   "count": 690,
+   "capacity": 690,
+   "instanceMatrix": {
+    "type": "f32",
+    "len": 11040,
+    "exact": "bbe34c5c",
+    "quant": "a884c8b4",
+    "off": 1179960
+   },
+   "instanceColor": null,
+   "boundingSphere": [
+    -31.210794982532498,
+    37.26430567961406,
+    1.279282003519576,
+    148.82124002048482
+   ]
+  },
+  {
+   "name": "traffic.body",
+   "role": "traffic.body",
+   "type": "Mesh",
+   "parent": null,
+   "visible": true,
+   "renderOrder": 0,
+   "frustumCulled": false,
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "quaternion": [
+    0,
+    0,
+    0,
+    1
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "geo": "g13",
+   "material": {
+    "type": "MeshStandardMaterial",
+    "color": "#2c3340",
+    "emissive": "#ffffff",
+    "roughness": 0.35,
+    "metalness": 0.5,
+    "emissiveIntensity": 0,
+    "opacity": 1,
+    "alphaTest": 0,
+    "transparent": false,
+    "vertexColors": false,
+    "flatShading": false,
+    "depthWrite": true,
+    "toneMapped": true,
+    "fog": true,
+    "side": 0,
+    "blending": 1,
+    "maps": [
+     "emissiveMap"
+    ],
+    "normalScale": [
+     1,
+     1
+    ]
+   },
+   "count": 78,
+   "capacity": 78,
+   "instanceMatrix": {
+    "type": "f32",
+    "len": 1248,
+    "exact": "702db132",
+    "quant": "c87c4611",
+    "off": 1225800
+   },
+   "instanceColor": {
+    "type": "f32",
+    "len": 234,
+    "exact": "56fb994a",
+    "quant": "c79d3b57",
+    "off": 1230792
+   }
+  },
+  {
+   "name": "traffic.lamp",
+   "role": "traffic.lamp",
+   "type": "Mesh",
+   "parent": null,
+   "visible": true,
+   "renderOrder": 0,
+   "frustumCulled": false,
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "quaternion": [
+    0,
+    0,
+    0,
+    1
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "geo": "g14",
+   "material": [
+    {
+     "type": "MeshBasicMaterial",
+     "color": "#fffaed",
+     "opacity": 1,
+     "alphaTest": 0,
+     "transparent": false,
+     "vertexColors": false,
+     "depthWrite": true,
+     "toneMapped": false,
+     "fog": true,
+     "side": 0,
+     "blending": 1,
+     "maps": []
+    },
+    {
+     "type": "MeshBasicMaterial",
+     "color": "#aa0d05",
+     "opacity": 1,
+     "alphaTest": 0,
+     "transparent": false,
+     "vertexColors": false,
+     "depthWrite": true,
+     "toneMapped": false,
+     "fog": true,
+     "side": 0,
+     "blending": 1,
+     "maps": []
+    }
+   ],
+   "count": 78,
+   "capacity": 78,
+   "instanceMatrix": {
+    "type": "f32",
+    "len": 1248,
+    "exact": "702db132",
+    "quant": "c87c4611",
+    "off": 1235088
+   },
+   "instanceColor": null
+  },
+  {
+   "name": "nav",
+   "role": "nav",
+   "type": "Points",
+   "parent": null,
+   "visible": true,
+   "renderOrder": 0,
+   "frustumCulled": true,
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "quaternion": [
+    0,
+    0,
+    0,
+    1
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "geo": "g15",
+   "material": {
+    "type": "PointsMaterial",
+    "color": "#ffcf8a",
+    "opacity": 0.2,
+    "alphaTest": 0,
+    "size": 1.1,
+    "transparent": true,
+    "vertexColors": false,
+    "depthWrite": false,
+    "toneMapped": true,
+    "fog": true,
+    "side": 0,
+    "blending": 2,
+    "maps": [
+     "map"
+    ]
+   }
+  },
+  {
+   "name": "axis.sun",
+   "role": "axis.sun",
+   "type": "Mesh",
+   "parent": null,
+   "visible": true,
+   "renderOrder": 0,
+   "frustumCulled": true,
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "quaternion": [
+    0,
+    0,
+    0,
+    1
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "geo": "g16",
+   "material": {
+    "type": "MeshBasicMaterial",
+    "color": "#fff7dc",
+    "opacity": 1,
+    "alphaTest": 0,
+    "transparent": true,
+    "vertexColors": false,
+    "depthWrite": true,
+    "toneMapped": false,
+    "fog": true,
+    "side": 2,
+    "blending": 1,
+    "maps": []
+   }
+  },
+  {
+   "name": "axis.spine",
+   "role": "axis.spine",
+   "type": "Mesh",
+   "parent": null,
+   "visible": true,
+   "renderOrder": 0,
+   "frustumCulled": true,
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "quaternion": [
+    0,
+    0,
+    0,
+    1
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "geo": "g17",
+   "material": {
+    "type": "MeshStandardMaterial",
+    "color": "#9099a3",
+    "emissive": "#000000",
+    "roughness": 0.45,
+    "metalness": 0.62,
+    "emissiveIntensity": 1,
+    "opacity": 1,
+    "alphaTest": 0,
+    "transparent": false,
+    "vertexColors": false,
+    "flatShading": false,
+    "depthWrite": true,
+    "toneMapped": true,
+    "fog": true,
+    "side": 0,
+    "blending": 1,
+    "maps": [
+     "map"
+    ],
+    "normalScale": [
+     1,
+     1
+    ]
+   }
+  },
+  {
+   "name": "lift.body",
+   "role": "lift.body",
+   "type": "Mesh",
+   "parent": null,
+   "visible": true,
+   "renderOrder": 0,
+   "frustumCulled": false,
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "quaternion": [
+    0,
+    0,
+    0,
+    1
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "geo": "g18",
+   "material": {
+    "type": "MeshStandardMaterial",
+    "color": "#b9c3cd",
+    "emissive": "#000000",
+    "roughness": 0.6,
+    "metalness": 0.12,
+    "emissiveIntensity": 1,
+    "opacity": 1,
+    "alphaTest": 0,
+    "transparent": false,
+    "vertexColors": false,
+    "flatShading": false,
+    "depthWrite": true,
+    "toneMapped": true,
+    "fog": true,
+    "side": 2,
+    "blending": 1,
+    "maps": [
+     "map"
+    ],
+    "normalScale": [
+     1,
+     1
+    ]
+   },
+   "count": 2,
+   "capacity": 2,
+   "instanceMatrix": {
+    "type": "f32",
+    "len": 32,
+    "exact": "568574a7",
+    "quant": "270a8a55",
+    "off": 1838680
+   },
+   "instanceColor": null
+  },
+  {
+   "name": "lift.lamp",
+   "role": "lift.lamp",
+   "type": "Mesh",
+   "parent": null,
+   "visible": true,
+   "renderOrder": 0,
+   "frustumCulled": false,
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "quaternion": [
+    0,
+    0,
+    0,
+    1
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "geo": "g19",
+   "material": {
+    "type": "MeshBasicMaterial",
+    "color": "#ffffff",
+    "opacity": 1,
+    "alphaTest": 0,
+    "transparent": false,
+    "vertexColors": false,
+    "depthWrite": true,
+    "toneMapped": false,
+    "fog": true,
+    "side": 0,
+    "blending": 1,
+    "maps": []
+   },
+   "count": 2,
+   "capacity": 2,
+   "instanceMatrix": {
+    "type": "f32",
+    "len": 32,
+    "exact": "568574a7",
+    "quant": "270a8a55",
+    "off": 1839648
+   },
+   "instanceColor": null
+  },
+  {
+   "name": "lift.glass",
+   "role": "lift.glass",
+   "type": "Mesh",
+   "parent": null,
+   "visible": true,
+   "renderOrder": 0,
+   "frustumCulled": false,
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "quaternion": [
+    0,
+    0,
+    0,
+    1
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "geo": "g20",
+   "material": {
+    "type": "MeshStandardMaterial",
+    "color": "#16283c",
+    "emissive": "#ffe0b0",
+    "roughness": 0.1,
+    "metalness": 0.7,
+    "emissiveIntensity": 0.35,
+    "opacity": 1,
+    "alphaTest": 0,
+    "transparent": true,
+    "vertexColors": false,
+    "flatShading": false,
+    "depthWrite": true,
+    "toneMapped": true,
+    "fog": true,
+    "side": 2,
+    "blending": 1,
+    "maps": [],
+    "normalScale": [
+     1,
+     1
+    ]
+   },
+   "count": 2,
+   "capacity": 2,
+   "instanceMatrix": {
+    "type": "f32",
+    "len": 32,
+    "exact": "568574a7",
+    "quant": "270a8a55",
+    "off": 1843136
+   },
+   "instanceColor": null
+  },
+  {
+   "name": "axis.collars",
+   "role": "axis.collars",
+   "type": "Mesh",
+   "parent": null,
+   "visible": true,
+   "renderOrder": 0,
+   "frustumCulled": true,
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "quaternion": [
+    0,
+    0,
+    0,
+    1
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "geo": "g21",
+   "material": {
+    "type": "MeshStandardMaterial",
+    "color": "#9099a3",
+    "emissive": "#000000",
+    "roughness": 0.45,
+    "metalness": 0.62,
+    "emissiveIntensity": 1,
+    "opacity": 1,
+    "alphaTest": 0,
+    "transparent": false,
+    "vertexColors": false,
+    "flatShading": false,
+    "depthWrite": true,
+    "toneMapped": true,
+    "fog": true,
+    "side": 0,
+    "blending": 1,
+    "maps": [
+     "map"
+    ],
+    "normalScale": [
+     1,
+     1
+    ]
+   }
+  },
+  {
+   "name": "truss",
+   "role": "truss",
+   "type": "Mesh",
+   "parent": null,
+   "visible": true,
+   "renderOrder": 0,
+   "frustumCulled": false,
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "quaternion": [
+    0,
+    0,
+    0,
+    1
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "geo": "g22",
+   "material": {
+    "type": "MeshStandardMaterial",
+    "color": "#9099a3",
+    "emissive": "#000000",
+    "roughness": 0.45,
+    "metalness": 0.62,
+    "emissiveIntensity": 1,
+    "opacity": 1,
+    "alphaTest": 0,
+    "transparent": false,
+    "vertexColors": false,
+    "flatShading": false,
+    "depthWrite": true,
+    "toneMapped": true,
+    "fog": true,
+    "side": 0,
+    "blending": 1,
+    "maps": [
+     "map"
+    ],
+    "normalScale": [
+     1,
+     1
+    ]
+   },
+   "count": 12,
+   "capacity": 12,
+   "instanceMatrix": {
+    "type": "f32",
+    "len": 192,
+    "exact": "91a041a1",
+    "quant": "717eaec5",
+    "off": 1915392
+   },
+   "instanceColor": null
+  },
+  {
+   "name": "tower",
+   "role": "tower",
+   "type": "Group",
+   "parent": null,
+   "visible": true,
+   "renderOrder": 0,
+   "frustumCulled": true,
+   "position": [
+    21.130913087034973,
+    45.31538935183249,
+    90
+   ],
+   "quaternion": [
+    0,
+    0,
+    0.9762960071199334,
+    0.21643961393810288
+   ],
+   "scale": [
+    1,
+    0.6470588235294118,
+    1
+   ]
+  },
+  {
+   "name": "tower.concrete",
+   "role": "tower.concrete",
+   "type": "Mesh",
+   "parent": "tower",
+   "visible": true,
+   "renderOrder": 0,
+   "frustumCulled": true,
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "quaternion": [
+    0,
+    0,
+    0,
+    1
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "geo": "g23",
+   "material": {
+    "type": "MeshStandardMaterial",
+    "color": "#c0a993",
+    "emissive": "#000000",
+    "roughness": 0.78,
+    "metalness": 0.06,
+    "emissiveIntensity": 1,
+    "opacity": 1,
+    "alphaTest": 0,
+    "transparent": false,
+    "vertexColors": false,
+    "flatShading": false,
+    "depthWrite": true,
+    "toneMapped": true,
+    "fog": true,
+    "side": 0,
+    "blending": 1,
+    "maps": [
+     "map"
+    ],
+    "normalScale": [
+     1,
+     1
+    ]
+   }
+  },
+  {
+   "name": "tower.glass",
+   "role": "tower.glass",
+   "type": "Mesh",
+   "parent": "tower",
+   "visible": true,
+   "renderOrder": 0,
+   "frustumCulled": true,
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "quaternion": [
+    0,
+    0,
+    0,
+    1
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "geo": "g24",
+   "material": {
+    "type": "MeshStandardMaterial",
+    "color": "#16283c",
+    "emissive": "#ffe6bd",
+    "roughness": 0.09,
+    "metalness": 0.72,
+    "emissiveIntensity": 0,
+    "opacity": 1,
+    "alphaTest": 0,
+    "transparent": false,
+    "vertexColors": false,
+    "flatShading": false,
+    "depthWrite": true,
+    "toneMapped": true,
+    "fog": true,
+    "side": 0,
+    "blending": 1,
+    "maps": [],
+    "normalScale": [
+     1,
+     1
+    ]
+   }
+  },
+  {
+   "name": "tower.beacon",
+   "role": "tower.beacon",
+   "type": "Mesh",
+   "parent": "tower",
+   "visible": true,
+   "renderOrder": 0,
+   "frustumCulled": true,
+   "position": [
+    0,
+    34.2,
+    0
+   ],
+   "quaternion": [
+    0,
+    0,
+    0,
+    1
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "geo": "g25",
+   "material": {
+    "type": "MeshStandardMaterial",
+    "color": "#30414f",
+    "emissive": "#ff5c3a",
+    "roughness": 0.4,
+    "metalness": 0,
+    "emissiveIntensity": 0.2,
+    "opacity": 1,
+    "alphaTest": 0,
+    "transparent": false,
+    "vertexColors": false,
+    "flatShading": false,
+    "depthWrite": true,
+    "toneMapped": true,
+    "fog": true,
+    "side": 0,
+    "blending": 1,
+    "maps": [],
+    "normalScale": [
+     1,
+     1
+    ]
+   }
+  },
+  {
+   "name": "endcap.disc",
+   "role": "endcap.disc",
+   "type": "Mesh",
+   "parent": null,
+   "visible": true,
+   "renderOrder": 0,
+   "frustumCulled": false,
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "quaternion": [
+    0,
+    0,
+    0,
+    1
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "geo": "g26",
+   "material": {
+    "type": "MeshStandardMaterial",
+    "color": "#ffffff",
+    "emissive": "#ffffff",
+    "roughness": 0.85,
+    "metalness": 0.12,
+    "emissiveIntensity": 0,
+    "opacity": 1,
+    "alphaTest": 0,
+    "transparent": false,
+    "vertexColors": false,
+    "flatShading": false,
+    "depthWrite": true,
+    "toneMapped": true,
+    "fog": true,
+    "side": 2,
+    "blending": 1,
+    "maps": [
+     "map",
+     "emissiveMap"
+    ],
+    "normalScale": [
+     1,
+     1
+    ]
+   },
+   "count": 2,
+   "capacity": 2,
+   "instanceMatrix": {
+    "type": "f32",
+    "len": 32,
+    "exact": "ec12fea9",
+    "quant": "1088c769",
+    "off": 2075352
+   },
+   "instanceColor": null
+  },
+  {
+   "name": "endcap.hub",
+   "role": "endcap.hub",
+   "type": "Mesh",
+   "parent": null,
+   "visible": true,
+   "renderOrder": 0,
+   "frustumCulled": false,
+   "position": [
+    0,
+    0,
+    0
+   ],
+   "quaternion": [
+    0,
+    0,
+    0,
+    1
+   ],
+   "scale": [
+    1,
+    1,
+    1
+   ],
+   "geo": "g27",
+   "material": {
+    "type": "MeshStandardMaterial",
+    "color": "#a7b0ba",
+    "emissive": "#000000",
+    "roughness": 0.45,
+    "metalness": 0.55,
+    "emissiveIntensity": 1,
+    "opacity": 1,
+    "alphaTest": 0,
+    "transparent": false,
+    "vertexColors": false,
+    "flatShading": false,
+    "depthWrite": true,
+    "toneMapped": true,
+    "fog": true,
+    "side": 0,
+    "blending": 1,
+    "maps": [],
+    "normalScale": [
+     1,
+     1
+    ]
+   },
+   "count": 2,
+   "capacity": 2,
+   "instanceMatrix": {
+    "type": "f32",
+    "len": 32,
+    "exact": "bb719ac9",
+    "quant": "82a25c96",
+    "off": 2084536
+   },
+   "instanceColor": null
+  }
+ ],
+ "geometries": [
+  {
+   "id": "g0",
+   "firstUser": "hull",
+   "attributes": {
+    "position": {
+     "itemSize": 3,
+     "count": 10537,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 31611,
+      "exact": "1a45840b",
+      "quant": "de6a7958",
+      "off": 0
+     }
+    },
+    "normal": {
+     "itemSize": 3,
+     "count": 10537,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 31611,
+      "exact": "26325333",
+      "quant": "1e394fdf",
+      "off": 126448
+     }
+    },
+    "uv": {
+     "itemSize": 2,
+     "count": 10537,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 21074,
+      "exact": "fa845dee",
+      "quant": "36500cbb",
+      "off": 252896
+     }
+    }
+   },
+   "attrOrder": [
+    "position",
+    "normal",
+    "uv"
+   ],
+   "vertexCount": 10537,
+   "index": {
+    "type": "u16",
+    "len": 61440,
+    "exact": "9dff21f5",
+    "quant": "9dff21f5",
+    "off": 337192
+   },
+   "indexCount": 61440,
+   "triSet": "9dc866e5",
+   "groups": [
+    [
+     0,
+     61440,
+     0
+    ]
+   ],
+   "drawRange": [
+    0,
+    -1
+   ]
+  },
+  {
+   "id": "g1",
+   "firstUser": "bld.0.s0",
+   "attributes": {
+    "position": {
+     "itemSize": 3,
+     "count": 96,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 288,
+      "exact": "876ea1c1",
+      "quant": "f3bbad29",
+      "off": 460072
+     }
+    },
+    "normal": {
+     "itemSize": 3,
+     "count": 96,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 288,
+      "exact": "f46552c5",
+      "quant": "ba889aa5",
+      "off": 461224
+     }
+    },
+    "uv": {
+     "itemSize": 2,
+     "count": 96,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 192,
+      "exact": "8bc56da5",
+      "quant": "1acc39f5",
+      "off": 462376
+     }
+    }
+   },
+   "attrOrder": [
+    "position",
+    "normal",
+    "uv"
+   ],
+   "vertexCount": 96,
+   "index": {
+    "type": "u32",
+    "len": 144,
+    "exact": "e3499185",
+    "quant": "e3499185",
+    "off": 463144
+   },
+   "indexCount": 144,
+   "triSet": "1b230085",
+   "groups": [
+    [
+     0,
+     96,
+     0
+    ],
+    [
+     96,
+     48,
+     1
+    ]
+   ],
+   "drawRange": [
+    0,
+    -1
+   ]
+  },
+  {
+   "id": "g2",
+   "firstUser": "bld.1.s0",
+   "attributes": {
+    "position": {
+     "itemSize": 3,
+     "count": 148,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 444,
+      "exact": "47a15071",
+      "quant": "2268ee95",
+      "off": 466992
+     }
+    },
+    "normal": {
+     "itemSize": 3,
+     "count": 148,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 444,
+      "exact": "bffb20a5",
+      "quant": "ea408a3e",
+      "off": 468768
+     }
+    },
+    "uv": {
+     "itemSize": 2,
+     "count": 148,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 296,
+      "exact": "8bfe9b3b",
+      "quant": "3a4704cb",
+      "off": 470544
+     }
+    }
+   },
+   "attrOrder": [
+    "position",
+    "normal",
+    "uv"
+   ],
+   "vertexCount": 148,
+   "index": {
+    "type": "u32",
+    "len": 252,
+    "exact": "0704f549",
+    "quant": "0704f549",
+    "off": 471728
+   },
+   "indexCount": 252,
+   "triSet": "55ef71a9",
+   "groups": [
+    [
+     0,
+     144,
+     0
+    ],
+    [
+     144,
+     108,
+     1
+    ]
+   ],
+   "drawRange": [
+    0,
+    -1
+   ]
+  },
+  {
+   "id": "g3",
+   "firstUser": "bld.2.s0",
+   "attributes": {
+    "position": {
+     "itemSize": 3,
+     "count": 240,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 720,
+      "exact": "496a54dd",
+      "quant": "e08d7e05",
+      "off": 476472
+     }
+    },
+    "normal": {
+     "itemSize": 3,
+     "count": 240,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 720,
+      "exact": "bb31ef4d",
+      "quant": "bb062fba",
+      "off": 479352
+     }
+    },
+    "uv": {
+     "itemSize": 2,
+     "count": 240,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 480,
+      "exact": "23c48f6c",
+      "quant": "1f4a1aec",
+      "off": 482232
+     }
+    }
+   },
+   "attrOrder": [
+    "position",
+    "normal",
+    "uv"
+   ],
+   "vertexCount": 240,
+   "index": {
+    "type": "u32",
+    "len": 456,
+    "exact": "cd66cdcb",
+    "quant": "cd66cdcb",
+    "off": 484152
+   },
+   "indexCount": 456,
+   "triSet": "9cafc4eb",
+   "groups": [
+    [
+     0,
+     228,
+     0
+    ],
+    [
+     228,
+     228,
+     1
+    ]
+   ],
+   "drawRange": [
+    0,
+    -1
+   ]
+  },
+  {
+   "id": "g4",
+   "firstUser": "bld.3.s0",
+   "attributes": {
+    "position": {
+     "itemSize": 3,
+     "count": 300,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 900,
+      "exact": "94e9218d",
+      "quant": "d33aa8f1",
+      "off": 489712
+     }
+    },
+    "normal": {
+     "itemSize": 3,
+     "count": 300,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 900,
+      "exact": "ab8c6315",
+      "quant": "e1315f46",
+      "off": 493312
+     }
+    },
+    "uv": {
+     "itemSize": 2,
+     "count": 300,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 600,
+      "exact": "fdb6196c",
+      "quant": "a18ef2e8",
+      "off": 496912
+     }
+    }
+   },
+   "attrOrder": [
+    "position",
+    "normal",
+    "uv"
+   ],
+   "vertexCount": 300,
+   "index": {
+    "type": "u32",
+    "len": 576,
+    "exact": "ead3e69d",
+    "quant": "ead3e69d",
+    "off": 499312
+   },
+   "indexCount": 576,
+   "triSet": "dbc9e961",
+   "groups": [
+    [
+     0,
+     288,
+     0
+    ],
+    [
+     288,
+     288,
+     1
+    ]
+   ],
+   "drawRange": [
+    0,
+    -1
+   ]
+  },
+  {
+   "id": "g5",
+   "firstUser": "cars.parked.s0",
+   "attributes": {
+    "position": {
+     "itemSize": 3,
+     "count": 48,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 144,
+      "exact": "573e2ff5",
+      "quant": "3900cb41",
+      "off": 505800
+     }
+    },
+    "normal": {
+     "itemSize": 3,
+     "count": 48,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 144,
+      "exact": "b3af1845",
+      "quant": "6fd5a995",
+      "off": 506376
+     }
+    },
+    "uv": {
+     "itemSize": 2,
+     "count": 48,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 96,
+      "exact": "909fa8c5",
+      "quant": "416408c5",
+      "off": 506952
+     }
+    }
+   },
+   "attrOrder": [
+    "position",
+    "normal",
+    "uv"
+   ],
+   "vertexCount": 48,
+   "index": {
+    "type": "u16",
+    "len": 72,
+    "exact": "c04f7275",
+    "quant": "c04f7275",
+    "off": 507336
+   },
+   "indexCount": 72,
+   "triSet": "04626d45",
+   "groups": [],
+   "drawRange": [
+    0,
+    -1
+   ]
+  },
+  {
+   "id": "g6",
+   "firstUser": "trunks.s0",
+   "attributes": {
+    "position": {
+     "itemSize": 3,
+     "count": 40,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 120,
+      "exact": "d8e99041",
+      "quant": "cef6c499",
+      "off": 516376
+     }
+    },
+    "normal": {
+     "itemSize": 3,
+     "count": 40,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 120,
+      "exact": "b18f3f11",
+      "quant": "b1c46852",
+      "off": 516856
+     }
+    },
+    "uv": {
+     "itemSize": 2,
+     "count": 40,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 80,
+      "exact": "3be82dc8",
+      "quant": "5d73b7b4",
+      "off": 517336
+     }
+    },
+    "color": {
+     "itemSize": 3,
+     "count": 40,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 120,
+      "exact": "eea93c85",
+      "quant": "f990c1d5",
+      "off": 517656
+     }
+    }
+   },
+   "attrOrder": [
+    "position",
+    "normal",
+    "uv",
+    "color"
+   ],
+   "vertexCount": 40,
+   "index": {
+    "type": "u16",
+    "len": 72,
+    "exact": "5bf86667",
+    "quant": "5bf86667",
+    "off": 518136
+   },
+   "indexCount": 72,
+   "triSet": "c4e6c9b7",
+   "groups": [
+    [
+     0,
+     36,
+     0
+    ],
+    [
+     36,
+     18,
+     1
+    ],
+    [
+     54,
+     18,
+     2
+    ]
+   ],
+   "drawRange": [
+    0,
+    -1
+   ]
+  },
+  {
+   "id": "g7",
+   "firstUser": "crowns.lod0.s0",
+   "attributes": {
+    "position": {
+     "itemSize": 3,
+     "count": 60,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 180,
+      "exact": "bf4baacd",
+      "quant": "fe67e761",
+      "off": 614280
+     }
+    },
+    "normal": {
+     "itemSize": 3,
+     "count": 60,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 180,
+      "exact": "bf8678ae",
+      "quant": "8dc01230",
+      "off": 615000
+     }
+    },
+    "uv": {
+     "itemSize": 2,
+     "count": 60,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 120,
+      "exact": "c604ec8e",
+      "quant": "4bbfa1cf",
+      "off": 615720
+     }
+    },
+    "color": {
+     "itemSize": 3,
+     "count": 60,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 180,
+      "exact": "c4597bc1",
+      "quant": "0df96a87",
+      "off": 616200
+     }
+    }
+   },
+   "attrOrder": [
+    "position",
+    "normal",
+    "uv",
+    "color"
+   ],
+   "vertexCount": 60,
+   "index": null,
+   "indexCount": 0,
+   "groups": [],
+   "drawRange": [
+    0,
+    -1
+   ]
+  },
+  {
+   "id": "g8",
+   "firstUser": "crowns.lod1.s0",
+   "attributes": {
+    "position": {
+     "itemSize": 3,
+     "count": 60,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 180,
+      "exact": "bf4baacd",
+      "quant": "fe67e761",
+      "off": 646944
+     }
+    },
+    "normal": {
+     "itemSize": 3,
+     "count": 60,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 180,
+      "exact": "bf8678ae",
+      "quant": "8dc01230",
+      "off": 647664
+     }
+    },
+    "uv": {
+     "itemSize": 2,
+     "count": 60,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 120,
+      "exact": "c604ec8e",
+      "quant": "4bbfa1cf",
+      "off": 648384
+     }
+    },
+    "color": {
+     "itemSize": 3,
+     "count": 60,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 180,
+      "exact": "c4597bc1",
+      "quant": "0df96a87",
+      "off": 648864
+     }
+    }
+   },
+   "attrOrder": [
+    "position",
+    "normal",
+    "uv",
+    "color"
+   ],
+   "vertexCount": 60,
+   "index": null,
+   "indexCount": 0,
+   "groups": [],
+   "drawRange": [
+    0,
+    -1
+   ]
+  },
+  {
+   "id": "g9",
+   "firstUser": "crowns.lod2.s0",
+   "attributes": {
+    "position": {
+     "itemSize": 3,
+     "count": 12,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 36,
+      "exact": "e0f4ff35",
+      "quant": "57d4faf9",
+      "off": 679608
+     }
+    },
+    "normal": {
+     "itemSize": 3,
+     "count": 12,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 36,
+      "exact": "aee1da15",
+      "quant": "3343118d",
+      "off": 679752
+     }
+    },
+    "uv": {
+     "itemSize": 2,
+     "count": 12,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 24,
+      "exact": "85114085",
+      "quant": "83fec885",
+      "off": 679896
+     }
+    },
+    "color": {
+     "itemSize": 3,
+     "count": 12,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 36,
+      "exact": "62c58565",
+      "quant": "62646065",
+      "off": 679992
+     }
+    }
+   },
+   "attrOrder": [
+    "position",
+    "normal",
+    "uv",
+    "color"
+   ],
+   "vertexCount": 12,
+   "index": {
+    "type": "u16",
+    "len": 18,
+    "exact": "0703a60e",
+    "quant": "0703a60e",
+    "off": 680136
+   },
+   "indexCount": 18,
+   "triSet": "3f6d99e6",
+   "groups": [],
+   "drawRange": [
+    0,
+    -1
+   ]
+  },
+  {
+   "id": "g10",
+   "firstUser": "tufts.s0",
+   "attributes": {
+    "position": {
+     "itemSize": 3,
+     "count": 42,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 126,
+      "exact": "30e3b9e3",
+      "quant": "c5e613ce",
+      "off": 962152
+     }
+    },
+    "normal": {
+     "itemSize": 3,
+     "count": 42,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 126,
+      "exact": "755f32cd",
+      "quant": "5b8fcd65",
+      "off": 962656
+     }
+    },
+    "uv": {
+     "itemSize": 2,
+     "count": 42,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 84,
+      "exact": "89d50a35",
+      "quant": "adeeb235",
+      "off": 963160
+     }
+    }
+   },
+   "attrOrder": [
+    "position",
+    "normal",
+    "uv"
+   ],
+   "vertexCount": 42,
+   "index": {
+    "type": "u16",
+    "len": 42,
+    "exact": "2cf4bcfc",
+    "quant": "2cf4bcfc",
+    "off": 963496
+   },
+   "indexCount": 42,
+   "triSet": "15100dd4",
+   "groups": [],
+   "drawRange": [
+    0,
+    -1
+   ]
+  },
+  {
+   "id": "g11",
+   "firstUser": "bushes.s0",
+   "attributes": {
+    "position": {
+     "itemSize": 3,
+     "count": 60,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 180,
+      "exact": "ecf6420a",
+      "quant": "9dca0224",
+      "off": 1059584
+     }
+    },
+    "normal": {
+     "itemSize": 3,
+     "count": 60,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 180,
+      "exact": "864bba49",
+      "quant": "7be22f6a",
+      "off": 1060304
+     }
+    },
+    "uv": {
+     "itemSize": 2,
+     "count": 60,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 120,
+      "exact": "c604ec8e",
+      "quant": "4bbfa1cf",
+      "off": 1061024
+     }
+    },
+    "color": {
+     "itemSize": 3,
+     "count": 60,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 180,
+      "exact": "0eb7ded3",
+      "quant": "b77514d2",
+      "off": 1061504
+     }
+    }
+   },
+   "attrOrder": [
+    "position",
+    "normal",
+    "uv",
+    "color"
+   ],
+   "vertexCount": 60,
+   "index": null,
+   "indexCount": 0,
+   "groups": [],
+   "drawRange": [
+    0,
+    -1
+   ]
+  },
+  {
+   "id": "g12",
+   "firstUser": "blob.s0",
+   "attributes": {
+    "position": {
+     "itemSize": 3,
+     "count": 4,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 12,
+      "exact": "0d3de9f5",
+      "quant": "43ae9f55",
+      "off": 1115432
+     }
+    },
+    "normal": {
+     "itemSize": 3,
+     "count": 4,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 12,
+      "exact": "98c247fd",
+      "quant": "bf9276a5",
+      "off": 1115480
+     }
+    },
+    "uv": {
+     "itemSize": 2,
+     "count": 4,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 8,
+      "exact": "4990eb05",
+      "quant": "a74e8c05",
+      "off": 1115528
+     }
+    }
+   },
+   "attrOrder": [
+    "position",
+    "normal",
+    "uv"
+   ],
+   "vertexCount": 4,
+   "index": {
+    "type": "u16",
+    "len": 6,
+    "exact": "07c0d37e",
+    "quant": "07c0d37e",
+    "off": 1115560
+   },
+   "indexCount": 6,
+   "triSet": "7befce06",
+   "groups": [],
+   "drawRange": [
+    0,
+    -1
+   ]
+  },
+  {
+   "id": "g13",
+   "firstUser": "traffic.body",
+   "attributes": {
+    "position": {
+     "itemSize": 3,
+     "count": 48,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 144,
+      "exact": "0bb7f92d",
+      "quant": "d21ed155",
+      "off": 1224120
+     }
+    },
+    "normal": {
+     "itemSize": 3,
+     "count": 48,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 144,
+      "exact": "b3af1845",
+      "quant": "6fd5a995",
+      "off": 1224696
+     }
+    },
+    "uv": {
+     "itemSize": 2,
+     "count": 48,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 96,
+      "exact": "909fa8c5",
+      "quant": "416408c5",
+      "off": 1225272
+     }
+    }
+   },
+   "attrOrder": [
+    "position",
+    "normal",
+    "uv"
+   ],
+   "vertexCount": 48,
+   "index": {
+    "type": "u16",
+    "len": 72,
+    "exact": "c04f7275",
+    "quant": "c04f7275",
+    "off": 1225656
+   },
+   "indexCount": 72,
+   "triSet": "04626d45",
+   "groups": [],
+   "drawRange": [
+    0,
+    -1
+   ]
+  },
+  {
+   "id": "g14",
+   "firstUser": "traffic.lamp",
+   "attributes": {
+    "position": {
+     "itemSize": 3,
+     "count": 96,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 288,
+      "exact": "bc1a19e5",
+      "quant": "ecb48635",
+      "off": 1231728
+     }
+    },
+    "normal": {
+     "itemSize": 3,
+     "count": 96,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 288,
+      "exact": "f46552c5",
+      "quant": "ba889aa5",
+      "off": 1232880
+     }
+    },
+    "uv": {
+     "itemSize": 2,
+     "count": 96,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 192,
+      "exact": "4a34b3c5",
+      "quant": "8ffd73c5",
+      "off": 1234032
+     }
+    }
+   },
+   "attrOrder": [
+    "position",
+    "normal",
+    "uv"
+   ],
+   "vertexCount": 96,
+   "index": {
+    "type": "u16",
+    "len": 144,
+    "exact": "5b052505",
+    "quant": "5b052505",
+    "off": 1234800
+   },
+   "indexCount": 144,
+   "triSet": "1b230085",
+   "groups": [
+    [
+     0,
+     72,
+     0
+    ],
+    [
+     72,
+     72,
+     1
+    ]
+   ],
+   "drawRange": [
+    0,
+    -1
+   ]
+  },
+  {
+   "id": "g15",
+   "firstUser": "nav",
+   "attributes": {
+    "position": {
+     "itemSize": 3,
+     "count": 600,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 1800,
+      "exact": "0cf000e1",
+      "quant": "3ec8532d",
+      "off": 1240080
+     }
+    }
+   },
+   "attrOrder": [
+    "position"
+   ],
+   "vertexCount": 600,
+   "index": null,
+   "indexCount": 0,
+   "groups": [],
+   "drawRange": [
+    0,
+    -1
+   ]
+  },
+  {
+   "id": "g16",
+   "firstUser": "axis.sun",
+   "attributes": {
+    "position": {
+     "itemSize": 3,
+     "count": 124,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 372,
+      "exact": "a733f9d5",
+      "quant": "8d4a0f45",
+      "off": 1247280
+     }
+    },
+    "normal": {
+     "itemSize": 3,
+     "count": 124,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 372,
+      "exact": "7e52acf9",
+      "quant": "9081f662",
+      "off": 1248768
+     }
+    },
+    "uv": {
+     "itemSize": 2,
+     "count": 124,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 248,
+      "exact": "7a36d6a8",
+      "quant": "ccd8f7f0",
+      "off": 1250256
+     }
+    }
+   },
+   "attrOrder": [
+    "position",
+    "normal",
+    "uv"
+   ],
+   "vertexCount": 124,
+   "index": {
+    "type": "u16",
+    "len": 240,
+    "exact": "0a0756c1",
+    "quant": "0a0756c1",
+    "off": 1251248
+   },
+   "indexCount": 240,
+   "triSet": "ebfb2c61",
+   "groups": [
+    [
+     0,
+     120,
+     0
+    ],
+    [
+     120,
+     60,
+     1
+    ],
+    [
+     180,
+     60,
+     2
+    ]
+   ],
+   "drawRange": [
+    0,
+    -1
+   ]
+  },
+  {
+   "id": "g17",
+   "firstUser": "axis.spine",
+   "attributes": {
+    "position": {
+     "itemSize": 3,
+     "count": 15540,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 46620,
+      "exact": "6dcca3bc",
+      "quant": "4c990cc4",
+      "off": 1251728
+     }
+    },
+    "normal": {
+     "itemSize": 3,
+     "count": 15540,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 46620,
+      "exact": "4bccaec5",
+      "quant": "e3bf508d",
+      "off": 1438208
+     }
+    },
+    "uv": {
+     "itemSize": 2,
+     "count": 15540,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 31080,
+      "exact": "cd41d53b",
+      "quant": "30acc08e",
+      "off": 1624688
+     }
+    }
+   },
+   "attrOrder": [
+    "position",
+    "normal",
+    "uv"
+   ],
+   "vertexCount": 15540,
+   "index": {
+    "type": "u16",
+    "len": 28080,
+    "exact": "fcad5905",
+    "quant": "fcad5905",
+    "off": 1749008
+   },
+   "indexCount": 28080,
+   "triSet": "f2ba4bb5",
+   "groups": [],
+   "drawRange": [
+    0,
+    -1
+   ]
+  },
+  {
+   "id": "g18",
+   "firstUser": "lift.body",
+   "attributes": {
+    "position": {
+     "itemSize": 3,
+     "count": 952,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 2856,
+      "exact": "35580885",
+      "quant": "ce767659",
+      "off": 1805168
+     }
+    },
+    "normal": {
+     "itemSize": 3,
+     "count": 952,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 2856,
+      "exact": "0c1b0895",
+      "quant": "fe39761d",
+      "off": 1816592
+     }
+    },
+    "uv": {
+     "itemSize": 2,
+     "count": 952,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 1904,
+      "exact": "269bfbad",
+      "quant": "125cde4d",
+      "off": 1828016
+     }
+    }
+   },
+   "attrOrder": [
+    "position",
+    "normal",
+    "uv"
+   ],
+   "vertexCount": 952,
+   "index": {
+    "type": "u16",
+    "len": 1524,
+    "exact": "c5607fb6",
+    "quant": "c5607fb6",
+    "off": 1835632
+   },
+   "indexCount": 1524,
+   "triSet": "f5c0e12a",
+   "groups": [],
+   "drawRange": [
+    0,
+    -1
+   ]
+  },
+  {
+   "id": "g19",
+   "firstUser": "lift.lamp",
+   "attributes": {
+    "position": {
+     "itemSize": 3,
+     "count": 24,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 72,
+      "exact": "7509869d",
+      "quant": "dfba1921",
+      "off": 1838808
+     }
+    },
+    "normal": {
+     "itemSize": 3,
+     "count": 24,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 72,
+      "exact": "bef39205",
+      "quant": "ce57ea3d",
+      "off": 1839096
+     }
+    },
+    "uv": {
+     "itemSize": 2,
+     "count": 24,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 48,
+      "exact": "d0f0da45",
+      "quant": "9c361345",
+      "off": 1839384
+     }
+    }
+   },
+   "attrOrder": [
+    "position",
+    "normal",
+    "uv"
+   ],
+   "vertexCount": 24,
+   "index": {
+    "type": "u16",
+    "len": 36,
+    "exact": "b6dbda65",
+    "quant": "b6dbda65",
+    "off": 1839576
+   },
+   "indexCount": 36,
+   "triSet": "6e2c5c05",
+   "groups": [],
+   "drawRange": [
+    0,
+    -1
+   ]
+  },
+  {
+   "id": "g20",
+   "firstUser": "lift.glass",
+   "attributes": {
+    "position": {
+     "itemSize": 3,
+     "count": 96,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 288,
+      "exact": "805eebf5",
+      "quant": "1e3a7665",
+      "off": 1839776
+     }
+    },
+    "normal": {
+     "itemSize": 3,
+     "count": 96,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 288,
+      "exact": "f46552c5",
+      "quant": "ba889aa5",
+      "off": 1840928
+     }
+    },
+    "uv": {
+     "itemSize": 2,
+     "count": 96,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 192,
+      "exact": "4a34b3c5",
+      "quant": "8ffd73c5",
+      "off": 1842080
+     }
+    }
+   },
+   "attrOrder": [
+    "position",
+    "normal",
+    "uv"
+   ],
+   "vertexCount": 96,
+   "index": {
+    "type": "u16",
+    "len": 144,
+    "exact": "5b052505",
+    "quant": "5b052505",
+    "off": 1842848
+   },
+   "indexCount": 144,
+   "triSet": "1b230085",
+   "groups": [],
+   "drawRange": [
+    0,
+    -1
+   ]
+  },
+  {
+   "id": "g21",
+   "firstUser": "axis.collars",
+   "attributes": {
+    "position": {
+     "itemSize": 3,
+     "count": 756,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 2268,
+      "exact": "a06060a9",
+      "quant": "215b8095",
+      "off": 1843264
+     }
+    },
+    "normal": {
+     "itemSize": 3,
+     "count": 756,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 2268,
+      "exact": "7a8af465",
+      "quant": "ad942ea5",
+      "off": 1852336
+     }
+    },
+    "uv": {
+     "itemSize": 2,
+     "count": 756,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 1512,
+      "exact": "b41be511",
+      "quant": "b96dca45",
+      "off": 1861408
+     }
+    }
+   },
+   "attrOrder": [
+    "position",
+    "normal",
+    "uv"
+   ],
+   "vertexCount": 756,
+   "index": {
+    "type": "u16",
+    "len": 3840,
+    "exact": "ae23d587",
+    "quant": "ae23d587",
+    "off": 1867456
+   },
+   "indexCount": 3840,
+   "triSet": "5a59428b",
+   "groups": [],
+   "drawRange": [
+    0,
+    -1
+   ]
+  },
+  {
+   "id": "g22",
+   "firstUser": "truss",
+   "attributes": {
+    "position": {
+     "itemSize": 3,
+     "count": 1126,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 3378,
+      "exact": "fca458d5",
+      "quant": "8f03e24e",
+      "off": 1875136
+     }
+    },
+    "normal": {
+     "itemSize": 3,
+     "count": 1126,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 3378,
+      "exact": "2b3be89d",
+      "quant": "9c03505a",
+      "off": 1888648
+     }
+    },
+    "uv": {
+     "itemSize": 2,
+     "count": 1126,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 2252,
+      "exact": "19070a3d",
+      "quant": "a7652625",
+      "off": 1902160
+     }
+    }
+   },
+   "attrOrder": [
+    "position",
+    "normal",
+    "uv"
+   ],
+   "vertexCount": 1126,
+   "index": {
+    "type": "u16",
+    "len": 2112,
+    "exact": "55cb04d1",
+    "quant": "55cb04d1",
+    "off": 1911168
+   },
+   "indexCount": 2112,
+   "triSet": "f7244829",
+   "groups": [],
+   "drawRange": [
+    0,
+    -1
+   ]
+  },
+  {
+   "id": "g23",
+   "firstUser": "tower.concrete",
+   "attributes": {
+    "position": {
+     "itemSize": 3,
+     "count": 2012,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 6036,
+      "exact": "c47a3a61",
+      "quant": "0f08923d",
+      "off": 1916160
+     }
+    },
+    "normal": {
+     "itemSize": 3,
+     "count": 2012,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 6036,
+      "exact": "0a961581",
+      "quant": "e605cd9e",
+      "off": 1940304
+     }
+    },
+    "uv": {
+     "itemSize": 2,
+     "count": 2012,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 4024,
+      "exact": "427e266c",
+      "quant": "91e963a7",
+      "off": 1964448
+     }
+    }
+   },
+   "attrOrder": [
+    "position",
+    "normal",
+    "uv"
+   ],
+   "vertexCount": 2012,
+   "index": {
+    "type": "u16",
+    "len": 3624,
+    "exact": "1a1988b5",
+    "quant": "1a1988b5",
+    "off": 1980544
+   },
+   "indexCount": 3624,
+   "triSet": "b7686ac5",
+   "groups": [],
+   "drawRange": [
+    0,
+    -1
+   ]
+  },
+  {
+   "id": "g24",
+   "firstUser": "tower.glass",
+   "attributes": {
+    "position": {
+     "itemSize": 3,
+     "count": 912,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 2736,
+      "exact": "d9d26715",
+      "quant": "8d80e105",
+      "off": 1987792
+     }
+    },
+    "normal": {
+     "itemSize": 3,
+     "count": 912,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 2736,
+      "exact": "9d62bbc1",
+      "quant": "f0c0951d",
+      "off": 1998736
+     }
+    },
+    "uv": {
+     "itemSize": 2,
+     "count": 912,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 1824,
+      "exact": "e2bdf17e",
+      "quant": "c9cd8136",
+      "off": 2009680
+     }
+    }
+   },
+   "attrOrder": [
+    "position",
+    "normal",
+    "uv"
+   ],
+   "vertexCount": 912,
+   "index": {
+    "type": "u16",
+    "len": 1776,
+    "exact": "4a86833a",
+    "quant": "4a86833a",
+    "off": 2016976
+   },
+   "indexCount": 1776,
+   "triSet": "f56513a2",
+   "groups": [],
+   "drawRange": [
+    0,
+    -1
+   ]
+  },
+  {
+   "id": "g25",
+   "firstUser": "tower.beacon",
+   "attributes": {
+    "position": {
+     "itemSize": 3,
+     "count": 240,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 720,
+      "exact": "3132fb69",
+      "quant": "3dfb3c71",
+      "off": 2020528
+     }
+    },
+    "normal": {
+     "itemSize": 3,
+     "count": 240,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 720,
+      "exact": "3132fb69",
+      "quant": "3dfb3c71",
+      "off": 2023408
+     }
+    },
+    "uv": {
+     "itemSize": 2,
+     "count": 240,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 480,
+      "exact": "13998aaa",
+      "quant": "2b3ff23b",
+      "off": 2026288
+     }
+    }
+   },
+   "attrOrder": [
+    "position",
+    "normal",
+    "uv"
+   ],
+   "vertexCount": 240,
+   "index": null,
+   "indexCount": 0,
+   "groups": [],
+   "drawRange": [
+    0,
+    -1
+   ]
+  },
+  {
+   "id": "g26",
+   "firstUser": "endcap.disc",
+   "attributes": {
+    "position": {
+     "itemSize": 3,
+     "count": 1095,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 3285,
+      "exact": "00444e49",
+      "quant": "c3a3da3a",
+      "off": 2028208
+     }
+    },
+    "uv": {
+     "itemSize": 2,
+     "count": 1095,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 2190,
+      "exact": "1029ddd8",
+      "quant": "4f7efbfc",
+      "off": 2041352
+     }
+    },
+    "normal": {
+     "itemSize": 3,
+     "count": 1095,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 3285,
+      "exact": "7aef01ad",
+      "quant": "319c1adb",
+      "off": 2050112
+     }
+    }
+   },
+   "attrOrder": [
+    "position",
+    "uv",
+    "normal"
+   ],
+   "vertexCount": 1095,
+   "index": {
+    "type": "u16",
+    "len": 6048,
+    "exact": "d9c8a6d9",
+    "quant": "d9c8a6d9",
+    "off": 2063256
+   },
+   "indexCount": 6048,
+   "triSet": "f9a66fb9",
+   "groups": [],
+   "drawRange": [
+    0,
+    -1
+   ]
+  },
+  {
+   "id": "g27",
+   "firstUser": "endcap.hub",
+   "attributes": {
+    "position": {
+     "itemSize": 3,
+     "count": 256,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 768,
+      "exact": "cfc46665",
+      "quant": "650c534d",
+      "off": 2075480
+     }
+    },
+    "normal": {
+     "itemSize": 3,
+     "count": 256,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 768,
+      "exact": "f2c3e7ad",
+      "quant": "5f74a756",
+      "off": 2078552
+     }
+    },
+    "uv": {
+     "itemSize": 2,
+     "count": 256,
+     "normalized": false,
+     "data": {
+      "type": "f32",
+      "len": 512,
+      "exact": "fb52acc1",
+      "quant": "0a86a3d2",
+      "off": 2081624
+     }
+    }
+   },
+   "attrOrder": [
+    "position",
+    "normal",
+    "uv"
+   ],
+   "vertexCount": 256,
+   "index": {
+    "type": "u16",
+    "len": 432,
+    "exact": "6f127343",
+    "quant": "6f127343",
+    "off": 2083672
+   },
+   "indexCount": 432,
+   "triSet": "6c09ceb3",
+   "groups": [],
+   "drawRange": [
+    0,
+    -1
+   ]
+  }
+ ],
+ "unnamed": [],
+ "configMutated": false
+}

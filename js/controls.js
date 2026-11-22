@@ -1,10 +1,12 @@
 import * as THREE from 'three';
 import { CONFIG } from './config.js';
-import { clamp, clampPitch } from './util.js';
+import { clamp, D2R } from '../core/math/scalar.ts';
 
 /* ═══════════════════════════════════════════════════════════════════════════
-   УПРАВЛЕНИЕ — только Pointer Events. Никаких FlyControls/OrbitControls
-   и никаких внешних джойстиков.
+   УПРАВЛЕНИЕ КАМЕРОЙ — состояние ввода, его применение и столкновения.
+   Сами источники ввода (клавиатура, мышь и pointer lock, касания и
+   джойстик, геймпад, пульт) живут в app/input/* и пишут сюда: в ctl и
+   через addLook. Никаких FlyControls/OrbitControls.
    ═══════════════════════════════════════════════════════════════════════════ */
 let collider = null;
 const _ray = new THREE.Raycaster();
@@ -24,6 +26,8 @@ export const ctl = {
   keys: Object.create(null),
   vert: 0,
   stick: { active: false, id: -1, ox: 0, oy: 0, x: 0, y: 0 },
+  /* аналоговый ввод геймпада, уже за мёртвой зоной: x вправо, y к оси, z вперёд */
+  axis: { x: 0, y: 0, z: 0 },
   look: { id: -1, lx: 0, ly: 0 },
   sens: 1,
   locked: false,
@@ -37,7 +41,6 @@ export const isMobile = matchMedia('(pointer: coarse)').matches
    нормализация усиливает погрешность в полсотни раз — камеру трясёт у
    зенита. 84° дают запас в 0.1: базис остаётся устойчивым. */
 const SIN_MAX = Math.sin(84 * Math.PI / 180);
-let base, knob;
 let dYaw = 0, dPitch = 0;      // накопленный ввод обзора за кадр
 
 /** «Верх» задаёт центробежная сила: от пола к оси станции.
@@ -56,133 +59,11 @@ export function frameUp(camera, out) {
   return out.set(0, 1, 0).applyQuaternion(camera.quaternion).normalize();
 }
 
-/** §12: радиус джойстика зависит от ориентации экрана */
-export const stickRadius = () =>
-  CONFIG.STICK_RADIUS[innerHeight >= innerWidth ? 'portrait' : 'landscape'];
-
-/**
- * @param dom     канвас рендерера
- * @param stage   контейнер, ловящий жесты
- * @param isBusy  () => true, если идёт перелёт (ввод игнорируется)
- * @param onTap   вызывается при касании во время перелёта — отмена
- */
-export function initControls(dom, stage, isBusy, onTap) {
-  base = document.getElementById('stickBase');
-  knob = document.getElementById('stickKnob');
-
-  /* --- клавиатура --- */
-  addEventListener('keydown', e => {
-    ctl.keys[e.code] = true;
-    if (e.code.startsWith('Shift')) ctl.boost = true;
-    if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Space'].includes(e.code)) e.preventDefault();
-  }, { passive: false });
-  addEventListener('keyup', e => {
-    ctl.keys[e.code] = false;
-    if (e.code.startsWith('Shift')) ctl.boost = false;
-  });
-
-  /* --- Pointer Lock --- */
-  document.addEventListener('pointerlockchange', () => { ctl.locked = document.pointerLockElement === dom; });
-  addEventListener('mousemove', e => {
-    if (!ctl.locked || isBusy()) return;
-    look(e.movementX, e.movementY, CONFIG.LOOK_SENS);
-  });
-
-  /* --- колесо: базовая скорость --- */
-  stage.addEventListener('wheel', e => {
-    e.preventDefault();
-    ctl.speed = clamp(ctl.speed - Math.sign(e.deltaY) * 2, CONFIG.SPEED_MIN, CONFIG.SPEED_MAX);
-  }, { passive: false });
-
-  /* --- касания и мышь --- */
-  stage.addEventListener('pointerdown', e => {
-    if (!ctl.enabled) return;
-    if (isBusy()) { onTap(); return; }
-
-    if (e.pointerType === 'mouse' && !isMobile) {
-      ctl.look.id = e.pointerId; ctl.look.lx = e.clientX; ctl.look.ly = e.clientY;
-      if (!ctl.locked) dom.requestPointerLock?.()?.catch?.(() => {});   // фолбэк: обзор перетаскиванием
-      return;
-    }
-    stage.setPointerCapture?.(e.pointerId);
-    if (e.clientX < innerWidth * 0.5 && !ctl.stick.active) {
-      Object.assign(ctl.stick, { active: true, id: e.pointerId, ox: e.clientX, oy: e.clientY, x: 0, y: 0 });
-      showStick(e.clientX, e.clientY, e.clientX, e.clientY);
-    } else if (ctl.look.id === -1) {
-      ctl.look.id = e.pointerId; ctl.look.lx = e.clientX; ctl.look.ly = e.clientY;
-    }
-  });
-
-  stage.addEventListener('pointermove', e => {
-    if (!ctl.enabled || isBusy()) return;
-    const s = ctl.stick;
-    if (e.pointerId === s.id && s.active) {
-      let dx = e.clientX - s.ox, dy = e.clientY - s.oy;
-      const len = Math.hypot(dx, dy), R = stickRadius();
-      if (len > R) { dx *= R / len; dy *= R / len; }
-      s.x = dx / R; s.y = dy / R;
-      showStick(s.ox, s.oy, s.ox + dx, s.oy + dy);
-    } else if (e.pointerId === ctl.look.id && !ctl.locked) {
-      look(e.clientX - ctl.look.lx, e.clientY - ctl.look.ly,
-        e.pointerType === 'mouse' ? CONFIG.LOOK_SENS : CONFIG.TOUCH_SENS);
-      ctl.look.lx = e.clientX; ctl.look.ly = e.clientY;
-    }
-  });
-
-  const release = e => {
-    if (e.pointerId === ctl.stick.id) { resetStick(); }
-    if (e.pointerId === ctl.look.id) ctl.look.id = -1;
-  };
-  for (const ev of ['pointerup', 'pointercancel', 'lostpointercapture']) {
-    stage.addEventListener(ev, release);
-  }
-
-  /* --- кнопки-«держалки» ▲ ▼ и переключатель скорости --- */
-  const hold = (el, on, off) => {
-    el.addEventListener('pointerdown', e => {
-      e.stopPropagation(); e.preventDefault();
-      el.setPointerCapture?.(e.pointerId); el.classList.add('held'); on();
-    });
-    const end = e => { e?.stopPropagation?.(); el.classList.remove('held'); off(); };
-    el.addEventListener('pointerup', end);
-    el.addEventListener('pointercancel', end);
-    el.addEventListener('lostpointercapture', () => end());
-  };
-  hold(document.getElementById('bUp'), () => ctl.vert = 1, () => ctl.vert = 0);
-  hold(document.getElementById('bDn'), () => ctl.vert = -1, () => ctl.vert = 0);
-
-  const bSpd = document.getElementById('bSpd');
-  bSpd.addEventListener('pointerdown', e => {
-    e.stopPropagation(); e.preventDefault();
-    const fast = ctl.speed < CONFIG.SPEED_RABBIT;
-    ctl.speed = fast ? CONFIG.SPEED_RABBIT : CONFIG.SPEED_TURTLE;
-    bSpd.classList.toggle('on', fast);
-  });
-
-  /* --- мобайл-гигиена --- */
-  addEventListener('gesturestart', e => e.preventDefault(), { passive: false });
-  addEventListener('contextmenu', e => e.preventDefault());
-  document.addEventListener('dblclick', e => e.preventDefault(), { passive: false });
-
-  if (isMobile) document.getElementById('pad').classList.add('show');
-}
-
-function look(dx, dy, k) {
+/** Накопить поворот взгляда за кадр. Применяется в updateControls одним
+    поворотом — так мышь, свайп и стик геймпада ведут себя одинаково. */
+export function addLook(dx, dy, k) {
   dYaw -= dx * k * ctl.sens;
   dPitch -= dy * k * ctl.sens;
-}
-function showStick(bx, by, kx, ky) {
-  const R = stickRadius(), kr = Math.round(R * 0.44);
-  base.style.width = base.style.height = R * 2 + 'px';
-  knob.style.width = knob.style.height = kr * 2 + 'px';
-  base.classList.add('on'); knob.classList.add('on');
-  base.style.transform = `translate(${bx - R}px,${by - R}px)`;
-  knob.style.transform = `translate(${kx - kr}px,${ky - kr}px)`;
-}
-export function resetStick() {
-  Object.assign(ctl.stick, { active: false, id: -1, x: 0, y: 0 });
-  ctl.look.id = -1; ctl.vert = 0;
-  base?.classList.remove('on'); knob?.classList.remove('on');
 }
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -248,6 +129,8 @@ export function updateControls(dt, camera) {
       fx += s.x * g; fz -= s.y * g;
     }
   }
+  const ax = ctl.axis;
+  fx += ax.x; fz += ax.z; fy += ax.y;
   if (!fx && !fz && !fy) return;
 
   const spd = ctl.speed * (ctl.boost ? CONFIG.SPEED_BOOST : 1) * dt;
@@ -305,4 +188,90 @@ export function updateControls(dt, camera) {
 export function syncFromCamera(camera) {
   dYaw = dPitch = 0;
   levelCamera(camera);
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   ГЕОМЕТРИЯ КАМЕРЫ — перенесено из js/util.js (v2.12.0: мир строит core/,
+   а util.js удалён; здесь остались только помощники камеры на THREE).
+   Чистые версии без three — core/camera/flight.ts.
+   ═══════════════════════════════════════════════════════════════════════════ */
+/** Точка на радиусе r под углом t: x = r·sin t, y = r·cos t (как в ядре) */
+export function surfacePos(t, r, z, out = new THREE.Vector3()) {
+  return out.set(Math.sin(t) * r, Math.cos(t) * r, z);
+}
+/** [θ°, r, z] → локальный вектор станции */
+export const tpVec = ([deg, r, z]) => surfacePos(deg * D2R, r, z);
+
+/** Кватернион камеры, смотрящей из eye на target.
+    Object3D.lookAt для НЕ-камеры разворачивает к цели +Z, а камера смотрит
+    вдоль −Z: подставив обычный Object3D, легко получить взгляд ровно назад.
+    Matrix4.lookAt строит именно камерный базис, поэтому берём его напрямую. */
+const _aimM = new THREE.Matrix4();
+const _aimF = new THREE.Vector3(), _aimU = new THREE.Vector3(), _aimT = new THREE.Vector3();
+export function aimAt(eye, target, up, out) {
+  /* «Верх» приводим к перпендикуляру взгляда. Когда взгляд идёт почти вдоль
+     него, базис вырождается и переворачивается — камера рывком крутится на
+     180° за один кадр. Ортогонализация убирает вырождение в корне, а если
+     верх совпал со взглядом полностью, берём любой перпендикуляр. */
+  _aimF.subVectors(target, eye);
+  if (_aimF.lengthSq() < 1e-12) return out;
+  _aimF.normalize();
+  _aimU.copy(up).addScaledVector(_aimF, -up.dot(_aimF));
+  /* Порог намеренно велик. Ортогонализация спасает только пока верх и
+     взгляд заметно расходятся: у dot = 0.999 остаток длиной 0.04, и его
+     направление скачет от кадра к кадру — камеру выворачивает. Ниже порога
+     берём ось станции: она перпендикулярна радиальному верху всегда. */
+  if (_aimU.lengthSq() < 0.02) {
+    _aimT.set(0, 0, 1);
+    if (Math.abs(_aimF.z) > 0.9) _aimT.set(1, 0, 0);
+    _aimU.crossVectors(_aimT, _aimF);
+    if (_aimU.lengthSq() < 1e-8) _aimU.set(1, 0, 0);
+  }
+  _aimU.normalize();
+  _aimM.lookAt(eye, target, _aimU);
+  return out.setFromRotationMatrix(_aimM);
+}
+
+/** Поворот одного направления к другому на долю w, с устойчивой осью.
+
+    setFromUnitVectors при почти противоположных направлениях выбирает ось
+    произвольно, и она скачет от кадра к кадру — камера выворачивается на
+    180° за один шаг. Здесь ось задаётся явно: обычно это их векторное
+    произведение, а при развороте точно назад — «верх», то есть камера
+    поворачивается через горизонт, как человек, а не через темя. */
+const _tA = new THREE.Vector3(), _tQ = new THREE.Quaternion();
+export function turnToward(from, to, w, up, out) {
+  const d = clamp(from.dot(to), -1, 1);
+  _tA.crossVectors(from, to);
+  if (_tA.lengthSq() < 1e-8) {
+    if (d > 0) return out.copy(from);          // уже совпали
+    _tA.copy(up);                              // ровно назад — через горизонт
+    _tA.addScaledVector(from, -from.dot(_tA));
+    if (_tA.lengthSq() < 1e-8) _tA.set(0, 0, 1).cross(from);
+  }
+  _tA.normalize();
+  _tQ.setFromAxisAngle(_tA, Math.acos(d) * clamp(w, 0, 1));
+  return out.copy(from).applyQuaternion(_tQ).normalize();
+}
+
+/** Ограничить угол между направлением и «верхом».
+
+    Наивное «убрать лишнюю вертикальную составляющую и нормализовать» не
+    работает: убрав её, вектор укорачивается, и нормализация возвращает долю
+    почти обратно — предел 0.978 оставлял 0.995. Раскладываем на составляющие
+    и собираем заново с нужной долей: результат точно на пределе. */
+const _cpP = new THREE.Vector3(), _cpT = new THREE.Vector3();
+export function clampPitch(dir, up, sinMax) {
+  const d = dir.dot(up);
+  if (Math.abs(d) <= sinMax) return dir;
+  _cpP.copy(dir).addScaledVector(up, -d);
+  if (_cpP.lengthSq() < 1e-10) {
+    _cpT.set(0, 0, 1);
+    if (Math.abs(up.z) > 0.9) _cpT.set(1, 0, 0);
+    _cpP.crossVectors(up, _cpT);
+  }
+  _cpP.normalize();
+  return dir.copy(up).multiplyScalar(Math.sign(d) * sinMax)
+    .addScaledVector(_cpP, Math.sqrt(Math.max(0, 1 - sinMax * sinMax)))
+    .normalize();
 }

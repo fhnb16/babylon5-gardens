@@ -1,0 +1,32 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "lib": ["ES2022", "DOM", "DOM.Iterable", "WebWorker"],
+    "types": ["vite/client", "node"],
+    "allowJs": true,
+    "checkJs": false,
+    "strict": true,
+    "noEmit": true,
+    "allowImportingTsExtensions": true,
+    "isolatedModules": true,
+    "verbatimModuleSyntax": false,
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "erasableSyntaxOnly": true
+  },
+  "include": [
+    "js",
+    "core",
+    "backends",
+    "pathtracer",
+    "app",
+    "tools",
+    "test",
+    "*.ts"
+  ],
+  "exclude": ["node_modules", "dist", "coverage", "backends/threert", "**/.threert"]
+}

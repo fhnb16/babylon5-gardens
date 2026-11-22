@@ -1,0 +1,9 @@
+# build outputs of tools/bake.mjs (regenerated from core by `node backends/threert/tools/bake.mjs`)
+generated/
+assets/tex/
+assets/sound/
+# ThreeRT CLI bundle / logs (once the game project lives here) and live-shot scratch
+.threert/
+shots/out/
+# never install @threert/* here or in any parent dir (it shadows the client SDK)
+node_modules/

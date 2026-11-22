@@ -1,0 +1,71 @@
+{
+ "format": 1,
+ "tol": 0.00001,
+ "quant": 0.0001,
+ "three": "165",
+ "cases": [
+  {
+   "id": "s1337-LOW-summer",
+   "seed": 1337,
+   "quality": "LOW",
+   "season": "summer",
+   "full": true
+  },
+  {
+   "id": "s1337-HIGH-summer",
+   "seed": 1337,
+   "quality": "HIGH",
+   "season": "summer",
+   "full": true
+  },
+  {
+   "id": "s1337-ULTRAM-summer",
+   "seed": 1337,
+   "quality": "ULTRAM",
+   "season": "summer",
+   "full": false
+  },
+  {
+   "id": "s1337-ULTRA-summer",
+   "seed": 1337,
+   "quality": "ULTRA",
+   "season": "summer",
+   "full": false
+  },
+  {
+   "id": "s42-LOW-summer",
+   "seed": 42,
+   "quality": "LOW",
+   "season": "summer",
+   "full": true
+  },
+  {
+   "id": "s42-HIGH-summer",
+   "seed": 42,
+   "quality": "HIGH",
+   "season": "summer",
+   "full": true
+  },
+  {
+   "id": "s42-ULTRAM-summer",
+   "seed": 42,
+   "quality": "ULTRAM",
+   "season": "summer",
+   "full": false
+  },
+  {
+   "id": "s42-ULTRA-summer",
+   "seed": 42,
+   "quality": "ULTRA",
+   "season": "summer",
+   "full": false
+  },
+  {
+   "id": "s1337-LOW-winter",
+   "seed": 1337,
+   "quality": "LOW",
+   "season": "winter",
+   "full": true
+  }
+ ]
+}

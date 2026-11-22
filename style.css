@@ -327,6 +327,12 @@ body.clean #rideBar{display:none}
 #fatal{position:absolute;inset:0;z-index:30;display:none;place-content:center;
   text-align:center;padding:36px;background:#06090f;font-size:15px;line-height:1.7}
 #fatal.show{display:grid}
+/* мир собирается асинхронно (ядро + текстуры в workers): до готовности —
+   тихая надпись поверх пустой сцены */
+#loader{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);z-index:2;
+  pointer-events:none;font-size:13px;letter-spacing:.12em;text-transform:uppercase;
+  color:rgba(219,232,247,.55)}
+#loader.done{display:none}
 /* ═══════════════════════════════════════════════════════════════════════════
    ГОРИЗОНТАЛЬНЫЙ РЕЖИМ НА ТЕЛЕФОНЕ
    Семь кнопок столбиком — это 384px, а высота экрана в ландшафте 320…412px.
@@ -408,3 +414,41 @@ body.clean #rideBar{display:none}
 }
 
 @media (prefers-reduced-motion:reduce){*{transition-duration:.01ms!important}}
+
+/* ═══════════════════════════════════════════════════════════════
+   ТВ-РЕЖИМ (?mode=tv): ни одного элемента интерфейса
+   Корневой класс ставит app/tv.ts. display:none, а не прозрачность:
+   спрятанное не должно ни ловить фокус, ни читаться экранным диктором.
+   ═══════════════════════════════════════════════════════════════ */
+html.tv #hud,html.tv .sheet,html.tv #intro,html.tv #pad,
+html.tv #stickBase,html.tv #stickKnob,html.tv #fps,html.tv #caption{display:none!important}
+html.tv,html.tv *{cursor:none!important}
+
+/* ── экранное меню ТВ: крупно, для 10-футового интерфейса ── */
+#tvMenu{
+  position:absolute;z-index:25;top:50%;left:50%;transform:translate(-50%,-50%);
+  width:min(92vw,720px);max-height:90vh;overflow:hidden;
+  display:none;flex-direction:column;gap:10px;
+  padding:28px 30px;border-radius:24px;
+  background:rgba(9,14,22,.86);border:1px solid rgba(180,214,255,.22);
+  box-shadow:0 18px 60px rgba(0,0,0,.55);
+}
+#tvMenu.open{display:flex}
+#tvMenu h2{font-size:18px;letter-spacing:.24em;text-transform:uppercase;
+  color:rgba(219,232,247,.7);font-weight:600;margin-bottom:6px}
+#tvMenuList{display:flex;flex-direction:column;gap:8px}
+.tvi{
+  display:flex;align-items:center;justify-content:space-between;gap:24px;
+  min-height:60px;padding:12px 22px;border-radius:14px;
+  background:rgba(255,255,255,.06);border:2px solid transparent;color:var(--ink);
+  font:500 22px/1.2 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;text-align:left;
+}
+.tvi b{font-weight:600;color:var(--accent);white-space:nowrap}
+/* Фокус виден с дивана: рамка, подсветка и лёгкое увеличение */
+.tvi:focus,.tvi:focus-visible{
+  outline:3px solid var(--accent);outline-offset:3px;
+  background:rgba(255,217,160,.16);border-color:rgba(255,217,160,.45);
+  transform:scale(1.02);
+}
+.tvhint{margin-top:6px;font-size:15px;letter-spacing:.06em;color:rgba(219,232,247,.55)}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}

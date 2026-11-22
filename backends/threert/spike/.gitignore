@@ -1,0 +1,5 @@
+# build output (threert), generated test asset (node tools/make-png.mjs), never install @threert/* here
+.threert/
+dist/
+node_modules/
+assets/tex2048.png

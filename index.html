@@ -13,20 +13,11 @@
 <link rel="icon" href="icons/icon-192.png" sizes="192x192" type="image/png">
 <link rel="apple-touch-icon" href="icons/icon-192.png">
 <meta name="description" content="Интерактивный цилиндр О'Нилла: полёт внутри вращающейся станции">
-<script type="importmap">
-{
-  "imports": {
-    "three": "https://cdn.jsdelivr.net/npm/three@0.165.0/build/three.module.js",
-    "three/examples/jsm/": "https://cdn.jsdelivr.net/npm/three@0.165.0/examples/jsm/",
-    "three-mesh-bvh": "https://cdn.jsdelivr.net/npm/three-mesh-bvh@0.9.14/build/index.module.js",
-    "three-gpu-pathtracer": "https://cdn.jsdelivr.net/npm/three-gpu-pathtracer@0.0.23/build/index.module.js"
-  }
-}
-</script>
 </head>
 <body>
 
 <div id="stage"></div>
+<div id="loader" aria-live="polite">сборка станции…</div>
 
 <div id="hud">
   <div id="brand"><b>ВАВИЛОН-5</b><i id="ver"></i><br>Сады · цилиндр О'Нилла</div>
@@ -106,6 +97,7 @@
   <div class="grip"></div>
   <div class="btn close" id="setClose"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></div>
   <h2>Настройки</h2>
+  <button id="androidUpdate" type="button" hidden>Проверить обновления</button>
   <div class="tab on" data-tab="0">
   <div class="row">
     <label>Качество<small>Плотность мира, детализация крон, следы домов</small></label>
@@ -158,6 +150,10 @@
   <div class="row">
     <label>Шумоподавитель<small id="sDnV">À-Trous + G-буфер</small></label>
     <select id="sDn"></select>
+  </div>
+  <div class="row">
+    <label for="sPathClean">Очистка пути WebGPU</label>
+    <select id="sPathClean"><option value="oidn">Open Image Denoise</option><option value="atrous">À-trous</option></select>
   </div>
   <div class="row" id="sAArow3">
     <label>Масштаб рендера<small id="sAAcost">—</small></label>
@@ -330,8 +326,30 @@
       <p>Журчание слышно только вблизи русла</p>
       <p>Птицы поют днём в парках и полях</p>
     </div>
+    <div>
+      <h3>Клавиши</h3>
+      <div id="helpKeys"></div>
+    </div>
+    <div>
+      <h3>Пульт и геймпад</h3>
+      <p>← → — соседняя точка обзора, перелёт</p>
+      <p>OK (A) — авто-тур, долгое OK — меню</p>
+      <p>↑ ↓ — фаза освещения</p>
+      <p>Меню (Start) — настройки, Назад (B) — закрыть</p>
+      <p>Play/Pause — пауза</p>
+      <p>Стики геймпада — полёт и обзор, курки — вверх и вниз</p>
+      <p>Без интерфейса, как заставка: адрес с <kbd>?mode=tv</kbd></p>
+    </div>
   </div>
 </section>
+
+<!-- Экранное меню ТВ-режима: только D-pad, открывается действием «настройки» -->
+<div id="tvMenu" role="dialog" aria-modal="true" aria-labelledby="tvMenuTitle" hidden>
+  <h2 id="tvMenuTitle">Настройки</h2>
+  <div id="tvMenuList" role="menu" aria-labelledby="tvMenuTitle"></div>
+  <p class="tvhint">↑ ↓ — выбор · OK — изменить · Назад — закрыть</p>
+  <div id="tvMenuStatus" class="sr" aria-live="polite"></div>
+</div>
 
 <div id="intro">
   <div class="eyebrow">Цилиндр О'Нилла · 3 км × 1 км</div>
@@ -345,6 +363,6 @@
   Браузер не смог создать графический контекст. Откройте страницу в свежем Chrome, Safari или Firefox и проверьте, что аппаратное ускорение включено.
 </div></div>
 
-<script type="module" src="js/main.js"></script>
+<script type="module" src="app/main.ts"></script>
 </body>
 </html>

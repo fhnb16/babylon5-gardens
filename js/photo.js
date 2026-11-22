@@ -3,8 +3,9 @@ import { CONFIG } from './config.js';
 /* SMAA берём готовым проходом three. Своя копия таблиц и шейдеров прожила
    недолго и дважды подвела: сперва я забыл перенести `defines`, и шейдер не
    компилировался, потом разошлась версия зависимости. Здесь всё это чинится
-   вместе с three. */
-import { SMAAPass } from 'three/examples/jsm/postprocessing/SMAAPass.js';
+   вместе с three. Путь `three/addons/…` — официальный псевдоним примеров
+   в карте exports пакета (r187), а не путь внутрь его каталогов. */
+import { SMAAPass } from 'three/addons/postprocessing/SMAAPass.js';
 
 /* ═══════════════════════════════════════════════════════════════════════════
    ТРАССИРОВКА ДЛЯ ФОТО-РЕЖИМА
@@ -261,7 +262,9 @@ const AO_FRAG = `
                 /* Цвет берём из альбедо корпуса по UV точки попадания.
                    Мир вращается — угол снимаем поворотом назад. */
                 float th = atan( hw.x, hw.y ) - uWorldRot;
-                float uu = fract( 0.5 - th / 6.28318531 );
+                /* развёртка корпуса: u = θ/2π (v2.12.0; было 0.5 − θ/2π —
+                   корпус под углом π − θ, та же ошибка, что в отражении воды) */
+                float uu = fract( th / 6.28318531 );
                 float vv = hw.z / uHullL + 0.5;
                 farCol = texture2D( tHull, vec2( uu, vv ) ).rgb;
                 farGot = 1.0;
@@ -1159,8 +1162,10 @@ export function resizePost(renderer) {
       depthBuffer: false, minFilter: THREE.LinearFilter, magFilter: THREE.LinearFilter
     })];
     smaaPass?.dispose?.();
-    smaaPass = new SMAAPass(s.x, s.y);
-    smaaPass.setSize?.(s.x, s.y);
+    /* С r175 конструктор аргументов не принимает: размер задаёт только
+       setSize. Вызов без ?. — промах здесь должен быть громким. */
+    smaaPass = new SMAAPass();
+    smaaPass.setSize(s.x, s.y);
   } else if (smaaPass) {
     smaaPass.dispose?.();
     smaaPass = null;

@@ -63,7 +63,7 @@ for (const tp of CONFIG.TP) allOk = report(tp) && allOk;
 
 /* Проверка замысла бесполезна, если наведение реализовано неверно: раньше
    все точки были рассчитаны правильно, а камера смотрела ровно назад. */
-const { tpVec, aimAt } = await import('./js/util.js');
+const { tpVec, aimAt } = await import('./js/controls.js');
 const { stationUp } = await import('./js/controls.js');
 const THREE = await import('three');
 const up = new THREE.Vector3(), q = new THREE.Quaternion(), fwd = new THREE.Vector3();

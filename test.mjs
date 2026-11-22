@@ -1,20 +1,162 @@
 /* Самопроверка проекта. Запуск:  npm i -D three && node test.mjs
    Проверяет то, что молча ломается: инъекции в шейдер, согласование
-   углов ферм с тенями, границы сборки мира. */
+   углов ферм с тенями, границы сборки мира.
+
+   С v2.12.0 мир строит ядро: core buildScene() → backends/three
+   createThreeWorld(). Прежние js/world.js, js/structures.js, js/textures.js,
+   js/util.js ушли из приложения (эталон для тестов паритета —
+   test/legacy-oracle/). Проверки, которые собирали мир прежним кодом, идут
+   через тонкий слой совместимости ниже (buildWorld/buildStructures/worldMats/
+   structMats/hullU поверх ThreeWorld); проверки исходника читают теперь тот
+   код, где живёт логика (core/, backends/three/, js/controls.js). Node 24
+   снимает типы с .ts сам, поэтому ядро и адаптер импортируются напрямую. */
 import './test/dom-stub.mjs';
-import { readFileSync, existsSync } from 'node:fs';
+import { readFileSync, existsSync, readdirSync } from 'node:fs';
 import * as THREE from 'three';
 import { CONFIG } from './js/config.js';
-import { D2R, TAU, zoneAt, mulberry32, clamp as clampNum, tpVec, aimAt, natural,
-  cityBlock, cityCenter, cellInfo, cellUsable, pickFloors, turnToward, clampPitch,
-  surfacePos, mergeGeos, rod } from './js/util.js';
-import { buildWorld, worldMats, hullU, uvSelfTest, patchAllRoughness,
-  updateTreeLod, displaceHills } from './js/world.js';
-import { buildStructures, structMats, updateStructures,
-  liftSeat, liftCount2, setLiftInside } from './js/structures.js';
+import { D2R, TAU, clamp as clampNum } from './core/math/scalar.ts';
+import { zoneAt } from './core/layout/zones.ts';
+import { mulberry32 } from './core/rng.ts';
+import { natural as coreNatural } from './core/math/color.ts';
+import { cityBlock, cityCenter, cellInfo as coreCellInfo, cellUsable, pickFloors } from './core/layout/city.ts';
+import { placeHills } from './core/layout/hills.ts';
+import { buildScene } from './core/scene/build.ts';
+import { lightingAt } from './core/lighting/phases.ts';
+import { createThreeWorld } from './backends/three/adapt/sceneGraph.ts';
 import { fieldAt, waterLevel, windLevel, humLevel, birdLevel } from './js/audio.js';
-import { stationUp } from './js/controls.js';
+import { stationUp, tpVec, aimAt, turnToward, clampPitch, surfacePos } from './js/controls.js';
 import { tracePlan } from './js/photo.js';
+
+/* ═══ Слой совместимости: прежний API мира поверх core + backends/three ═══
+   buildWorld(group, r, q) кладёт в group объекты мира (материалы 'w.'),
+   buildStructures(group, r, q) — конструкции ('s.') того же мира (или нового,
+   если мир этого качества не собран). worldMats/structMats/hullU — живые
+   ссылки на материалы и униформы последнего собранного мира. Параметры мира
+   берутся из CONFIG (SEED, SEASON, SATURATION, GREEN_K), как в app/scene.ts. */
+let lastWorld = null, lastScene = null;
+const worldParams = q => ({ seed: CONFIG.SEED >>> 0, quality: q, season: CONFIG.SEASON,
+  saturation: CONFIG.SATURATION, greenK: CONFIG.GREEN_K });
+function coreWorld(q) {
+  lastScene = buildScene(worldParams(q));
+  lastWorld = createThreeWorld(lastScene, fakeRenderer, { textures: 'none' });
+  lastWorld.__scene = lastScene;
+  return lastWorld;
+}
+const firstMat = o => (Array.isArray(o.material) ? o.material[0] : o.material);
+const partOf = (o, pre) => !!o.material && String(firstMat(o).name).startsWith(pre);
+function attachParts(group, world, pre, key) {
+  for (const o of group.userData[key] || []) group.remove(o);
+  const parts = world.stationGroup.children.filter(o => partOf(o, pre));
+  for (const o of parts) group.add(o);
+  group.userData[key] = parts;
+  return parts;
+}
+function buildWorld(group, _renderer, quality) {
+  const w = coreWorld(quality);
+  group.userData.__world = w;
+  const parts = attachParts(group, w, 'w.', '__worldParts');
+  const hd = CONFIG.HILL.dipDepth;
+  return {
+    world: w, scene: lastScene, drawn: parts.length,
+    hullMat: w.materials.get('w.hull'),
+    hills: lastScene.hull.hills.map(h => ({ t: h.theta, z: h.z, r: h.r, h: h.rise < 0 ? -h.rise / hd : h.rise,
+      dip: h.rise < 0, ax: h.ax, rot: h.rot })),
+    ponds: lastScene.hull.hills.filter(h => h.pond).map(h => ({ t: h.theta, z: h.z, r: h.pond.r, ax: h.ax, rot: h.rot }))
+  };
+}
+function buildStructures(group, _renderer, quality) {
+  let w = group.userData.__world;
+  if (!w || w.__scene.params.quality !== quality) w = coreWorld(quality);
+  group.userData.__world = w;
+  lastWorld = w; lastScene = w.__scene;
+  attachParts(group, w, 's.', '__structParts');
+}
+const matsBy = (w, pred) => [...w.materials.entries()].filter(([id]) => pred(id)).map(([, m]) => m);
+const worldMats = {
+  get hull() { return lastWorld?.materials.get('w.hull') ?? null; },
+  get blob() { return lastWorld?.materials.get('w.blob') ?? null; },
+  get print() { return lastWorld?.materials.get('w.print') ?? null; },
+  get nav() { return lastWorld?.materials.get('w.nav') ?? null; },
+  get bld() { return lastWorld ? matsBy(lastWorld, id => id.startsWith('w.bld.wall.')) : []; },
+  get trafficBody() { return lastWorld?.materials.get('w.traffic.body') ?? null; },
+  get trafficLamp() { return lastWorld?.materials.get('w.traffic.lamp.front') ?? null; },
+  get trafficRear() { return lastWorld?.materials.get('w.traffic.lamp.rear') ?? null; }
+};
+const structMats = {
+  get sun() { return lastWorld?.materials.get('s.sun') ?? null; },
+  get beacon() { return lastWorld?.materials.get('s.tower.beacon') ?? null; },
+  get liftGlass() { return lastWorld?.materials.get('s.lift.glass') ?? null; },
+  /* стёкла, которые палитра ведёт как окна ×0.45 (башня, торцы) */
+  get glass() {
+    return lastWorld ? [...lastWorld.materials.entries()].filter(([id]) => {
+      const d = lastScene.materials[id];
+      return d?.emissiveDrive?.param === 'windowEmission' && d.emissiveDrive.scale === 0.45;
+    }).map(([, m]) => m) : [];
+  }
+};
+const hullU = new Proxy({}, { get: (_, k) => lastWorld?.hullUniforms[k] });
+const updateStructures = dt => lastWorld.dynamics.step(dt, { traffic: false });
+const liftSeat = (k, p, d) => lastWorld.liftSeat(k, p, d);
+const liftCount2 = () => lastWorld.liftCount();
+const setLiftInside = on => lastWorld.setLiftInside(on);
+/** раскладка крон по уровням: камера в мировых координатах */
+function updateTreeLod(camWorld, group, force) {
+  const camS = group.worldToLocal(camWorld.clone());
+  for (const l of lastWorld.lods) l.update(camWorld, camS, force);
+}
+const cellInfo = (i, j) => coreCellInfo(CONFIG.SEED >>> 0, i, j);
+/** список холмов, как прежний displaceHills (корпус продавливает core hullGeo по нему же) */
+const displaceHills = (_geo, R, L, rnd) => placeHills(rnd, R, L);
+/** natural() в THREE.Color (ядро пишет линейные rgb — то же, что setHSL three) */
+const natural = (hex, k, out = new THREE.Color()) => { const c = coreNatural(hex, k); return out.setRGB(c[0], c[1], c[2]); };
+/** Самотест развёртки корпуса: u вершины = θ/2π (ядро запекает развёртку) */
+function uvSelfTest(geo) {
+  const p = geo.attributes.position, u = geo.attributes.uv;
+  let worst = 0;
+  for (let k = 0; k < p.count; k += 7) {
+    let th = Math.atan2(p.getX(k), p.getY(k));
+    if (th < 0) th += TAU;
+    let uu = u.getX(k);
+    uu -= Math.floor(uu);
+    const d = Math.abs(uu - th / TAU);
+    worst = Math.max(worst, Math.min(d, 1 - d));
+  }
+  return worst < 0.02;
+}
+/** Корпус мира: роль 'hull' (FrontSide, лицом внутрь) */
+const hullOf = group => group.children.find(o => o.name === 'hull');
+/* Исходники, где теперь живёт прежняя логика */
+const srcOf = (...files) => files.map(f => readFileSync(new URL('./' + f, import.meta.url), 'utf8')).join('\n');
+const dirTs = d => readdirSync(new URL('./' + d + '/', import.meta.url), { recursive: true })
+  .map(f => d + '/' + String(f).replace(/\\/g, '/')).filter(f => f.endsWith('.ts') && !f.includes('/test/'));
+/** прежний js/world.js: сцена мира, раскладка, формы, адаптер и GLSL-патчи */
+const WSRC = srcOf(...dirTs('core/scene'), ...dirTs('core/layout'), ...dirTs('backends/three'));
+/** прежний js/textures.js: генераторы текстур ядра */
+const TSRC = srcOf(...dirTs('core/textures'));
+/** прежний js/structures.js: фрагмент конструкций и их геометрия */
+const SSRC = srcOf('core/scene/structures.ts', 'core/scene/structuresDynamics.ts', ...dirTs('core/geometry'),
+  ...dirTs('backends/three'));
+/** прежний js/util.js: математика ядра, раскладка, помощники камеры */
+const USRC = srcOf(...dirTs('core/math'), ...dirTs('core/layout'), 'core/rng.ts', 'js/controls.js');
+/* Исходник приложения. main.js разобран по app/*.ts (юнит B4); проверки,
+   которые раньше читали main.js, читают все модули приложения разом.
+   Порядок — как в прежнем main.js: часть проверок смотрит на взаимное
+   расположение строк. app/workers/ — не часть приложения, а потоки. */
+const APP_FILES = [
+  'app/cfg.ts', 'app/dom.ts', 'app/state.ts', 'app/prefs.ts', 'app/boot.ts',
+  'app/scene.ts', 'app/palette.ts', 'app/flight.ts', 'app/tour.ts',
+  'app/ride.ts', 'app/photo-mode.ts', 'app/path-session.ts', 'app/shot.ts', 'app/ui/sheets.ts', 'app/ui/hud.ts',
+  'app/ui/teleport-menu.ts', 'app/ui/settings.ts', 'app/ui/help.ts', 'app/ui/tv-overlay.ts',
+  'app/perf.ts', 'app/loop.ts', 'app/commands.ts', 'app/tv-mode.ts', 'app/tv.ts',
+  'app/input/actions.ts', 'app/input/keyboard.ts', 'app/input/remote.ts',
+  'app/input/pointer.ts', 'app/input/touch.ts', 'app/input/gamepad.ts', 'app/main.ts'
+];
+const readSrc = f => readFileSync(new URL('./' + f, import.meta.url), 'utf8');
+const readApp = () => APP_FILES.map(readSrc).join('\n');
+/** Все .ts приложения (кроме потоков и объявлений) — чтобы список выше не отстал */
+const listAppTs = () => readdirSync(new URL('./app/', import.meta.url), { recursive: true })
+  .map(f => 'app/' + String(f).replace(/\\/g, '/'))
+  .filter(f => f.endsWith('.ts') && !f.endsWith('.d.ts') && !f.startsWith('app/workers/'));
 
 
 /* Инстансы разрезаны на секторы ради отсечения по кадру, поэтому искать их
@@ -42,11 +184,22 @@ let fails = 0;
 const ok = (c, m) => { console.log((c ? '  ok  ' : '  FAIL') + '  ' + m); if (!c) fails++; };
 const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
 
+/* ══ 0. Приложение разобрано по app/ ══════════════════════════════════ */
+{
+  ok(!existsSync(new URL('./js/main.js', import.meta.url)), 'main.js разобран по app/* — второго входа нет');
+  const html = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
+  ok(html.includes('<script type="module" src="app/main.ts">'), 'Вход страницы — app/main.ts');
+  const listed = new Set(APP_FILES), onDisk = listAppTs();
+  const lost = onDisk.filter(f => !listed.has(f)), gone = APP_FILES.filter(f => !onDisk.includes(f));
+  ok(!lost.length && !gone.length,
+     `Список модулей приложения в test.mjs совпадает с app/ (${[...lost, ...gone].join(', ') || 'все на месте'})`);
+}
+
 /* ══ 1. Инъекции в шейдер корпуса реально попали в цель ══════════════════ */
 {
   const group = new THREE.Group();
   const res = buildWorld(group, fakeRenderer, 'LOW');
-  const hull = group.children.find(o => o.material?.side === THREE.BackSide);
+  const hull = hullOf(group);
   ok(!!hull, 'Корпус собран');
 
   const lib = THREE.ShaderLib.physical;
@@ -306,7 +459,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   /* R = вода, G = растительность, B = покрытие. Смешанный цвет вроде #3366ff
      подмешивал 20% воды в каждую городскую площадь: асфальт бликовал днём,
      а ночью весь сектор заливало кремовым. */
-  const src = readFileSync(new URL('./js/textures.js', import.meta.url), 'utf8');
+  const src = TSRC;
   const fills = [...src.matchAll(/[ms]\.(?:fill|stroke)Style = '(#[0-9a-f]{6})'/g)].map(x => x[1]);
   const maskFills = [...src.matchAll(/\bm\.(?:fill|stroke)Style = '(#[0-9a-f]{6})'/g)].map(x => x[1]);
   /* Важно не «полная яркость», а отсутствие протечки: в заливке маски
@@ -333,7 +486,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
     && o.count <= CONFIG.COUNT.hills[0] && o.geometry.attributes.position.count < 200);
   ok(!hillMesh, 'Отдельных мешей-холмов нет — рельеф несёт сам корпус');
 
-  const hullMesh = group.children.find(o => o.material?.side === THREE.BackSide);
+  const hullMesh = hullOf(group);
   const hpos = hullMesh.geometry.attributes.position;
   let minR = 1e9, maxRad = 0;
   const vv = new THREE.Vector3();
@@ -475,8 +628,8 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
 
 /* ══ 3e1. Городская текстура — план, а не нарисованные дома ════════════ */
 {
-  const src = readFileSync(new URL('./js/textures.js', import.meta.url), 'utf8');
-  const city = src.slice(src.indexOf('── ГОРОДА'), src.indexOf('── РЕКИ'));
+  const src = TSRC;
+  const city = src.slice(src.indexOf('── cities'), src.indexOf('── rivers'));
 
   /* Признак старой ошибки: дробление квартала на случайные серые ячейки,
      изображавшие застройку сверху. Дома должны быть только объёмными. */
@@ -501,7 +654,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   globalThis.__canvasStacks.length = 0;
   const g = new THREE.Group();
   buildWorld(g, fakeRenderer, 'LOW');
-  ok(g.children.some(o => o.material?.side === THREE.BackSide), 'Корпус с новой текстурой собран');
+  ok(!!hullOf(g), 'Корпус с новой текстурой собран');
 
   /* Каждый save с обрезкой обязан быть закрыт. Незакрытый — тихая ошибка:
      следующая обрезка пересекается с предыдущей, и всё дальнейшее рисование
@@ -582,8 +735,8 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   ok(bldSpill === 0, `Ни один дом не стоит на чужом биоме (нарушений ${bldSpill})`);
 
   /* текстура и геометрия обязаны читать одну функцию */
-  const tsrc = readFileSync(new URL('./js/textures.js', import.meta.url), 'utf8');
-  const wsrc = readFileSync(new URL('./js/world.js', import.meta.url), 'utf8');
+  const tsrc = TSRC;
+  const wsrc = WSRC;
   for (const fn of ['cityBlock', 'cityCenter', 'cellInfo', 'cellUsable']) {
     ok(tsrc.includes(fn) && wsrc.includes(fn), `И текстура, и геометрия используют ${fn}`);
   }
@@ -602,7 +755,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
 
 /* ══ 3e2. Вода: глубина, поток, анизотропия ════════════════════════════ */
 {
-  const src = readFileSync(new URL('./js/textures.js', import.meta.url), 'utf8');
+  const src = TSRC;
   /* канал R реки должен иметь несколько уровней — это глубина, а не флаг */
   const levels = [...src.matchAll(/stroke\(m,[^,]+,\s*'(#[0-9a-f]{6})'/g)].map(x => x[1]);
   const reds = [...new Set(levels.map(c => parseInt(c.slice(1, 3), 16)))].sort((a, b) => a - b);
@@ -610,7 +763,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   ok(reds[0] > 0 && reds[reds.length - 1] === 255, 'Отмель слабее нуля, стрежень на максимуме');
 
   /* волны идут поперёк русла — иначе блик от линейного солнца не вытянется */
-  const wsrc = readFileSync(new URL('./js/world.js', import.meta.url), 'utf8');
+  const wsrc = WSRC;
   const waves = [...wsrc.matchAll(/dot\( P, vec2\(\s*(-?[\d.]+),\s*(-?[\d.]+)\s*\)/g)]
     .map(x => [Math.abs(+x[1]), Math.abs(+x[2])]);
   ok(waves.length >= 5, `Волновых составляющих: ${waves.length}`);
@@ -659,7 +812,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
 
   const html2 = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
   ok(html2.includes('id="sSat"'), 'Насыщенность настраивается слайдером');
-  const msrc2 = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+  const msrc2 = readApp();
   ok(/sSat\.onchange/.test(msrc2) && !/sSat\.oninput = \(\) => \{[\s\S]{0,80}rebuild/.test(msrc2),
      'Пересборка мира идёт на отпускании слайдера, а не на каждый пиксель');
   ok(/prefs\.set\('sat'/.test(msrc2), 'Насыщенность сохраняется');
@@ -787,17 +940,17 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
 
   /* setHSL по умолчанию работает в ЛИНЕЙНОМ пространстве — цвет выходит
      заметно светлее задуманного. Требуем явного указания sRGB. */
-  const wsrc = readFileSync(new URL('./js/world.js', import.meta.url), 'utf8');
-  const tsrc0 = readFileSync(new URL('./js/textures.js', import.meta.url), 'utf8');
+  const wsrc = WSRC;
+  const tsrc0 = TSRC;
   const hslCalls = (wsrc + tsrc0).split('setHSL(').slice(1)
     .map(s => s.slice(0, s.indexOf('));')));
   ok(hslCalls.every(s => /SRGBColorSpace/.test(s)),
      `Все setHSL (${hslCalls.length}) задают цвет в sRGB, а не в рабочем линейном пространстве`);
 
   /* дорожки: плавная кривая вместо ломаной */
-  const tsrc = readFileSync(new URL('./js/textures.js', import.meta.url), 'utf8');
+  const tsrc = TSRC;
   ok(/quadraticCurveTo/.test(tsrc), 'Линии ведутся кривыми, а не отрезками');
-  const parks = tsrc.slice(tsrc.indexOf('── ПАРКИ'), tsrc.indexOf('── ГОРОДА'));
+  const parks = tsrc.slice(tsrc.indexOf('── parks'), tsrc.indexOf('── cities'));
   ok(!/px \+= \(rnd\(\) - \.5\)/.test(parks), 'Случайного блуждания в дорожках больше нет');
   ok(/smoothLine\(a, pts\)/.test(parks), 'Дорожка рисуется плавной линией');
   ok(/Math\.sin\(py \* fr0/.test(parks) && /Math\.sin\(py \* fr1/.test(parks),
@@ -831,7 +984,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   ok(P.dark < 1 - inShadow * 0.6,
      `Тень затемняет до ${(P.dark * 100) | 0}%, а в ней остаётся ${(inShadow * 100) | 0}% света от полусферы`);
   ok(P.dark > 0.4, 'Но тень всё же читается, а не еле заметна');
-  const tsrc3 = readFileSync(new URL('./js/textures.js', import.meta.url), 'utf8');
+  const tsrc3 = TSRC;
   ok(/a2 \* 1\.25/.test(tsrc3), 'Кайма усилена умеренно — раньше она добивала пятно до чёрного');
 
   /* на высоком следы домов — отдельный инстанс, на низком их нет */
@@ -880,9 +1033,9 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   for (const k of P) ok(Object.keys(CONFIG[k]).sort().join() === keys,
      `Фаза ${k} описана тем же набором полей`);
 
-  const msrc = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+  const msrc = readApp();
   ok(/phaseTo \+= 1/.test(msrc), 'Кнопка двигает фазу на одну вперёд, а не переключает день/ночь');
-  ok(/phase = Math\.min\(phaseTo, phase \+ dt \/ CONFIG\.FADE\)/.test(msrc),
+  ok(/phase = Math\.min\((?:app\.)?phaseTo, (?:app\.)?phase \+ dt \/ CONFIG\.FADE\)/.test(msrc),
      'Переход идёт дробной фазой — плавно, а не скачком');
   ok(/phase -= CONFIG\.PHASES\.length/.test(msrc), 'Счётчики фаз не растут бесконечно');
   ok(!/dayMix|dayTarget/.test(msrc), 'Старой двухфазной модели не осталось');
@@ -890,7 +1043,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
      читались как «кнопка не работает». */
   ok(CONFIG.FADE >= 2 && CONFIG.FADE <= 5,
      `Переход занимает ${CONFIG.FADE} с — виден, но отзывчив`);
-  ok(/phaseTo = Math\.floor\(phase\) \+ 1/.test(msrc),
+  ok(/phaseTo = Math\.floor\((?:app\.)?phase\) \+ 1/.test(msrc),
      'Цель — следующая фаза от текущей: быстрые нажатия не копят очередь');
   /* авто-цикл прибавлять цель может: он срабатывает по таймеру, когда
      переход уже завершён, и очереди не создаёт */
@@ -902,11 +1055,11 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
      `Стоянка в фазе ${CONFIG.AUTO_CYCLE_PERIOD} с заметно длиннее перехода`);
 
   /* контакт: темнеет не только земля, но и низ самого объекта */
-  const tsrc = readFileSync(new URL('./js/textures.js', import.meta.url), 'utf8');
+  const tsrc = TSRC;
   ok(/const foot = Math\.round\( ?H \* 0\.13 ?\)/.test(tsrc),
      'У фасада есть градиент затемнения по нижней части стены');
-  const wsrc = readFileSync(new URL('./js/world.js', import.meta.url), 'utf8');
-  ok(/trunkGeo\.setAttribute\('color'/.test(wsrc), 'Комель ствола темнеет к земле');
+  const wsrc = WSRC;
+  ok(/function trunkGeo[\s\S]{0,400}g\.color = tc/.test(wsrc), 'Комель ствола темнеет к земле');
 
   /* численно: низ ствола заметно темнее верха */
   const g = new THREE.Group();
@@ -996,7 +1149,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   ok(split === 0, 'Общие вершины смещены согласованно — крона не расходится по швам');
 
   /* шелест листвы в шейдере */
-  const wsrc3 = readFileSync(new URL('./js/world.js', import.meta.url), 'utf8');
+  const wsrc3 = WSRC;
   ok(/transformed \+= normalize\( transformed \) \* sin\( uTime/.test(wsrc3),
      'У каждой вершины кроны своя фаза — листва шелестит, а не качается целиком');
   ok(!/transformed \+= normal \*/.test(wsrc3),
@@ -1089,7 +1242,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   /* Холмы теперь несёт сам корпус, поэтому проверяем ЕГО: под городом и над
      руслом поверхность обязана остаться ровной, иначе дома встанут на склон,
      а река потечёт в гору. */
-  const hullM = group.children.find(o => o.material?.side === THREE.BackSide);
+  const hullM = hullOf(group);
   const hp = hullM.geometry.attributes.position;
   const vv2 = new THREE.Vector3();
   let cityBump = 0, riverBump = 0, worstCity = 0, worstRiver = 0;
@@ -1238,7 +1391,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   }
   ok(worstTilt > 0.8, `Горизонт нигде не завален (худшее совпадение верха ${worstTilt.toFixed(2)})`);
 
-  const msrc1 = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+  const msrc1 = readApp();
   ok(!/new THREE\.Object3D\(\)/.test(msrc1),
      'Наведение больше не идёт через обычный Object3D');
   ok(/aimAt\(/.test(msrc1), 'Используется камерный базис Matrix4.lookAt');
@@ -1262,15 +1415,14 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   ok(!/Euler/.test(csrc),
      'Углы Эйлера от мирового +Y убраны — иначе крен защёлкивался бы после посадки');
   ok(/levelCamera/.test(csrc) && /makeBasis/.test(csrc), 'Крен снимается перестроением базиса');
-  const msrc0 = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+  const msrc0 = readApp();
   ok(!/_o\.up\.set\(0, 1, 0\)/.test(msrc0), 'Перелёт больше не использует мировой верх');
   ok((msrc0.match(/stationUp\(/g) || []).length >= 2, 'И посадка, и перелёт берут верх станции');
 }
 
 /* ══ 3j. Новые возможности и починенные баги ═══════════════════════════ */
 {
-  const msrc = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
-  const csrc = readFileSync(new URL('./js/controls.js', import.meta.url), 'utf8');
+  const msrc = readApp();
   const html = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
   const css = readFileSync(new URL('./style.css', import.meta.url), 'utf8');
   const asrc = readFileSync(new URL('./js/audio.js', import.meta.url), 'utf8');
@@ -1294,7 +1446,11 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   ok(/lowpass/.test(asrc) && /3200/.test(asrc), 'Общий срез убирает шипение выше 3.2 кГц');
 
   /* --- облака в LOW --- */
-  ok(/clouds\.visible = q !== 'LOW'/.test(msrc), '§14: в пресете LOW облака выключаются');
+  /* облака теперь в описании мира (core/scene/ambient.ts): на LOW их нет вовсе */
+  ok(/if \(params\.quality !== 'LOW'\)/.test(srcOf('core/scene/ambient.ts'))
+     && !buildScene(worldParams('LOW')).billboards.some(b => b.role === 'clouds')
+     && buildScene(worldParams('HIGH')).billboards.some(b => b.role === 'clouds'),
+     '§14: в пресете LOW облака выключаются');
 
   /* --- сохранение всех настроек --- */
   const keys = [...msrc.matchAll(/prefs\.set\('(\w+)'/g)].map(x => x[1]);
@@ -1310,19 +1466,21 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   ok(typeof CONFIG.STICK_RADIUS === 'object'
      && CONFIG.STICK_RADIUS.portrait > CONFIG.STICK_RADIUS.landscape,
      `§12: в портрете джойстик крупнее (${CONFIG.STICK_RADIUS.portrait} против ${CONFIG.STICK_RADIUS.landscape} px)`);
-  ok(/innerHeight >= innerWidth/.test(csrc), 'Ориентация определяется по пропорциям экрана');
-  ok(/base\.style\.width = base\.style\.height/.test(csrc), 'Размер базы задаётся из того же радиуса');
+  /* джойстик переехал из controls.js в app/input/touch.ts (юнит B4) */
+  const touchSrc = readSrc('app/input/touch.ts');
+  ok(/innerHeight >= innerWidth/.test(touchSrc), 'Ориентация определяется по пропорциям экрана');
+  ok(/base\.style\.width = base\.style\.height/.test(touchSrc), 'Размер базы задаётся из того же радиуса');
 
   /* --- фото-режим --- */
   ok(/toBlob/.test(msrc), 'Снимок берётся через toBlob');
   const mCode = msrc.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
   ok(!/preserveDrawingBuffer/.test(mCode),
      'preserveDrawingBuffer не включён — снимок берётся сразу после отрисовки');
-  ok(msrc.lastIndexOf('if (shotPending)') > msrc.indexOf('renderer.render(scene, camera);'),
+  ok(msrc.lastIndexOf('if (app.shotPending)') > msrc.indexOf('renderer.render(scene, camera);'),
      'Захват стоит после render, иначе буфер уже очищен');
   /* Захватов теперь два — в ветке пути и в ветке экранных лучей; проверяем
      тот, что относится к экранной трассировке. */
-  ok(msrc.indexOf('if (shotPending)', msrc.indexOf('traceStep()')) > msrc.indexOf('traceStep()'),
+  ok(msrc.indexOf('if (app.shotPending)', msrc.indexOf('traceStep()')) > msrc.indexOf('traceStep()'),
      'В режиме трассировки захват идёт после показа накопленного');
   ok(/body\.clean #topbar/.test(css), 'В фото-режиме HUD скрывается');
   ok(html.includes('id="bShot"') && html.includes('id="bPhotoExit"'), 'Есть затвор и выход');
@@ -1391,8 +1549,8 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
      давало обращение к переменной до инициализации и роняло трассировку */
   ok(!/^\s\sconst S = /m.test(psrc2), 'Имя сцены не затеняется внутри функций');
   ok(/setAmbientShare/.test(psrc2), 'Доля рассеянного света берётся из текущей палитры');
-  const msrc2 = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
-  ok(/setAmbientShare\(hemi\.intensity \/ \(hemi\.intensity \+ lights\.length/.test(msrc2),
+  const msrc2 = readApp();
+  ok(/setAmbientShare\(s\.hemiIntensity \/ \(s\.hemiIntensity \+ n \* s\.pointIntensity/.test(msrc2),
      'Считается как отношение полусферы к полному свету, а не задана числом');
   ok(P.bounce > 0, `Сила переотражения ${P.bounce}`);
 
@@ -1425,20 +1583,24 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
 
   const psrc3 = readFileSync(new URL('./js/photo.js', import.meta.url), 'utf8');
   ok(/export function setHullRef/.test(psrc3), 'Альбедо корпуса и угол мира передаются трассировке');
-  const msrc3 = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
-  ok(/setHullRef\(hullAlbedoTex, worldGroup\.rotation\.z\)/.test(msrc3),
+  const msrc3 = readApp();
+  ok(/setHullRef\(world\.textures\.get\(TEX\.hullAlbedo\), worldGroup\.rotation\.z\)/.test(msrc3),
      'Угол берётся текущий, каждый кадр');
 
   /* шероховатость берётся из альфы кадра, а не из отдельного прохода */
   ok(/float rough = beauty\.a/.test(src), 'Шероховатость читается из альфа-канала кадра');
-  const wsrc = readFileSync(new URL('./js/world.js', import.meta.url), 'utf8');
+  const wsrc = WSRC;
   ok(/export function patchRoughnessAlpha/.test(wsrc), 'Материалы пишут шероховатость в альфу');
+  ok(/roughnessAlpha && !mat\.transparent && \(mat as THREE\.MeshStandardMaterial\)\.isMeshStandardMaterial/.test(wsrc),
+     'Патч ставит адаптер каждому непрозрачному стандартному материалу — пропущенных нет');
   ok(/gl_FragColor\.a = roughnessFactor/.test(wsrc),
      'Пишется именно шероховатость — по ней трассировка отличает воду и металл от травы');
-  const ssrc = readFileSync(new URL('./js/structures.js', import.meta.url), 'utf8');
-  ok((wsrc.match(/patchRoughnessAlpha\(/g) || []).length >= 3
-     && (ssrc.match(/patchRoughnessAlpha\(/g) || []).length >= 3,
-     'Патч применён и к корпусу с домами, и к металлу с бетоном и стеклом');
+  {
+    const w = coreWorld('LOW');
+    const ids = ['w.hull', 'w.bld.wall.0', 'w.bld.roof', 's.metal', 's.tower.concrete', 's.tower.glass'];
+    ok(ids.every(id => w.materials.get(id)?.userData.__ra),
+       'Патч применён и к корпусу с домами, и к металлу с бетоном и стеклом');
+  }
 
   /* туман гасит все три составляющие, а не одну */
   ok(/gi \*= k/.test(src) && /refl \*= k/.test(src),
@@ -1490,7 +1652,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
 
   /* мир обязан замереть */
   ok(/windUniform\.value = 0/.test(src), 'Ветер останавливается: движение обнулило бы накопленное');
-  const msrc = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+  const msrc = readApp();
   ok(/if \(trace\.active\) \{[\s\S]{0,400}?return;/.test(msrc),
      'Пока идёт съёмка, мир не вращается и камера не двигается');
   ok(/fly\.on \|\| trace\.active/.test(msrc), 'Ввод во время съёмки её прекращает');
@@ -1501,21 +1663,24 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
 
   /* На время съёмки все деревья идут на полной детализации: сцена
      неподвижна, а крест из плоскостей выдаёт себя на снимке. */
-  const wsrc2 = readFileSync(new URL('./js/world.js', import.meta.url), 'utf8');
-  ok(/export function setTreeDetailFull/.test(wsrc2), 'Полная детализация включается разом');
-  ok(/if \(treeFull \|\| d2 < near2\)/.test(wsrc2),
+  const wsrc2 = WSRC;
+  ok(/setDetailFull\(on, camera\) \{\s*for \(const l of lods\) l\.setFull\(on\)/.test(wsrc2), 'Полная детализация включается разом');
+  ok(/if \(full \|\| d2 < near2\)/.test(wsrc2),
      'В раскладке она перебивает расстояние');
-  ok(/_lodPrev\.set\(1e9, 1e9, 1e9\)/.test(wsrc2),
+  ok(/setFull\(on\) \{\s*full = !!on;\s*prev\[0\] = prev\[1\] = prev\[2\] = 1e9;/.test(wsrc2),
      'Переключение заставляет пересчитать: иначе порог сдвига камеры отложил бы его');
-  ok(/setTreeDetailFull\(true, camera\.position, worldGroup\);\s*\n\s*startTrace/.test(msrc),
+  const screenStart = readSrc('app/photo-mode.ts').split('export function setTrace(on: boolean)')[1].split('export const stopTracing')[0];
+  const fullDetail = screenStart.indexOf('setDetailFull(true)');
+  ok(fullDetail >= 0 && screenStart.indexOf('startTrace(renderer') > fullDetail &&
+     screenStart.indexOf('setPostOptions({ screenTrace: 0') > fullDetail,
      'Экранная трассировка включает её перед стартом');
-  const iFull = msrc.indexOf("setTreeDetailFull(true, camera.position, worldGroup);",
+  const iFull = msrc.indexOf("setDetailFull(true);",
     msrc.indexOf("showTrace('загрузка библиотеки…')"));
   const iStart = msrc.indexOf('await startPath(', iFull);
   ok(iFull > 0 && iFull < iStart,
      'Путь — тоже, и ДО постройки дерева обхода: оно строится по видимой в этот момент геометрии');
   const exitBody = msrc.slice(msrc.indexOf('function exitPhotoModes'));
-  ok(/setTreeDetailFull\(false/.test(exitBody.slice(0, exitBody.indexOf('\n}'))),
+  ok(/setDetailFull\(false/.test(exitBody.slice(0, exitBody.indexOf('\n}'))),
      'Выход возвращает уровни детализации');
   for (const call of ['setTrace\\(false\\)', 'stopPath\\(\\)', 'forcePost\\(renderer, false\\)',
     'setDenoise\\(false\\)', 'setTraceDebug\\(0\\)']) {
@@ -1541,7 +1706,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
 
 /* ══ 3h3. Сглаживание ══════════════════════════════════════════════════ */
 {
-  const msrc = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+  const msrc = readApp();
   const psrc = readFileSync(new URL('./js/photo.js', import.meta.url), 'utf8');
   const html = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
 
@@ -1596,7 +1761,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   ok(/clamp\( texture2D\( tHist, hUv \)\.rgb, lo, hi \)/.test(psrc),
      'История отбраковывается по соседям — то, что двигалось иначе, заменяется текущим кадром');
   ok(/uHasHist/.test(psrc), 'Первый кадр берётся целиком, без пустой истории');
-  ok(/filter\.includes\('taa'\) \? 0 : windBase/.test(msrc),
+  ok(/filter\.includes\('taa'\) \? 0 : (?:app\.)?windBase/.test(msrc),
      'При TAA ветер приглушается: качающийся лес тянулся бы шлейфом');
   ok(CONFIG.TAA.blend > 0.5 && CONFIG.TAA.blend < 1, `Доля истории ${CONFIG.TAA.blend}`);
 
@@ -1605,8 +1770,12 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   /* SMAA берём готовым проходом three: своя копия таблиц и шейдеров дважды
      подвела — сперва я забыл перенести `defines`, потом разошлась версия
      зависимости. Здесь всё чинится вместе с three. */
-  ok(/import \{ SMAAPass \} from 'three\/examples\/jsm\/postprocessing\/SMAAPass\.js'/.test(psrc),
+  /* r187: примеры берутся через официальный псевдоним `three/addons/…` */
+  ok(/import \{ SMAAPass \} from 'three\/addons\/postprocessing\/SMAAPass\.js'/.test(psrc),
      'SMAA — готовый проход, а не своя копия');
+  /* С r175 конструктор SMAAPass аргументов не принимает: размер — только setSize */
+  ok(/new SMAAPass\(\)/.test(psrc) && /smaaPass\.setSize\(s\.x, s\.y\)/.test(psrc),
+     'SMAA создаётся без аргументов и получает размер через setSize');
   ok(/smaaPass\.render\(renderer, null, smaaRT\[0\]\)/.test(psrc),
      'Проход вызывается напрямую, без композера');
   ok(/smaaPass\.renderToScreen = true/.test(psrc), 'И выводит прямо в канвас');
@@ -1622,7 +1791,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
 
 /* ══ 3h4. Снимок в увеличенном разрешении и FXAA ═══════════════════════ */
 {
-  const msrc = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+  const msrc = readApp();
   const psrc = readFileSync(new URL('./js/photo.js', import.meta.url), 'utf8');
   const S = CONFIG.SHOT;
 
@@ -1674,22 +1843,32 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
 
 /* ══ 3h5. Карты нормалей ═══════════════════════════════════════════════ */
 {
-  const tsrc = readFileSync(new URL('./js/textures.js', import.meta.url), 'utf8');
-  const wsrc = readFileSync(new URL('./js/world.js', import.meta.url), 'utf8');
+  const tsrc = TSRC;
+  const wsrc = WSRC;
 
   ok(/export function heightToNormal/.test(tsrc), 'Карты нормалей строятся из готового альбедо');
   ok(/H\(x \+ 1, y\) - H\(x - 1, y\)/.test(tsrc), 'Градиент высоты берётся центральной разностью');
   ok(/\(\(\(y % h\) \+ h\) % h\)/.test(tsrc), 'Края замкнуты по кругу — карта тайлится вместе с альбедо');
 
   /* рельеф не может разъехаться с картинкой: он из неё и сделан */
-  for (const [what, re] of [
-    ['корпус', /heightToNormal\(hullCanvas/],
-    ['фасады', /heightToNormal\(facCanvas/],
-    ['панели', /heightToNormal\(panelCanvas/]
-  ]) ok(re.test(wsrc), `Нормали строятся для: ${what}`);
+  /* в ядре карта нормалей — описание heightToNormal, чей источник — то же альбедо */
+  const imgs = buildScene(worldParams('HIGH')).images;
+  for (const [what, id, src] of [
+    ['корпус', 'hull.normal', 'hullMaps'],
+    ['фасады', 'facade.0.normal', 'facade'],
+    ['панели', 'panel.normal', 'panelTexture']
+  ]) ok(imgs[id]?.source.gen === 'heightToNormal' && imgs[id].source.args.src.gen === src, `Нормали строятся для: ${what}`);
 
-  ok(/hullNormal\.repeat\.x = -1/.test(wsrc),
-     'Карта нормалей корпуса зеркалится так же, как альбедо, иначе рельеф уедет');
+  /* Прежде все карты корпуса зеркалились repeat.x = −1 под BackSide. Ядро
+     запекает развёртку u = θ/2π, поэтому ни у одной карты корпуса нет
+     преобразования — рельеф и альбедо совпадают по построению. */
+  {
+    const w = coreWorld('HIGH');
+    const hm = w.materials.get('w.hull');
+    const maps = [hm.map, hm.normalMap, w.hullUniforms.uMask.value];
+    ok(maps.every(t => t && t.repeat.x === 1 && t.offset.x === 0) && uvSelfTest(hullOf(w.stationGroup).geometry),
+       'Карты корпуса без зеркала repeat.x = −1: развёртка запечена (u = θ/2π), рельеф не уедет');
+  }
 
   /* пресеты */
   ok(CONFIG.QUALITY.LOW.normals === 0, 'На низком пресете нормалей нет — как и было');
@@ -1700,12 +1879,12 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
 
   const low = new THREE.Group();
   buildWorld(low, fakeRenderer, 'LOW');
-  const hullLow = low.children.find(o => o.material?.side === THREE.BackSide);
+  const hullLow = hullOf(low);
   ok(!hullLow.material.normalMap, 'На низком пресете корпус без карты нормалей');
 
   const hi = new THREE.Group();
   buildWorld(hi, fakeRenderer, 'HIGH');
-  const hullHi = hi.children.find(o => o.material?.side === THREE.BackSide);
+  const hullHi = hullOf(hi);
   ok(!!hullHi.material.normalMap, 'На высоком — с картой');
   const bldHi = hi.children.filter(isBuilding);
   ok(bldHi.every(o => wallMatOf(o).normalMap), 'У всех типов домов есть рельеф оконных ниш');
@@ -1715,8 +1894,8 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
 /* ══ 3h6. Свечение, лучи, трафик, машины, трава ════════════════════════ */
 {
   const psrc = readFileSync(new URL('./js/photo.js', import.meta.url), 'utf8');
-  const msrc = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
-  const wsrc = readFileSync(new URL('./js/world.js', import.meta.url), 'utf8');
+  const msrc = readApp();
+  const wsrc = WSRC;
   const html = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
   const P = CONFIG.POST;
 
@@ -1740,12 +1919,12 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
 
   /* --- один буфер на всех --- */
   ok(/export function setPost/.test(psrc), 'FXAA, свечение и лучи включают общую цепочку');
-  ok(/setPost\(renderer, \{ mode, glow: glowOn, rays: raysOn \}\)/.test(msrc),
+  ok(/setPost\w*\(renderer, \{ mode, glow: (?:app\.)?glowOn, rays: (?:app\.)?raysOn \}\)/.test(msrc),
      'Настройки сходятся в один вызов');
   ok(/uFxaa < 0\.5/.test(psrc), 'Свечение можно включить без FXAA');
 
   /* --- трафик --- */
-  ok(/export function updateTraffic/.test(wsrc), 'Огни машин двигаются');
+  ok(/export function stepTraffic/.test(wsrc) && /dynamics\.step\(dt, \{ traffic: world\.trafficOn \}\)/.test(wsrc), 'Огни машин двигаются');
   /* Габариты гасим В САМОМ ЦВЕТЕ: яркость материала умножает все каналы, и
      (1, 0.16, 0.1) превращалось в (3.2, 0.51, 0.32) — после ограничения
      единицей это оранжево-белый, а не красный. */
@@ -1771,14 +1950,16 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   ok(fs.every(v => v > 0.9), `Спереди белые: ${fs.map(v => v.toFixed(2)).join(', ')}`);
   ok(rs[0] > 0.9 && rs[1] < 0.2 && rs[2] < 0.2,
      `Сзади красные и на экране: ${rs.map(v => v.toFixed(2)).join(', ')}`);
-  ok(/traffic\.dir\[k\] < 0\) _tq\.multiply/.test(wsrc), 'Встречные машины развёрнуты');
+  ok(/if \(lane\.dir < 0\) qmul\(_q, fromAxisAngle\(_up, Math\.PI/.test(wsrc), 'Встречные машины развёрнуты');
   ok(CONFIG.TRAFFIC.lamp > 1,
      `Фары ярче единицы (${CONFIG.TRAFFIC.lamp}) — иначе не попадут в яркую выборку свечения`);
   ok(CONFIG.TRAFFIC.win < CONFIG.TRAFFIC.lamp / 3,
      `Окна тлеют слабее фар: ${CONFIG.TRAFFIC.win} против ${CONFIG.TRAFFIC.lamp}`);
-  ok(/traffic\.dir\[k\] \* traffic\.half \/ R/.test(wsrc), 'Полосы разнесены поперёк улицы');
+  ok(/theta: road \+ dir \* half \/ R/.test(wsrc), 'Полосы разнесены поперёк улицы');
   ok(/i2 \+= 3/.test(wsrc), 'Трафик идёт по магистралям — тем же, что светятся фонарями');
-  ok(/worldMats\.trafficLamp\.color\.setRGB/.test(msrc) && /CONFIG\.TRAFFIC\.lamp, 0\.12, daylight/.test(msrc),
+  /* палитра теперь в ядре (lightingAt) и адаптере: цвет = базовый × trafficLamp */
+  ok(/trafficLamp: lerp\(cfg\.TRAFFIC\.lamp, 0\.12, daylight\)/.test(srcOf('core/lighting/phases.ts'))
+     && /d\.channel === 'trafficLamp'\) setLin\(\(mat as Colored\)\.color, d\.baseColor, s\.trafficLamp\)/.test(wsrc),
      'Днём фары почти не видны, ночью горят');
   ok(CONFIG.TRAFFIC.speed > 0, `Скорость ${CONFIG.TRAFFIC.speed} юнита/с = ${CONFIG.TRAFFIC.speed * 10} м/с`);
 
@@ -1787,8 +1968,8 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   ok(/cr\(\) < 0\.35/.test(wsrc), 'Часть мест пустая — иначе стоянка выглядит выставкой');
 
   /* --- трава у комлей --- */
-  ok(/ТРАВА У КОМЛЕЙ/.test(wsrc), 'Трава у комлей есть');
-  ok(/patchWindMaterial\(tuftMat\)/.test(wsrc), 'Трава колышется тем же ветром, что и кроны');
+  ok(/tufts at the trunk base/.test(wsrc) && !!gW.children.find(o => o.name.startsWith('tufts')), 'Трава у комлей есть');
+  ok(/id: ID\('tufts'\)[^}]*kernels: \['wind'\]/.test(wsrc), 'Трава колышется тем же ветром, что и кроны');
 
   /* --- вода --- */
   ok(/1\.0 - exp\( -wDeep \* 3\.2 \)/.test(wsrc),
@@ -1845,7 +2026,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   ok(noise(1) > 30, `Первый кадр даёт ${noise(1).toFixed(0)}% шума — схождение видно глазом`);
   ok(noise(P.samples) < 8, `К концу остаётся ${noise(P.samples).toFixed(0)}%`);
   ok(P.rays * P.samples > 300, `Всего ${P.rays * P.samples} лучей на пиксель`);
-  const msrc = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+  const msrc = readApp();
   ok(/шум \$\{noise\.toFixed\(0\)\}%/.test(msrc),
      'Индикатор показывает оставшийся шум, а не одни проценты');
 }
@@ -1853,7 +2034,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
 /* ══ 3h8. Все настройки живые ══════════════════════════════════════════ */
 {
   const html = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
-  const msrc = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+  const msrc = readApp();
   const sheet = html.slice(html.indexOf('id="set"'), html.indexOf('id="help"'));
 
   /* карта псевдонимов: const swGlow = $('sGlow'), swRays = $('sRays') */
@@ -1894,13 +2075,13 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   ok(dups.length === 0, `Дублей id нет (${dups.join(', ') || '—'})`);
 
   /* промах по подписи не должен попадать в соседнюю строку */
-  ok(/row\.querySelector\('\.sw'\)/.test(msrc) && /sw\.click\(\)/.test(msrc),
+  ok(/row\.querySelector(?:<\w+>)?\('\.sw'\)/.test(msrc) && /sw\.click\(\)/.test(msrc),
      'Вся строка переключает свой тумблер — кликабельна была только пилюля в 15% ширины');
 }
 
 /* ══ 3h10. Переключатели красятся при старте ═══════════════════════════ */
 {
-  const msrc = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+  const msrc = readApp();
 
   /* Состояние в переменных без первой покраски = переключатель показывает
      «выкл», хотя включён. Первый клик тогда «включает соседей»: они всё это
@@ -1931,7 +2112,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
 /* ══ 3h11. Режим отладки трассировки ═══════════════════════════════════ */
 {
   const psrc = readFileSync(new URL('./js/photo.js', import.meta.url), 'utf8');
-  const msrc = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+  const msrc = readApp();
   const html = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
 
   /* Убедиться, что свет считается лучами, можно только увидев сам вклад
@@ -1960,13 +2141,13 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   /* свечение и лучи от оси по умолчанию выключены */
   ok(/prefs\.get\('glow', false\)/.test(msrc) && /prefs\.get\('rays', false\)/.test(msrc),
      'Свечение и лучи от оси выключены по умолчанию');
-  ok(/let glowOn = false, raysOn = false/.test(msrc), 'И начальные значения им под стать');
+  ok(/glowOn: false, raysOn: false/.test(msrc), 'И начальные значения им под стать');
 }
 
 /* ══ 3h12. Ничто не игнорирует туман ═══════════════════════════════════ */
 {
-  const usrc = readFileSync(new URL('./js/util.js', import.meta.url), 'utf8');
-  const files = ['js/main.js', 'js/world.js', 'js/structures.js', 'js/photo.js'];
+  const usrc = WSRC;
+  const files = [...APP_FILES, ...dirTs('backends/three'), ...dirTs('core/scene'), 'js/photo.js'];
 
   /* Ореол солнца — плоскость во всю длину станции. С fog: false её дальний
      край светит в полную силу поверх того, что уже съедено туманом, и это
@@ -1980,10 +2161,11 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   ok(/gl_FragColor\.a \*= 1\.0 - clamp\( fogF/.test(usrc),
      'Гасится альфа, а не подмешивается цвет: при аддитивном смешивании туман ДОБАВЛЯЛ бы света');
 
-  const msrc = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
-  const ssrc = readFileSync(new URL('./js/structures.js', import.meta.url), 'utf8');
-  ok(/fadeByFog\(new THREE\.MeshBasicMaterial/.test(msrc), 'Ореол солнца гаснет в дымке');
-  ok(/structMats\.sun = fadeByFog/.test(ssrc), 'Солнечная труба тоже');
+  /* ореол и труба описаны ядром с ядром fogFade; адаптер вешает на них fadeByFog */
+  const sc = buildScene(worldParams('HIGH'));
+  ok(sc.materials['a.glow'].kernels?.includes('fogFade'), 'Ореол солнца гаснет в дымке');
+  ok(sc.materials['s.sun'].kernels?.includes('fogFade'), 'Солнечная труба тоже');
+  ok(/if \(kernels\.includes\('fogFade'\)\) fadeByFog\(mat\)/.test(usrc), 'Адаптер применяет fogFade как fadeByFog');
 }
 
 /* ══ 3h13. Что сколько стоит ═══════════════════════════════════════════ */
@@ -2018,7 +2200,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
 
   /* прозрачные декали дороги не треугольниками, а перерисовкой */
   ok(lo.decals < 2200, `LOW: прозрачных декалей ${lo.decals}`);
-  const wsrc = readFileSync(new URL('./js/world.js', import.meta.url), 'utf8');
+  const wsrc = WSRC;
   ok(!/shadows\.push\(\[t, z, \{ r: s \* 1\.3/.test(wsrc),
      'Под кустами декалей нет: полторы тысячи прозрачных квадов ради теней от кустиков не окупались');
 }
@@ -2057,9 +2239,10 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
      `Плотность зелени: ${CONFIG.GREEN.map(v => (v * 100) + '%').join(', ')}`);
   ok(CONFIG.DRAW_FAR.every((v, i, a) => i === 0 || v < a[i - 1]),
      `Дальность прорисовки: ${CONFIG.DRAW_FAR.map(v => (v / 100).toFixed(1) + ' км').join(', ')}`);
-  const wsrc = readFileSync(new URL('./js/world.js', import.meta.url), 'utf8');
-  ok(/CONFIG\.GREEN_K/.test(wsrc), 'Множитель плотности применяется к деревьям и кустам');
-  const msrc = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+  const wsrc = WSRC;
+  ok((wsrc.match(/params\.greenK/g) || []).length >= 2 && /greenK: CONFIG\.GREEN_K/.test(readApp()),
+     'Множитель плотности применяется к деревьям и кустам');
+  const msrc = readApp();
   ok(/camera\.far = CONFIG\.DRAW_FAR/.test(msrc), 'Дальность меняет дальнюю плоскость камеры');
   ok(/prefs\.set\('green'/.test(msrc) && /prefs\.set\('far'/.test(msrc), 'Оба рычага сохраняются');
 
@@ -2075,7 +2258,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
 
 /* ══ 3h15. Измеряем то, что надо ═══════════════════════════════════════ */
 {
-  const msrc = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+  const msrc = readApp();
   const psrc = readFileSync(new URL('./js/photo.js', import.meta.url), 'utf8');
 
   /* three обнуляет статистику на каждом render(). С постобработкой в счётчик
@@ -2093,7 +2276,8 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   }
   ok(CONFIG.QUALITY.ULTRAM.lights < CONFIG.QUALITY.ULTRA.lights,
      'На мобильной ультре источников меньше: корпус занимает почти весь экран, и каждый источник считается на каждом пикселе');
-  ok(/\(CONFIG\.QUALITY\[currentQuality\(\)\] \|\| CONFIG\.QUALITY\.HIGH\)\.lights/.test(msrc),
+  ok(/\(CORE_CONFIG\.QUALITY\[quality\] \|\| CORE_CONFIG\.QUALITY\.HIGH\)\.lights/.test(srcOf('core/scene/build.ts'))
+     && /rasterLights: rasterLightsFor\(params\.quality\)/.test(srcOf('core/scene/build.ts')),
      'Число берётся из пресета, а не из проверки на LOW');
 
   /* Костылей экранного марша больше нет: они лечили симптомы того, что луч
@@ -2114,7 +2298,8 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
     ['js/photo.js', 'export function renderFrame'],
     ['js/photo.js', 'export function composite'],
     ['js/photo.js', 'function runTaa'],
-    ['js/world.js', 'export function updateTraffic'],
+    ['core/scene/dynamics.ts', 'export function stepTraffic'],
+    ['core/scene/dynamics.ts', 'export function trafficMatrices'],
     ['js/controls.js', 'export function updateControls'],
     ['js/audio.js', 'export function updateAudio']
   ];
@@ -2179,7 +2364,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
      && /smaaOn = f\.includes\('smaa'\)/.test(psrc),
      'Части фильтра независимы и складываются, а не перечислены по одной');
 
-  const msrc = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+  const msrc = readApp();
   ok(/mode\.filter\.includes\('taa'\)\) mode\.samples = 0/.test(msrc),
      'TAA сбрасывает MSAA в любом сочетании');
 }
@@ -2190,7 +2375,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
      шейдер просто не компилируется: 'SMAA_THRESHOLD' undeclared identifier. */
 
   /* Затенение имён модульного уровня — источник ошибок «до инициализации» */
-  for (const f of ['js/photo.js', 'js/main.js', 'js/world.js']) {
+  for (const f of ['js/photo.js', ...APP_FILES, 'core/scene/world.ts']) {
     const src = readFileSync(new URL('./' + f, import.meta.url), 'utf8');
     const top = [...src.matchAll(/^(?:let|const)\s+([A-Za-z_$][\w$]*)/gm)].map(m => m[1]);
     const inner = [...src.matchAll(/^\s\s+const\s+([A-Za-z_$][\w$]*)\s*=/gm)].map(m => m[1]);
@@ -2203,7 +2388,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
 {
   const html = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
   const css = readFileSync(new URL('./style.css', import.meta.url), 'utf8');
-  const msrc = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+  const msrc = readApp();
 
   /* Девятнадцать строк в одном свитке не читались — разложены по вкладкам */
   const tabs = [...html.matchAll(/class="tabbtn[^"]*" data-tab="(\d+)"/g)].map(m => m[1]);
@@ -2234,9 +2419,9 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   ok(order[order.length - 1] === 'bDay', 'Фаза освещения — в самом низу');
 
   /* фото-режим останавливает станцию */
-  ok(/omegaSaved = omega;\s*\n\s*omega = 0;/.test(msrc),
+  ok(/omegaSaved = (?:app\.)?omega;\s*\n\s*(?:app\.)?omega = 0;/.test(msrc),
      'Вход в фото-режим останавливает вращение станции');
-  ok(/omega = omegaSaved;/.test(msrc), 'Выход возвращает прежнюю скорость');
+  ok(/omega = (?:app\.)?omegaSaved;/.test(msrc), 'Выход возвращает прежнюю скорость');
 
   /* ракурсы на башню: за целью должен оставаться цилиндр, а не торец */
   for (const i of [1, 2]) {
@@ -2253,7 +2438,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
 /* ══ 3h20. Камера, полёт, торец ════════════════════════════════════════ */
 {
   const csrc = readFileSync(new URL('./js/controls.js', import.meta.url), 'utf8');
-  const msrc = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+  const msrc = readApp();
 
   /* Предел тангажа. У 89° вектор «вправо» получается длиной 0.017, и
      нормализация усиливает погрешность в полсотни раз — камеру трясло. */
@@ -2327,7 +2512,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
      `Все ${pairs} перелётов: середина не выше r=${hi.toFixed(1)} при верхе башни ${towerTop} (худший: ${worstPair})`);
   ok(lo >= keep, `И не ближе r=${lo.toFixed(1)} к трубе при запасе ${keep.toFixed(1)}`);
 
-  const msrc = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+  const msrc = readApp();
   ok(/function flyPoint/.test(msrc), 'Траектория считается в цилиндрических координатах');
   ok(/fly\.da = \(\(fly\.a1 - fly\.a0 \+ Math\.PI\) % TAU/.test(msrc),
      'Угол проходится по кратчайшей дуге, а не через полный круг');
@@ -2429,8 +2614,8 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
 
 /* ══ 3h22. Отражения в обычном режиме ══════════════════════════════════ */
 {
-  const wsrc = readFileSync(new URL('./js/world.js', import.meta.url), 'utf8');
-  const msrc = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+  const wsrc = WSRC;
+  const msrc = readApp();
 
   /* Экранные отражения требуют буфера глубины, буфера нормалей и отдельного
      прохода — и всё равно чернеют по краям кадра. Фрагменту воды всё нужное
@@ -2451,9 +2636,13 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
     ok((CONFIG.QUALITY[q].mirror || 0) === want,
        `${q}: отражения в воде ${want ? 'включены' : 'выключены'}`);
   }
-  ok(/mirrorOn = \(CONFIG\.QUALITY\[q\] \|\| CONFIG\.QUALITY\.HIGH\)\.mirror/.test(msrc),
-     'Состояние берётся из пресета при пересборке');
-  ok(/hullU\.uCamObj\.value\.copy\(worldGroup\.worldToLocal/.test(msrc),
+  /* С v2.12.0 отражения ведёт переключатель настроек (app.mirrorOn), и
+     пересборка его больше не перебивает пресетом; по умолчанию у мира — mirror пресета. */
+  ok(/mirror: opts\.mirror \?\? Q\.mirror \?\? 0/.test(wsrc), 'По умолчанию мир берёт отражения из пресета');
+  ok(/next\.mirror = app\.mirrorOn/.test(msrc) && /world\.mirror = app\.mirrorOn/.test(msrc),
+     'Переключатель отражений переживает пересборку и действует каждый кадр');
+  ok(/stationGroup\.worldToLocal\(camS\)[\s\S]{0,300}hullU\.uCamObj\.value\.copy\(camS\)/.test(wsrc)
+     && /world\.update\(dt, camera\)/.test(msrc),
      'Камера переводится в систему станции каждый кадр');
 }
 
@@ -2489,9 +2678,9 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   /* ходовая балка — решётка, а не труба */
   const RB = CONFIG.RAILBEAM;
   ok(RB.bay > 0 && RB.chord > 0 && RB.brace > 0, `Балка: пояс ${RB.chord}, раскос ${RB.brace}, отсек ${RB.bay}`);
-  const ssrc = readFileSync(new URL('./js/structures.js', import.meta.url), 'utf8');
-  ok(/раскосы крест-накрест/.test(ssrc), 'У балки есть раскосы');
-  ok(/поперечины на границах отсеков/.test(ssrc), 'И поперечины');
+  const ssrc = SSRC;
+  ok(/for \(const \[ax, ay, tilt\] of braces\)/.test(ssrc), 'У балки есть раскосы');
+  ok(/const cross = box\(RB\.w \* 2, RB\.brace, RB\.brace\)/.test(ssrc), 'И поперечины');
   const bays = Math.round(CONFIG.SUN.len / RB.bay);
   ok(bays > 40, `Отсеков по длине: ${bays}`);
 
@@ -2502,12 +2691,12 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
      остекление, а внутри есть пол, потолок, стойки и сиденья. */
   for (const [what, re] of [
     ['пол и потолок', /rod\(CR\.w, CR\.floor, CR\.len/],
-    ['стойки между окнами', /стойки между окнами/],
-    ['сиденья вдоль бортов', /сиденья вдоль бортов/],
-    ['катки по рельсу', /катки по рельсу/],
-    ['подоконный пояс', /подоконный пояс/]
+    ['стойки между окнами', /for \(let k = 0; k <= PILLARS; k\+\+\)/],
+    ['сиденья вдоль бортов', /-hh \+ CR\.floor \+ CR\.seat/],
+    ['катки по рельсу', /const wheel = cylinder\(WHEEL\.r/],
+    ['подоконный пояс', /rod\(CR\.floor \* 1\.4, CR\.belt, CR\.len/]
   ]) ok(re.test(ssrc), `У кабины есть ${what}`);
-  ok(/Остекление — тонкие панели в проёмах/.test(ssrc),
+  ok(/Thin glazing panels in the side openings/.test(ssrc),
      'Стекло — панели в проёмах, а не второй ящик поверх корпуса');
 
   /* камера обязана оказаться между полом и потолком */
@@ -2537,7 +2726,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   liftSeat(0, p, d);
   ok(Math.abs(p.z - z0) > 1, `За две секунды кабина уехала на ${Math.abs(p.z - z0).toFixed(0)} юнитов`);
 
-  const msrc = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+  const msrc = readApp();
   ok(/function updateRide/.test(msrc), 'Камеру ведёт кабина');
   ok(/updateControls\(dt, camera\); updateRide\(\)/.test(msrc),
      'Обзор остаётся за игроком: положение задаёт кабина, поворот — нет');
@@ -2559,7 +2748,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   ok(CONFIG.SUN.len / 2 > hub,
      `Труба доходит до ступицы: конец на ${CONFIG.SUN.len / 2}, ступица на ${hub}`);
   ok(CONFIG.SUN.len / 2 < HL, 'И не торчит наружу за обод торца');
-  const ssrc = readFileSync(new URL('./js/structures.js', import.meta.url), 'utf8');
+  const ssrc = SSRC;
   ok(/sign \* \(flipZ \? HL : HL - E\.depth\)/.test(ssrc),
      'Ступица со спицами садится на дно воронки, а не висит на прежней глубине');
 
@@ -2579,7 +2768,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
     capG.rotateX(-Math.PI / 2);
     capG.computeBoundingBox();
     const hubLocal = capG.boundingBox.min.z;
-    const sc = /m\.makeScale\(1, 1, sign\)/.test(ssrc) ? 1 : -1;
+    const sc = /m4?\.makeScale\(1, 1, sign\)/.test(ssrc) ? 1 : -1;
     for (const sign of [-1, 1]) {
       const world = sign * HL2 + sign * sc * hubLocal;
       ok(Math.abs(world) < HL2,
@@ -2594,9 +2783,9 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   /* Опоры — монолитные колонны, решётка только у ходовой балки */
   const C = CONFIG.AXIS.column;
   ok(C && C.bottom > C.top, `Колонна расширяется книзу: ${C.top} → ${C.bottom}`);
-  ok(/монолитная коническая колонна/.test(ssrc), 'Опора описана колонной');
+  ok(/export function trussColumn/.test(ssrc) && /const C = CORE_CONFIG\.AXIS\.column/.test(ssrc), 'Опора описана колонной');
   ok(!/4 пояса \+ раскосы/.test(ssrc), 'Решётки у силовой опоры не осталось');
-  ok(/раскосы крест-накрест/.test(ssrc),
+  ok(/for \(const \[ax, ay, tilt\] of braces\)/.test(ssrc),
      'Но у ходовой балки монорельса решётка есть: она длинная и работает на изгиб');
 
   /* марш отражений мельче дома */
@@ -2615,7 +2804,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   const g = new THREE.Group();
   const res = buildWorld(g, fakeRenderer, 'ULTRA');
   buildStructures(g, fakeRenderer, 'ULTRA', res.panel, res.panelNormal);
-  patchAllRoughness(g);
+  /* патч шероховатости ставит сам адаптер (createLegacyMaterial) */
 
   /* Альфа непатченного материала хранит непрозрачность — единицу, — и
      трассировка принимает такую поверхность за зеркальную. Патчить надо ВСЕ
@@ -2643,7 +2832,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   const psrc = readFileSync(new URL('./js/photo.js', import.meta.url), 'utf8');
   ok(/pow\( clamp\( \( 1\.0 - rough - uMirrorMin \)/.test(psrc),
      'Вес отражения — степенная функция гладкости, а не порог с линейным весом');
-  const wsrc = readFileSync(new URL('./js/world.js', import.meta.url), 'utf8');
+  const wsrc = WSRC;
   ok(/uMirror > 0\.001 && hullMask\.r > 0\.02/.test(wsrc),
      'В реальном времени отражает только вода, а не весь корпус');
 
@@ -2665,15 +2854,15 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
      `На телефоне ${mob.rays * mob.samples} лучей против ${deskt.rays * deskt.samples} на настольном`);
   ok(mob.refSteps < deskt.refSteps && mob.shadowSteps < deskt.shadowSteps,
      'И марши короче: марш отражения и теней');
-  const msrc = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
-  ok(/startTrace\(renderer, scene, camera, windU\.uWind, isMobile\)/.test(msrc),
+  const msrc = readApp();
+  ok(/startTrace\(renderer, scene, camera, world\.windUniforms\.uWind, isMobile\)/.test(msrc),
      'План выбирается по устройству');
 }
 
 /* ══ 3h27. Проходы постобработки и слияние статики ═════════════════════ */
 {
   const psrc = readFileSync(new URL('./js/photo.js', import.meta.url), 'utf8');
-  const ssrc = readFileSync(new URL('./js/structures.js', import.meta.url), 'utf8');
+  const ssrc = SSRC;
 
   /* Считаем проходы по коду: сколько pass() вызывается в каждой ветке.
      Лишний проход при выключенном эффекте — это полный экран впустую. */
@@ -2712,7 +2901,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   const dups = [...bySig.entries()].filter(([, n]) => n > 1);
   ok(dups.length === 0,
      `Одиночных мешей с повторяющейся геометрией нет${dups.length ? ' (' + dups.length + ')' : ''}`);
-  ok(/const twin = \(geo, mat, flipZ\)/.test(ssrc),
+  ok(/export function endcapInstanceMatrices\(flipZ: boolean\)/.test(ssrc) && /instances: instanceSet\(endcapInstanceMatrices\(true\)/.test(ssrc),
      'Оба торца — два инстанса одной геометрии, а не два отдельных меша');
 
   let solo = 0;
@@ -2724,7 +2913,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
 {
   const html = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
   const css = readFileSync(new URL('./style.css', import.meta.url), 'utf8');
-  const ssrc = readFileSync(new URL('./js/structures.js', import.meta.url), 'utf8');
+  const ssrc = SSRC;
 
   /* вкладки внизу и не уезжают вместе с прокруткой */
   const sheet = html.slice(html.indexOf('id="set"'), html.indexOf('id="help"'));
@@ -2755,7 +2944,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   /* стекло изнутри исчезает целиком */
   ok(/m\.opacity = inside \? 0 : 1/.test(ssrc),
      'Изнутри стекло полностью прозрачно: любая остаточная непрозрачность даёт тонировку');
-  ok(/lifts\.glass\.visible = !inside/.test(ssrc), 'И сама панель убирается из отрисовки');
+  ok(/o\.visible = !inside/.test(ssrc), 'И сама панель убирается из отрисовки');
 
   /* теневой марш обязан ловить ближние преграды */
   const P = CONFIG.PHOTO;
@@ -2781,7 +2970,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
 {
   const src = readFileSync(new URL('./js/pathtrace.js', import.meta.url), 'utf8');
   const html = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
-  const msrc = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+  const msrc = readApp();
 
   /* Библиотека грузится лениво: она весит больше самого проекта, платить за
      неё при обычном запуске незачем. */
@@ -2789,20 +2978,25 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
      'Библиотека подгружается по первому включению, а не при старте');
   ok(!/^import .*three-gpu-pathtracer/m.test(src), 'Статического импорта нет');
 
-  /* Карта импортов должна покрывать всё, что тянут сборки. Забытая
-     зависимость даёт молчаливый отказ загрузки модуля. */
-  const map = JSON.parse(html.slice(html.indexOf('{', html.indexOf('importmap')),
-    html.indexOf('</script>', html.indexOf('importmap'))).trim());
-  const keys = Object.keys(map.imports);
-  for (const dep of ['three', 'three-gpu-pathtracer', 'three-mesh-bvh', 'three/examples/jsm/']) {
-    ok(keys.includes(dep), `Карта импортов знает «${dep}»`);
+  /* Модули разрешает сборщик (Vite) из node_modules — карты импортов больше
+     нет. Зависимости должны быть объявлены в package.json и закреплены точно:
+     забытая даёт молчаливый отказ загрузки, плавающая — чужую сборку. */
+  ok(!html.includes('importmap'), 'Карты импортов в разметке нет: модули разрешает сборщик');
+  const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8'));
+  const pinned = ['three', 'three-gpu-pathtracer', 'three-mesh-bvh', 'oidn-webgpu'];
+  for (const dep of pinned) {
+    const v = (pkg.dependencies || {})[dep];
+    ok(!!v, `package.json знает «${dep}»`);
+    ok(/^\d+\.\d+\.\d+$/.test(v || ''), `«${dep}»: версия закреплена точно (${v})`);
   }
-  /* каждый адрес — на существующий файл сборки, а не на каталог пакета */
-  for (const [k, v] of Object.entries(map.imports)) {
-    ok(k.endsWith('/') || /\.js$/.test(v), `«${k}» ведёт на файл, а не на каталог`);
-    ok(/^https:\/\//.test(v), `«${k}» грузится по https`);
-    const ver = (v.match(/@([\d.]+)\//) || [])[1];
-    ok(!ver || /^\d+\.\d+\.\d+$/.test(ver), `«${k}»: версия закреплена точно (${ver})`);
+  /* каждый голый импорт проекта — из объявленного пакета */
+  for (const f of [...['photo', 'pathtrace', 'pathtrace-bvh.worker', 'controls', 'audio'].map(n => `js/${n}.js`),
+    ...APP_FILES, ...dirTs('backends/three'), ...dirTs('core')]) {
+    const s = readSrc(f);
+    for (const m of s.matchAll(/(?:from\s+|import\()\s*'([^'.][^']*)'/g)) {
+      const pkgName = m[1].split('/')[0];
+      ok(pinned.includes(pkgName), `${f}: «${m[1]}» из объявленного пакета`);
+    }
   }
 
   /* дерево строится один раз — это возможно только на статичной сцене */
@@ -2813,13 +3007,17 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
      замораживает интерфейс, снимок не сделать. Штатный worker библиотеки не
      годится — worker не наследует карту импортов страницы. Собираем свой из
      строки с абсолютными адресами. */
+  /* Worker теперь отдельный модуль: сборщик узнаёт его по буквальному шаблону
+     new Worker(new URL(..., import.meta.url)) и сам разрешает в нём 'three'. */
+  const wsrcBvh = readFileSync(new URL('./js/pathtrace-bvh.worker.js', import.meta.url), 'utf8');
   ok(/function makeBvhWorker/.test(src), 'Дерево строится в отдельном потоке');
-  ok(/import\.meta\.resolve\(name\)/.test(src),
-     'Адреса берутся из карты импортов страницы, а не пишутся руками второй раз');
-  ok(/new Worker\(url, \{ type: 'module' \}\)/.test(src), 'Поток модульный');
+  ok(/from 'three'/.test(wsrcBvh) && /from 'three-mesh-bvh'/.test(wsrcBvh) && !/https?:\/\//.test(wsrcBvh.replace(/\/\*[\s\S]*?\*\//g, '')),
+     'Адреса модулей в потоке разрешает сборщик, а не пишутся руками второй раз');
+  ok(/new Worker\(new URL\('\.\/pathtrace-bvh\.worker\.js', import\.meta\.url\), \{ type: 'module' \}\)/.test(src),
+     'Поток модульный и записан шаблоном, который сборщик узнаёт');
   ok(/\[pos\.buffer,/.test(src),
      'Буферы уходят в поток без копирования: их сотни мегабайт');
-  ok(/MeshBVH\.serialize\(bvh, \{ cloneBuffers: false \}\)/.test(src),
+  ok(/MeshBVH\.serialize\(bvh, \{ cloneBuffers: false \}\)/.test(wsrcBvh),
      'И возвращаются упакованными, тоже без копий');
   ok(/if \(!threaded\) tracer\.setScene\(scene, camera\);/.test(src),
      'Не поднялся поток — считаем в главном: медленнее по ощущению, но работает всегда');
@@ -2854,7 +3052,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   ok(/pt\.buildMs = /.test(src), 'Время постройки замеряется и показывается');
   ok(/windU\.value = 0/.test(src),
      'Ветер останавливается: дерево описывает геометрию в покое, а кроны смещает вершинный шейдер');
-  ok(/omegaSaved = omega;\s*\n\s*omega = 0;/.test(msrc),
+  ok(/omegaSaved = (?:app\.)?omega;\s*\n\s*(?:app\.)?omega = 0;/.test(msrc),
      'Вращение станции уже остановлено фото-режимом — сцена статична');
 
   /* отказ обязан быть мягким */
@@ -2929,14 +3127,16 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
      'Набрав нужное, счёт прекращается — путь стоит на порядок дороже обычной отрисовки');
   ok(/export function pathCameraMoved/.test(src) && /tracer\.updateCamera\(\)/.test(src),
      'Сдвиг камеры сбрасывает накопление');
-  ok(/if \(!camera\.position\.equals\(_ptPrev\)\)/.test(msrc), 'Движение отслеживается в цикле');
+  ok(/!camera\.position\.equals\(_ptPrev\) \|\| !camera\.quaternion\.equals\(_ptOrient\)/.test(msrc),
+     'Сдвиг и поворот камеры отслеживаются в цикле');
   ok(/pathStep\(\);[\s\S]{0,400}return;/.test(msrc),
      'Путь выводит кадр сам, обычная отрисовка пропускается целиком');
   /* Ветка возвращалась раньше обработки затвора: снимок во время трассировки
      не делался вовсе, и это выглядело как заблокированный интерфейс. */
-  const iStep = msrc.indexOf('pathStep();');
-  const iShot = msrc.indexOf('if (shotPending)', iStep);
-  const iRet = msrc.indexOf('return;', iStep);
+  const loopSrc = readSrc('app/loop.ts');
+  const iStep = loopSrc.indexOf('pathStep();');
+  const iShot = loopSrc.indexOf('if (app.shotPending)', iStep);
+  const iRet = loopSrc.indexOf('return;', iStep);
   ok(iShot > 0 && iShot < iRet, 'Затвор обрабатывается до выхода из ветки пути');
   ok(/if \(pt\.active\) \{ saveCanvas\(renderer\.domElement\.width/.test(msrc),
      'Накопленный путём кадр не перерисовывается, а ужимается: перерисовка стёрла бы накопленное');
@@ -2965,7 +3165,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   const css = readFileSync(new URL('./style.css', import.meta.url), 'utf8');
   const src = readFileSync(new URL('./js/pathtrace.js', import.meta.url), 'utf8');
   const psrc = readFileSync(new URL('./js/photo.js', import.meta.url), 'utf8');
-  const msrc = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+  const msrc = readApp();
 
   /* панель: иконка слева, подпись справа, полупрозрачная с размытием */
   const barStart = html.indexOf('id="photobar"');
@@ -3040,7 +3240,8 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   ok(/Очистка идёт первой, до тонмаппинга/.test(psrc),
      'Очистка до тонмаппинга: шум живёт в линейных значениях');
   ok(/export function setDenoise/.test(psrc), 'Очистку можно включить отдельно');
-  ok(/traceHeld \? 1 : traceStep\(\)/.test(msrc), 'Пауза работает и для экранных лучей');
+  ok(/if \(!app\.traceHeld\) \{\s*if \(isClassic\(\)\) done = traceStep\(\);\s*else if \(trace\.sample < trace\.total\)/.test(readSrc('app/loop.ts')),
+     'Пауза работает и для экранных лучей');
 
   /* путь идёт через нашу постобработку — иначе ни свечения, ни сглаживания */
   ok(/t\.renderToCanvasCallback = \(target, renderer2, quad\)/.test(src),
@@ -3051,7 +3252,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
 
   /* вода */
   ok(/export function makeWaterRoughness/.test(
-    readFileSync(new URL('./js/textures.js', import.meta.url), 'utf8')),
+    TSRC),
      'Карта шероховатости воды строится из канала глубины');
   ok(/function waterForPath/.test(src), 'И подставляется корпусу на время съёмки');
   ok(/hullMat\.normalScale\?\.multiplyScalar/.test(src),
@@ -3070,7 +3271,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   ok(/hullMat\.clearcoatMap = roughMap;/.test(src),
      'У плёнки есть карта: иначе она легла бы и на дороги с полями');
   ok(/s\.mat\.clearcoatMap = s\.coatMap;/.test(src), 'И карта снимается вместе со слоем');
-  const tsrc3 = readFileSync(new URL('./js/textures.js', import.meta.url), 'utf8');
+  const tsrc3 = TSRC;
   ok(/px\[i\] = Math\.round\(s \* 255\);/.test(tsrc3),
      'Доля воды пишется в КРАСНЫЙ канал: оттуда её читает карта плёнки');
   ok(/px\[i \+ 1\] = Math\.round\(\(0\.95 - s \* 0\.90\) \* 255\);/.test(tsrc3),
@@ -3087,10 +3288,10 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   ok(/s\.mat\.clearcoat = s\.coat;/.test(src), 'И снимается после');
 
   /* Гладкость воды не зависит от глубины */
-  const tsrc2 = readFileSync(new URL('./js/textures.js', import.meta.url), 'utf8');
+  const tsrc2 = TSRC;
   ok(/const wet = Math\.min\(1, Math\.max\(0, \(water - 0\.04\) \/ 0\.10\)\)/.test(tsrc2),
      'Шероховатость не выводится из глубины: вода на отмели такая же гладкая, как на стрежне');
-  const wsrc3 = readFileSync(new URL('./js/world.js', import.meta.url), 'utf8');
+  const wsrc3 = WSRC;
   ok(/float wet = smoothstep\( 0\.04, 0\.14, hullMask\.r \)/.test(wsrc3),
      'В обычном кадре то же самое: прежде у берега поверхность выходила матовой');
   {
@@ -3148,7 +3349,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
 
 /* ══ 3h31. Текстуры металла и торца ════════════════════════════════════ */
 {
-  const tsrc = readFileSync(new URL('./js/textures.js', import.meta.url), 'utf8');
+  const tsrc = TSRC;
 
   /* Ровная сетка одинаковых плит читается заглушкой: глазу не за что
      зацепиться, масштаб не считывается. */
@@ -3157,20 +3358,20 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   ok(/const h = 26 \+ Math\.floor\(rnd\(\) \* 46\)/.test(panelBody),
      'Ряды плит разной высоты, а не ровная сетка');
   ok(/const w = 34 \+ Math\.floor\(rnd\(\) \* 92\)/.test(panelBody), 'И плиты разной ширины');
-  ok(/фаска: светлая сверху-слева/.test(panelBody),
+  ok(/g\.fillStyle = 'rgba\(255,255,255,\.10\)';\s*g\.fillRect\(x, y, w - 1, 1\)/.test(panelBody),
      'У плит есть фаска — объём читается даже без карты нормалей');
-  ok(/Потёки вниз от стыков/.test(panelBody),
+  ok(/createLinearGradient\(sx, sy, sx, sy \+ len\)/.test(panelBody),
      'Есть потёки: без них металл выглядит только что отлитым');
   ok(/createLinearGradient/.test(panelBody), 'Потёки затухают, а не рисуются полосой');
-  ok(/Мелкие люки и вставки/.test(panelBody), 'Есть люки и вставки для масштаба');
+  ok(/strokeRect\(x2 \+ 0\.5, y2 \+ 0\.5, w2, h2\)/.test(panelBody), 'Есть люки и вставки для масштаба');
 
   /* Торец: концентрические пояса с секциями, а не ровные кольца */
   const cap = tsrc.slice(tsrc.indexOf('export function makeEndCapTexture'));
   const capBody = cap.slice(0, cap.indexOf('\n}\n'));
   ok(/const seg = Math\.max\(6, Math\.round\(i \* 2\.6\)\)/.test(capBody),
      'Число секций растёт к краю: длина дуги остаётся соизмеримой');
-  ok(/мелкие блоки внутри секции/.test(capBody), 'В секциях есть мелкие блоки');
-  ok(/иллюминаторы/.test(capBody), 'И редкие светящиеся окна');
+  ok(/const blocks = 1 \+ Math\.floor\(rnd\(\) \* 3\)/.test(capBody), 'В секциях есть мелкие блоки');
+  ok(/if \(rnd\(\) < 0\.1\) \{\s*const rr = r0 \+ \(r1 - r0\) \* 0\.5;\s*const side = \(r1 - r0\) \* 0\.34/.test(capBody), 'И редкие светящиеся окна');
 
   /* Постоянный угол даёт дугу, растущую вместе с радиусом: у края окна
      вытягивались впятеро против тех, что у ступицы. */
@@ -3193,7 +3394,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
     ok(Math.abs(near.w / near.h - 1) < 0.2 && Math.abs(far.w / far.h - 1) < 0.2,
        `Окна квадратные и у ступицы (${near.w.toFixed(1)}×${near.h.toFixed(1)}), и у края (${far.w.toFixed(1)}×${far.h.toFixed(1)})`);
   }
-  ok(/шесть силовых спиц/.test(capBody), 'Спицы нарисованы поверх поясов');
+  ok(/const ang = \(k \/ 6\) \* TAU_2D \+ 0\.26/.test(capBody), 'Спицы нарисованы поверх поясов');
   ok(/rings = 22/.test(capBody), 'Поясов достаточно, чтобы читалась конструкция');
 
   /* двойной счёт осевого света */
@@ -3213,13 +3414,14 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   /* У каждой карты в three СВОЯ матрица развёртки. Альбедо корпуса зеркалится
      (смотрим изнутри цилиндра), и карты без этого зеркала ложатся в
      противофазе: вода в них оказывается там, где на самом деле трава. */
-  const g2 = new THREE.Group();
-  buildWorld(g2, fakeRenderer, 'HIGH');
-  const hm = worldMats.hull;
-  for (const [name, tx] of [['шероховатость воды', worldMats.waterRough],
-    ['рябь', worldMats.waterNormal], ['рельеф', hm.normalMap]]) {
-    if (!tx) continue;
-    ok(tx.repeat.x === hm.map.repeat.x && tx.offset.x === hm.map.offset.x,
+  /* С v2.12.0 развёртка запечена в геометрию корпуса, и у всех его карт
+     одна (тождественная) матрица; воду фото-режиму мир создаёт заранее. */
+  const wW = createThreeWorld(buildScene(worldParams('HIGH')), fakeRenderer,
+    { textures: 'none', collider: false, extraTextures: ['water.rough', 'water.normal'] });
+  const hm = wW.materials.get('w.hull');
+  for (const [name, tx] of [['шероховатость воды', wW.textures.get('water.rough')],
+    ['рябь', wW.textures.get('water.normal')], ['рельеф', hm.normalMap]]) {
+    ok(!!tx && tx.repeat.x === hm.map.repeat.x && tx.offset.x === hm.map.offset.x,
        `Развёртка «${name}» совпадает с альбедо корпуса (${tx.repeat.x}, ${tx.offset.x})`);
   }
   ok(/s\.mat\.normalMap = s\.normal;/.test(psrc2), 'Исходный рельеф возвращается');
@@ -3230,7 +3432,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   const vsrc = readFileSync(new URL('./js/version.js', import.meta.url), 'utf8');
   const sw = readFileSync(new URL('./sw.js', import.meta.url), 'utf8');
   const readme = readFileSync(new URL('./README.md', import.meta.url), 'utf8');
-  const msrc = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+  const msrc = readApp();
   const html = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
 
   const ver = (vsrc.match(/VERSION = '([\d.]+)'/) || [])[1];
@@ -3261,7 +3463,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
 {
   const src = readFileSync(new URL('./js/pathtrace.js', import.meta.url), 'utf8');
   const psrc = readFileSync(new URL('./js/photo.js', import.meta.url), 'utf8');
-  const msrc = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+  const msrc = readApp();
 
   /* У дома два материала — стены и кровля. Прежняя версия возвращала сам
      массив, у которого нет ни vertexColors, ни clone. */
@@ -3306,7 +3508,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
 /* ══ 3h34. Разрешение, отскоки, рябь, рассеянный свет ══════════════════ */
 {
   const src = readFileSync(new URL('./js/pathtrace.js', import.meta.url), 'utf8');
-  const msrc = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+  const msrc = readApp();
   const html = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
   const P = CONFIG.PATH;
 
@@ -3339,8 +3541,8 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
 /* ══ 3h35. Выбор шумоподавителя, холмы в корпусе, пруды ════════════════ */
 {
   const psrc = readFileSync(new URL('./js/photo.js', import.meta.url), 'utf8');
-  const msrc = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
-  const wsrc = readFileSync(new URL('./js/world.js', import.meta.url), 'utf8');
+  const msrc = readApp();
+  const wsrc = WSRC;
   const html = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
 
   /* четыре способа: у каждого своя цена и своя слабость */
@@ -3359,8 +3561,8 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
      'Кросс-билатеральный — тот же фильтр в один проход');
 
   /* холмы несёт сам корпус */
-  ok(/export function displaceHills/.test(wsrc), 'Корпус продавливается холмами');
-  ok(/Math\.atan2\(v\.x, -v\.z\)/.test(wsrc),
+  ok(/export function displaceHull/.test(wsrc), 'Корпус продавливается холмами');
+  ok(/const t = Math\.atan2\(vx, -vz\)/.test(wsrc),
      'Угол считается в КОНЕЧНОЙ системе: после поворота он становится 180° минус исходный');
   ok(/const f = \(1 - u \* u\) \* \(1 - u \* u\)/.test(wsrc),
      'Гладкий колокол: у края производная нулевая, стыка не видно');
@@ -3378,11 +3580,12 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
 
   /* пруды */
   ok(CONFIG.HILL.pondChance > 0, `Доля низин: ${(CONFIG.HILL.pondChance * 100) | 0}%`);
-  ok(/const ponds = hullHills\.filter\(h => h\.dip\)/.test(wsrc),
+  ok(/const ponds = pondsOf\(hills\)/.test(wsrc)
+     && buildScene(worldParams('HIGH')).hull.hills.every(h => !h.pond || h.rise < 0),
      'Пруды стоят в низинах, а не где придётся');
-  const tsrc = readFileSync(new URL('./js/textures.js', import.meta.url), 'utf8');
-  ok(/─── ПРУДЫ ───/.test(tsrc), 'Пруд рисуется в тот же канал маски, что и река');
-  const pondBlock = tsrc.slice(tsrc.indexOf('─── ПРУДЫ ───'));
+  const tsrc = TSRC;
+  ok(/─── ponds:/.test(tsrc), 'Пруд рисуется в тот же канал маски, что и река');
+  const pondBlock = tsrc.slice(tsrc.indexOf('─── ponds:'));
   ok(/band\(m, M\.c\.width, 1\.0, 0\.42, \[40, 0, 0\], \[255, 0, 0\], 14\)/.test(pondBlock),
      'В канал воды: весь водный шейдер достаётся пруду даром');
   /* Сложение оставляло зелёный канал на месте, и трава ложилась поверх
@@ -3391,22 +3594,23 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
      'Пруд заливается как река, а не складывается с фоном');
   /* Пять сплошных колец читались плоским ореолом, наклеенным поверх травы:
      у настоящего берега нет резких границ. */
-  ok(/const band = \(ctx, size, from, to, colFrom, colTo, steps\)/.test(pondBlock),
+  ok(/const band = \(ctx: Context2D, size2: number, from: number, to: number,/.test(pondBlock),
      'Берег и глубина — плавным переходом, а не ступенями');
   ok(/ctx\.globalAlpha = 0\.5;/.test(pondBlock),
      'Кольца накладываются полупрозрачно: холст не умеет заливать градиентом по повёрнутому эллипсу');
 
   /* и вода в низине действительно появляется */
-  const g3 = new THREE.Group();
-  const r3 = buildWorld(g3, fakeRenderer, 'HIGH');
-  ok(!!r3.waterRough, 'Карта шероховатости воды собрана уже с прудами');
+  const sc3 = buildScene(worldParams('HIGH'));
+  const maskSpec = sc3.images['water.rough']?.source.args.mask;
+  ok(!!maskSpec && maskSpec.args.ponds?.length === sc3.hull.hills.filter(h => h.pond).length && maskSpec.args.ponds.length > 0,
+     'Карта шероховатости воды собрана уже с прудами');
 }
 
 /* ══ 3h36. Уровни детализации деревьев и резкость ══════════════════════ */
 {
-  const wsrc = readFileSync(new URL('./js/world.js', import.meta.url), 'utf8');
+  const wsrc = WSRC;
   const psrc = readFileSync(new URL('./js/photo.js', import.meta.url), 'utf8');
-  const tsrc = readFileSync(new URL('./js/textures.js', import.meta.url), 'utf8');
+  const tsrc = TSRC;
 
   /* плотность до пятикратной — без уровней это одиннадцать миллионов граней */
   ok(CONFIG.GREEN[0] >= 5, `Верхняя плотность зелени: ${CONFIG.GREEN[0] * 100}%`);
@@ -3419,12 +3623,12 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   ok(L.near > 0 && L.mid > L.near, `Границы уровней: ${L.near} и ${L.mid} юнитов`);
   ok(L.step > 0, `Пересчёт при сдвиге камеры на ${L.step} юнитов`);
   ok(/function crossQuadGeo/.test(wsrc), 'Дальний уровень — крест из двух плоскостей');
-  ok(/Билборд, разворачивающийся к камере, здесь дороже/.test(wsrc),
+  ok(/addGeo\('crowns\.lod2', crossQuadGeo\(\)\)/.test(wsrc) && !/crowns[\s\S]{0,80}lookAt/.test(wsrc),
      'Крест вместо билборда: мир вращается, разворачивать тысячи плоскостей дороже');
-  ok(/export function updateTreeLod/.test(wsrc), 'Раскладка есть');
-  ok(/Раскладка идёт ПО КАЖДОМУ ДЕРЕВУ/.test(wsrc),
+  ok(/export function classifyLod/.test(wsrc) && /for \(const l of lods\) l\.update\(camW, camS, false\)/.test(wsrc), 'Раскладка есть');
+  ok(/Classify every instance/.test(wsrc),
      'Раскладка по деревьям, а не по секторам: сфера сектора охватывает всю длину станции');
-  ok(/im\.boundingSphere = sectorSphere\(b, R\)/.test(wsrc),
+  ok(/sphere: sectorSphere\(b, R\)/.test(wsrc) && /im\.boundingSphere = new THREE\.Sphere\(new THREE\.Vector3\(ch\.sphere\[0\]/.test(wsrc),
      'Отсечение по кадру сохранено: сфера считается по ёмкости сектора');
 
   /* мир целый и без раскладки */
@@ -3456,7 +3660,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
 
   /* фактура листвы */
   ok(/export function makeLeafTexture/.test(tsrc), 'Текстура листвы есть');
-  ok(/отдельные листья: мазки поперёк/.test(tsrc), 'В ней прорисованы отдельные листья');
+  ok(/leaf strokes/.test(tsrc), 'В ней прорисованы отдельные листья');
   ok(CONFIG.NORMALS.leaf > 0, `Рельеф листвы ${CONFIG.NORMALS.leaf}: без него крона — гранёный камень`);
 
   /* резкость при растяжении */
@@ -3464,7 +3668,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   ok(/float contrast = clamp\( \( mx - mn \) \* 4\.0/.test(psrc),
      'Сила следует контрасту: на ровном месте подъём вытащил бы только зерно');
   ok(/export function setSharpen/.test(psrc), 'И настраивается');
-  const msrc2 = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+  const msrc2 = readApp();
   ok(/setSharpen\(v < 0\.999 \? CONFIG\.POST\.sharpen \* \(1 - v\)/.test(msrc2),
      'Тем сильнее, чем меньше доля разрешения');
 }
@@ -3472,7 +3676,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
 /* ══ 3h37. Умолчания и вызов всех шумоподавителей ══════════════════════ */
 {
   const psrc = readFileSync(new URL('./js/photo.js', import.meta.url), 'utf8');
-  const msrc = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+  const msrc = readApp();
 
   /* каждый способ обязан иметь свою ветку — иначе выбор в настройках
      переключал бы подпись, а работал бы один и тот же фильтр */
@@ -3507,11 +3711,13 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
      экспортирована, вызов стоял на месте, а строка импорта потерялась при
      правке. Синтаксис при этом верный, и `node --check` молчит — ошибка
      всплывает только в браузере, сотнями раз в секунду из цикла отрисовки. */
-  const files = ['config', 'util', 'textures', 'world', 'structures',
-    'controls', 'photo', 'pathtrace', 'audio', 'main', 'version'];
+  /* после разбора main.js (юнит B4) в проверке участвуют все модули app/ */
+  /* с v2.12.0 мир строят core + backends/three: адаптер проверяется вместе с приложением */
+  const files = [...['config', 'controls', 'photo', 'pathtrace', 'audio', 'version'].map(n => `js/${n}.js`),
+    ...APP_FILES, ...dirTs('backends/three')];
   const src = {};
   for (const f of files) {
-    src[f] = readFileSync(new URL(`./js/${f}.js`, import.meta.url), 'utf8');
+    src[f] = readSrc(f);
   }
 
   /* что каждый модуль отдаёт наружу */
@@ -3540,21 +3746,25 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   /* Шейдеры лежат в тех же файлах обратными кавычками, и в GLSL полно имён,
      совпадающих с нашими: clamp, mix, texture. Вырезаем их, иначе проверка
      ловит несуществующее. */
-  const stripGlsl = s => s.replace(/`[^`]*`/g, '``');
+  const stripGlsl = s => s.replace(/`[^`]*`/g, '``')
+    /* и комментарии: в них вызовы упоминаются словами (адаптер ссылается на прежний код) */
+    .replace(/\/\*[\s\S]*?\*\//g, '').replace(/(^|[^:])\/\/.*$/gm, '$1');
 
   let missing = [];
   for (const f of files) {
     /* имена, объявленные в самом файле, — не в счёт */
     const own = new Set(exportsOf[f]);
     for (const m of src[f].matchAll(/(?:function|const|let|var|class)\s+(\w+)/g)) own.add(m[1]);
+    /* методы объектов (world.setDetailFull(…) { … }) — тоже свои */
+    for (const m of src[f].matchAll(/^\s+(\w+)\s*\([^)]*\)\s*\{/gm)) own.add(m[1]);
 
     for (const other of files) {
       if (other === f) continue;
       for (const name of exportsOf[other]) {
         if (own.has(name) || importsOf[f].has(name)) continue;
         /* ищем настоящее обращение, а не совпадение внутри слова или строки */
-        const used = new RegExp(`(^|[^\\w.'"])${name}\\s*\\(`, 'm').test(stripGlsl(src[f]));
-        if (used) missing.push(`${f}.js → ${name} (из ${other}.js)`);
+        const used = new RegExp(`(^|[^\\w.'"])${name.replace(/\$/g, '\\$')}\\s*\\(`, 'm').test(stripGlsl(src[f]));
+        if (used) missing.push(`${f} → ${name} (из ${other})`);
       }
     }
   }
@@ -3564,8 +3774,8 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
 
 /* ══ 3h39. Улицы, озёра, дальнее дерево, накопление ════════════════════ */
 {
-  const wsrc = readFileSync(new URL('./js/world.js', import.meta.url), 'utf8');
-  const tsrc = readFileSync(new URL('./js/textures.js', import.meta.url), 'utf8');
+  const wsrc = WSRC;
+  const tsrc = TSRC;
   const psrc = readFileSync(new URL('./js/photo.js', import.meta.url), 'utf8');
 
   /* Ничего не растёт на проезжей части: раньше туда попадало пять сотен крон
@@ -3620,7 +3830,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
     }
   }
   ok(inWater === 0, `В воде ничего не растёт (${inWater} из ${plants})`);
-  ok(/if \(inPond\(t, z, r\)\) continue;/.test(wsrc), 'Отсев идёт при расстановке');
+  ok(/if \(inPond\(ponds, t, z, r, R\)\) continue;/.test(wsrc), 'Отсев идёт при расстановке');
   ok(/dx = px \/ pd\.ax; dz = py \* pd\.ax;/.test(wsrc),
      'Проверяется овалом, а не кругом: у берега вытянутого озера круг промахнётся в обе стороны');
   ok(CONFIG.HILL.shore > 0, `Запас берега ${CONFIG.HILL.shore}: крона не свешивается над водой`);
@@ -3632,8 +3842,8 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   /* Пруды рисуются ДО возврата из функции: блок стоял после него и не
      выполнялся ни разу — озёр не было вовсе. */
   const hullFn = tsrc.slice(tsrc.indexOf('export function makeHullMaps'));
-  const iPond = hullFn.indexOf('─── ПРУДЫ ───');
-  const iRet = hullFn.indexOf('return { albedo, mask');
+  const iPond = hullFn.indexOf('─── ponds:');
+  const iRet = hullFn.indexOf('return { albedo: A.c, mask');
   ok(iPond > 0 && iPond < iRet, 'Пруды рисуются до возврата из функции');
 
   /* дальнее дерево — три плоскости, а не две */
@@ -3653,7 +3863,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
 /* ══ 3h40. Готовые проходы three и дерево обхода ═══════════════════════ */
 {
   const psrc = readFileSync(new URL('./js/photo.js', import.meta.url), 'utf8');
-  const wsrc = readFileSync(new URL('./js/world.js', import.meta.url), 'utf8');
+  const wsrc = WSRC;
   const csrc = readFileSync(new URL('./js/controls.js', import.meta.url), 'utf8');
   const ptsrc = readFileSync(new URL('./js/pathtrace.js', import.meta.url), 'utf8');
   const html = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
@@ -3662,17 +3872,22 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
      разошедшаяся версия зависимости. */
   ok(!existsSync(new URL('./js/smaa-lut.js', import.meta.url)), 'Файл своих таблиц SMAA удалён');
   ok(!existsSync(new URL('./js/smaa-shaders.js', import.meta.url)), 'И файл своих шейдеров');
-  ok(/from 'three\/examples\/jsm\/postprocessing\/SMAAPass\.js'/.test(psrc),
+  ok(/from 'three\/addons\/postprocessing\/SMAAPass\.js'/.test(psrc),
      'SMAA берётся готовым проходом three');
-  ok(html.includes('"three/examples/jsm/"'), 'Карта импортов знает про примеры three');
+  const threePkg = JSON.parse(readFileSync(new URL('./node_modules/three/package.json', import.meta.url), 'utf8'));
+  ok(!html.includes('importmap') &&
+     threePkg.exports?.['./addons/*'] === './examples/jsm/*' &&
+     existsSync(new URL('./node_modules/three/examples/jsm/postprocessing/SMAAPass.js', import.meta.url)),
+     'Примеры three разрешаются из node_modules (псевдоним three/addons), карта импортов не нужна');
 
   /* Дерево обхода: расширение прототипа надо УСТАНОВИТЬ, иначе метода просто
      не существует, а вызов через ?. молча ничего не делает. */
-  ok(/THREE\.BufferGeometry\.prototype\.computeBoundsTree = computeBoundsTree/.test(wsrc),
+  ok(/if \(G\.computeBoundsTree !== computeBoundsTree\) G\.computeBoundsTree = computeBoundsTree/.test(wsrc),
      'Расширение геометрии установлено');
-  ok(/THREE\.Mesh\.prototype\.raycast = acceleratedRaycast/.test(wsrc),
+  ok(/if \(M\.raycast !== acceleratedRaycast\) M\.raycast = acceleratedRaycast/.test(wsrc),
      'И ускоренный луч тоже');
-  ok(/hullGeo\.computeBoundsTree\(\{ targetLeafSize: 8 \}\)/.test(wsrc),
+  ok(/const LEAF = 8;/.test(wsrc) && /g\.computeBoundsTree\(\{ targetLeafSize: LEAF \}\)/.test(wsrc)
+     && !!coreWorld('LOW').collider?.geometry.boundsTree && lastWorld.collider.name === 'hull',
      'Дерево строится по корпусу');
   ok(!/computeBoundsTree\?\./.test(wsrc), 'Без ?. — промах здесь молчаливый и потому опасный');
 
@@ -3692,16 +3907,17 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   ok(CONFIG.COLLIDE.radius > 0, `Радиус отхода ${CONFIG.COLLIDE.radius} юнита`);
 
   /* SAH для дерева трассировщика */
-  ok(/strategy: SAH/.test(ptsrc),
+  const bvhWsrc = readFileSync(new URL('./js/pathtrace-bvh.worker.js', import.meta.url), 'utf8');
+  ok(/strategy: SAH/.test(bvhWsrc),
      'Дерево трассировщика строится по площади поверхности: строится дольше, обходится быстрее');
-  ok(/import \{ MeshBVH, SAH \}/.test(ptsrc), 'Стратегия берётся из библиотеки');
+  ok(/import \{ MeshBVH, SAH \}/.test(bvhWsrc), 'Стратегия берётся из библиотеки');
 }
 
 /* ══ 3h41. Форма озёр, спицы, дневной свет ═════════════════════════════ */
 {
-  const wsrc = readFileSync(new URL('./js/world.js', import.meta.url), 'utf8');
-  const ssrc = readFileSync(new URL('./js/structures.js', import.meta.url), 'utf8');
-  const tsrc = readFileSync(new URL('./js/textures.js', import.meta.url), 'utf8');
+  const wsrc = WSRC;
+  const ssrc = SSRC;
+  const tsrc = TSRC;
 
   /* Озёра не наезжают друг на друга и не круглые */
   const g7 = new THREE.CylinderGeometry(CONFIG.R, CONFIG.R, CONFIG.L,
@@ -3727,7 +3943,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
 
   /* Спицы достают до стенки */
   const R7 = CONFIG.R, hubR = 4.6, bite = CONFIG.ENDCAP.spokeBite;
-  ok(/const spokeLen = R \+ bite - hubR;/.test(ssrc),
+  ok(/const spokeLen = CORE_CONFIG\.R \+ CORE_CONFIG\.ENDCAP\.spokeBite - HUB\.r;/.test(ssrc),
      'Длина спицы считается от ступицы до стенки, а не подбирается числом');
   ok(hubR + (R7 + bite - hubR) > R7,
      `Спица заходит в стенку на ${(hubR + (R7 + bite - hubR) - R7).toFixed(1)} юнита — щели нет`);
@@ -3739,7 +3955,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
      здесь закреплены, чтобы это не повторилось. */
   ok(D.hemiInt === 1.35 && D.pointInt === 0.95,
      `Дневная палитра обычного режима нетронута: полусфера ${D.hemiInt}, осевые ${D.pointInt}`);
-  const msrc = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+  const msrc = readApp();
   const exp = parseFloat((msrc.match(/toneMappingExposure = ([\d.]+)/) || [])[1]);
   ok(exp === 1.22, `Экспозиция обычного кадра ${exp} — тоже нетронута`);
 
@@ -3755,9 +3971,9 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
 
 /* ══ 3h42. Цена пикселя и растяжение ═══════════════════════════════════ */
 {
-  const wsrc = readFileSync(new URL('./js/world.js', import.meta.url), 'utf8');
+  const wsrc = WSRC;
   const psrc = readFileSync(new URL('./js/photo.js', import.meta.url), 'utf8');
-  const msrc = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+  const msrc = readApp();
 
   /* Корпус закрывает весь экран, и всё, что в его шейдере, платится за
      КАЖДЫЙ пиксель кадра. Цикл теней от опор отрабатывал двенадцать
@@ -3796,7 +4012,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
 {
   const html = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
   const css = readFileSync(new URL('./style.css', import.meta.url), 'utf8');
-  const msrc = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+  const msrc = readApp();
   const ptsrc = readFileSync(new URL('./js/pathtrace.js', import.meta.url), 'utf8');
 
   /* Вкладки как нижняя панель: иконка, под ней подпись, выбранное
@@ -3817,7 +4033,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
      `Ступеней FSR: ${CONFIG.POST.FSR.map(x => x.label.split(' ')[0]).join(', ')}`);
   ok(CONFIG.POST.FSR[0].v === 0, 'Первая — авто, доля остаётся за адаптацией');
   ok(CONFIG.POST.FSR.some(x => x.v === 1), 'Есть и явное «выкл»');
-  ok(/fsrFixed > 0 \? native \* fsrFixed : renderScale\(\)/.test(msrc),
+  ok(/fsrFixed > 0 \? native \* (?:app\.)?fsrFixed : renderScale\(\)/.test(msrc),
      'Заданная вручную доля перебивает адаптацию: человек попросил явно');
   ok(/prefs\.set\('fsr'/.test(msrc), 'Выбор сохраняется');
 
@@ -3829,9 +4045,9 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
 /* ══ 3h44. Глубокие настройки и очистка ════════════════════════════════ */
 {
   const html = readFileSync(new URL('./index.html', import.meta.url), 'utf8');
-  const msrc = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+  const msrc = readApp();
   const psrc = readFileSync(new URL('./js/photo.js', import.meta.url), 'utf8');
-  const wsrc = readFileSync(new URL('./js/world.js', import.meta.url), 'utf8');
+  const wsrc = WSRC;
 
   /* Отдельная вкладка: у каждой из этих настроек своя цена, и «правильного»
      значения нет — оно зависит от того, что снимают. */
@@ -3868,7 +4084,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
      'Пауза его останавливает: иначе он показывал бы не работу, а время в режиме');
 
   /* Растения отступают от ВСЕЙ чаши низины, а не от кромки воды */
-  ok(/pd\.r \/ CONFIG\.HILL\.pondFill \+ r \+ CONFIG\.HILL\.shore/.test(wsrc),
+  ok(/pd\.r \/ H\.pondFill \+ r \+ H\.shore/.test(wsrc),
      'Отступ считается от всей чаши: склон пологий, и дерево на спуске читается стоящим в озере');
   ok(CONFIG.HILL.pondFill > 0 && CONFIG.HILL.pondFill < 1,
      `Вода занимает ${(CONFIG.HILL.pondFill * 100) | 0}% чаши`);
@@ -3929,10 +4145,10 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   const asrc = readFileSync(new URL('./js/audio.js', import.meta.url), 'utf8');
   ok(/export function startAudio/.test(asrc) && !/new\s+AC\(\)/.test(asrc.split('export function startAudio')[0]),
      'AudioContext создаётся только в startAudio, вызываемом по жесту');
-  const msrc = readFileSync(new URL('./js/main.js', import.meta.url), 'utf8');
+  const msrc = readApp();
   ok(/\$\('go'\)\.onclick[\s\S]{0,300}startAudio\(\)/.test(msrc),
      'startAudio вызывается по нажатию «Начать», а не при загрузке');
-  ok(/suspendAudio\(paused\)/.test(msrc), 'Звук останавливается вместе со сценой');
+  ok(/suspendAudio\((?:app\.)?paused\)/.test(msrc), 'Звук останавливается вместе со сценой');
   ok(!/fetch|\.mp3|\.ogg|\.wav/.test(asrc), 'Ни одного внешнего сэмпла — всё синтез');
 }
 
@@ -3997,7 +4213,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
 
   /* Эмиссия не освещается: ночью она обязана быть слабее отражённого света,
      иначе улицы светятся сами и красят пол в кремовый. */
-  const src2 = readFileSync(new URL('./js/world.js', import.meta.url), 'utf8');
+  const src2 = WSRC;
   ok(/smoothstep\(\s*0\.10,\s*0\.75,\s*hullMask\.b\s*\)/.test(src2),
      'Фонари зажигаются мягким порогом по B, а не по всей заливке');
   /* Прежний порог 0.34…0.92 давал резкий край: асфальт светился сам, а
@@ -4006,8 +4222,8 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
      'За краем застройки остаётся отсвет, спадающий к нулю');
   /* фонари горят на всех улицах, а не только на магистралях, поэтому
      площадь свечения выросла и яркость должна была упасть */
-  const tsrc2 = readFileSync(new URL('./js/textures.js', import.meta.url), 'utf8');
-  const cityBlk = tsrc2.slice(tsrc2.indexOf('── ГОРОДА'), tsrc2.indexOf('── РЕКИ'));
+  const tsrc2 = TSRC;
+  const cityBlk = tsrc2.slice(tsrc2.indexOf('── cities'), tsrc2.indexOf('── rivers'));
   const passes = (cityBlk.match(/\[[\d.]+, [\d.]+\]/g) || []).length;
   ok(/for \(const \[mul, alpha\] of/.test(cityBlk),
      `След фонарей рисуется несколькими проходами (${passes}) — край мягкий, а не квадратный`);
@@ -4016,7 +4232,7 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   /* Свечение стало множителем к альбедо, а не самостоятельным цветом:
      сравнивать его с абсолютной яркостью света больше нельзя. Проверяем
      то, что важно, — фонарь освещает покрытие, поэтому разметка видна. */
-  const wsrc2 = readFileSync(new URL('./js/world.js', import.meta.url), 'utf8');
+  const wsrc2 = WSRC;
   ok(/totalEmissiveRadiance \+= uCityGlow \* diffuseColor\.rgb/.test(wsrc2),
      'Свет фонарей множится на альбедо — разметка дороги видна ночью');
   ok(N.cityGlow <= 1.0, `Фонарь не ярче самой поверхности (множитель ${N.cityGlow})`);
@@ -4038,18 +4254,93 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
 
 /* ══ 6. Базис, UV и слияние — регресс от первой версии ══════════════════ */
 {
-  const hull = new THREE.CylinderGeometry(CONFIG.R, CONFIG.R, CONFIG.L, CONFIG.HULL_SEG, 1, true);
-  hull.rotateX(Math.PI / 2);
-  ok(uvSelfTest(hull, true) && !uvSelfTest(hull, false),
-     'Самотест UV: зеркало BackSide есть и снимается repeat.x = -1');
-
-  const g = mergeGeos([rod(1, 2, 1, 0, 1, 0), rod(1, 2, 1, 3, 1, 0)]);
-  let maxI = 0;
-  for (let i = 0; i < g.index.count; i++) maxI = Math.max(maxI, g.index.getX(i));
-  ok(maxI === g.attributes.position.count - 1, 'Слияние: индексы в границах буфера');
+  /* Сырой цилиндр three развёрнут зеркально (u = 0.5 − θ/2π): прежний корпус
+     снимал зеркало repeat.x = −1 на каждой карте. Ядро запекает u = θ/2π в
+     геометрию корпуса — карты без преобразований. */
+  const raw = new THREE.CylinderGeometry(CONFIG.R, CONFIG.R, CONFIG.L, CONFIG.HULL_SEG, 1, true);
+  raw.rotateX(Math.PI / 2);
+  ok(!uvSelfTest(raw) && uvSelfTest(hullOf(coreWorld('LOW').stationGroup).geometry),
+     'Самотест UV: у сырого цилиндра развёртка зеркальна, у корпуса ядра u = θ/2π запечено');
+  /* слияние геометрий (прежний mergeGeos/rod) сверяет core/test/geometry-parity.test.ts */
 
   const p = surfacePos(30 * D2R, CONFIG.R, 0);
   ok(Math.abs(Math.hypot(p.x, p.y) - CONFIG.R) < 1e-9, 'Расстановка: точка ровно на корпусе');
+}
+
+/* ══ 7. v2.12.0: мир строит ядро, прежний код мира ушёл ═══════════════ */
+{
+  /* прежние модули мира — не часть приложения */
+  ok(!existsSync(new URL('./js/structures.js', import.meta.url)), 'js/structures.js удалён');
+  for (const f of ['js/util.js', 'js/world.js', 'js/textures.js'])
+    ok(!existsSync(new URL('./' + f, import.meta.url)), `${f} удалён: внешние потребители смотрят в test/legacy-oracle/`);
+  ok(!existsSync(new URL('./app/lights.ts', import.meta.url)), 'app/lights.ts удалён: свет и ореол строит адаптер по описанию мира');
+  const LEGACY = /(?:from\s+|import\()\s*'[^']*(?:js\/(?:util|world|textures|structures)\.js|\.\/(?:util|world|textures|structures)\.js|legacy-oracle\/[^']*)'/;
+  const SHIMS = ['js/util.js', 'js/world.js', 'js/textures.js'];
+  const jsFiles = readdirSync(new URL('./js/', import.meta.url)).filter(f => f.endsWith('.js')).map(f => 'js/' + f);
+  const offenders = [...listAppTs(), ...jsFiles, ...dirTs('backends/three'), ...dirTs('core')]
+    .filter(f => !SHIMS.includes(f) && LEGACY.test(readSrc(f)));
+  ok(offenders.length === 0,
+     `Ни app/, ни js/, ни core/ с адаптером не импортируют прежний мир и эталон test/legacy-oracle/${offenders.length ? ' (' + offenders.join(', ') + ')' : ''}`);
+  for (const f of SHIMS) {
+    if (!existsSync(new URL('./' + f, import.meta.url))) continue;
+    const body = readSrc(f).replace(/\/\*[\s\S]*?\*\//g, '').trim();
+    ok(/^export \* from '\.\.\/test\/legacy-oracle\/\w+\.js';$/.test(body),
+       `${f}: только мост к test/legacy-oracle/ для внешних потребителей`);
+  }
+  const msrc = readApp();
+  ok(/buildScene\(worldParams\(\)\)/.test(msrc) && /createThreeWorld\(desc, renderer/.test(msrc),
+     'Мир приложения: core buildScene → backends/three createThreeWorld');
+  ok(/await next\.ready/.test(msrc) && /if \(!world\) return;/.test(msrc),
+     'Мир подменяется, только когда готовы все текстуры; до первого мира кадр не рисуется');
+  ok(/world\.applyLighting\(s\)/.test(msrc) && /lightingAt\(ph\)/.test(msrc),
+     'Палитра — lightingAt ядра, применяет её мир');
+
+  /* облака, пылинки и ореол — в описании мира */
+  const sc = buildScene(worldParams('HIGH'));
+  ok(sc.meshes.some(m => m.role === 'glow' && m.parent === 'scene' && m.only === 'raster')
+     && ['clouds', 'motes'].every(r => sc.billboards.some(b => b.role === r && b.parent === 'scene')),
+     'Ореол солнца, облака и пылинки описаны ядром (core/scene/ambient.ts)');
+  ok(sc.billboards.find(b => b.role === 'motes').positions.length === 400 * 3
+     && sc.billboards.find(b => b.role === 'clouds').positions.length === 14 * 3,
+     'Их столько же, сколько в прежнем рецепте: 14 облаков, 400 пылинок');
+
+  /* сектора и их номера — из описания, а не угадываются по углу */
+  const sectored = sc.meshes.filter(m => m.sectored).map(m => m.role);
+  ok(['bld.0', 'cars.parked', 'trunks', 'tufts', 'bushes', 'blob', 'print'].every(r => sectored.includes(r)),
+     `Секторные роли помечены в описании: ${sectored.join(', ')}`);
+  ok(sc.meshes.filter(m => m.sectored).every(m => m.instances.chunks.every(ch => Number.isInteger(ch.bucket))),
+     'У каждого сектора записан его номер (InstanceChunk.bucket)');
+  ok(!/LEGACY_SECTORED|chunkBuckets\(I\.chunks, I\.matrices/.test(WSRC), 'Адаптер не угадывает сектора по углу экземпляров');
+
+  /* normalScale «как отрисовано»: корпус (−1, −1), никто не обращает его по стороне */
+  ok(JSON.stringify(sc.materials['w.hull'].normalScale) === '[-1,-1]', 'У корпуса normalScale (−1, −1) прямо в описании');
+  ok(!/normalScale\.negate\(\)/.test(srcOf('backends/three/materials/legacy.ts').replace(/\/\*[\s\S]*?\*\//g, '')), 'Адаптер не обращает normalScale');
+  const hw = coreWorld('HIGH').materials.get('w.hull');
+  ok(hw.side === THREE.FrontSide && hw.normalScale.x === -1 && hw.normalScale.y === -1,
+     'Корпус лицом внутрь (FrontSide) с рельефом (−1, −1)');
+
+  /* отражение корпуса в воде берёт столбец θ/2π, а не π − θ */
+  const legacyTs = srcOf('backends/three/materials/legacy.ts'), psrc = srcOf('js/photo.js');
+  ok(/huv = vec2\( fract\( atan\( hw\.x, hw\.y \) \/ 6\.28318531 \)/.test(legacyTs)
+     && !/0\.5 - atan\( hw\.x, hw\.y \)/.test(legacyTs), 'Отражение корпуса в воде: u = θ/2π (было π − θ)');
+  ok(/K\.fract\(K\.atan\(hw\.x, hw\.y\)\.div\(C\.twoPi\)\)/.test(srcOf('core/shading/kernels/hullMirror.ts')),
+     'То же в ядре отражения (hullMirror)');
+  ok(/float uu = fract\( th \/ 6\.28318531 \)/.test(psrc), 'И в экранной трассировке фото-режима');
+
+  /* сохранённые качество и зелень действуют уже на первую сборку */
+  const prefsSrc = readSrc('app/prefs.ts'), mainSrc = readSrc('app/main.ts');
+  ok(/CONFIG\.GREEN_K = g/.test(prefsSrc) && /target\.quality = prefs\.get\('quality'/.test(prefsSrc),
+     'applyStoredWorld читает и качество, и густоту зелени');
+  ok(mainSrc.indexOf('applyStoredWorld(app)') > 0 && mainSrc.indexOf('applyStoredWorld(app)') < mainSrc.indexOf('boot()'),
+     'И зовётся до первой сборки мира');
+
+  /* настройки ТВ-режима и геймпада — в CONFIG */
+  ok(CONFIG.TV && CONFIG.TV.overlayIdleMs > 0 && CONFIG.TV.longPressMs > 0 && CONFIG.TV.tourHolds.length >= 3,
+     'CONFIG.TV: оверлей, долгое нажатие, скорости тура');
+  ok(CONFIG.GAMEPAD && CONFIG.GAMEPAD.dead > 0 && CONFIG.GAMEPAD.lookRate > 0, 'CONFIG.GAMEPAD: мёртвая зона и скорость обзора');
+  ok(/CONFIG\.GAMEPAD\.lookRate/.test(readSrc('app/input/gamepad.ts')) && /CONFIG\.TV\.longPressMs/.test(readSrc('app/input/remote.ts'))
+     && /CONFIG\.TV\.overlayIdleMs/.test(readSrc('app/ui/tv-overlay.ts')),
+     'Приложение читает их из CONFIG');
 }
 
 console.log(fails ? `\n${fails} проверок провалено` : '\nВсе проверки пройдены');

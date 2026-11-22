@@ -1,0 +1,84 @@
+name: Android APK
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+      - uses: android-actions/setup-android@v3
+      - name: Install Android SDK
+        run: sdkmanager "platforms;android-34" "build-tools;36.0.0"
+      - run: npm ci
+      - run: npm test
+      - run: npm run lint
+      - run: npm run typecheck
+      - run: npm run build
+      - name: Assemble and verify APK
+        shell: bash
+        env:
+          KEYSTORE: ${{ (github.event_name == 'release' || (github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch)) && secrets.ANDROID_KEYSTORE_BASE64 || '' }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ (github.event_name == 'release' || (github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch)) && secrets.ANDROID_KEYSTORE_PASSWORD || '' }}
+          ANDROID_KEY_ALIAS: ${{ (github.event_name == 'release' || (github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch)) && secrets.ANDROID_KEY_ALIAS || '' }}
+          ANDROID_KEY_PASSWORD: ${{ (github.event_name == 'release' || (github.event_name != 'pull_request' && github.ref_name == github.event.repository.default_branch)) && secrets.ANDROID_KEY_PASSWORD || '' }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          if [[ -n "$TAG" ]]; then
+            version=$(node --input-type=module -e "import {VERSION} from './js/version.js'; console.log(VERSION)")
+            [[ "${TAG#v}" == "$version" ]] || { echo "::error::Release tag differs from VERSION"; exit 1; }
+          fi
+          if [[ -n "$KEYSTORE$ANDROID_KEYSTORE_PASSWORD$ANDROID_KEY_ALIAS$ANDROID_KEY_PASSWORD$TAG" ]]; then
+            : "${KEYSTORE:?Missing ANDROID_KEYSTORE_BASE64}" "${ANDROID_KEYSTORE_PASSWORD:?}" "${ANDROID_KEY_ALIAS:?}" "${ANDROID_KEY_PASSWORD:?}"
+            export ANDROID_KEYSTORE_PATH="$RUNNER_TEMP/gardens.jks"
+            trap 'rm -f "$ANDROID_KEYSTORE_PATH"' EXIT
+            umask 077
+            printf '%s' "$KEYSTORE" | base64 --decode > "$ANDROID_KEYSTORE_PATH"
+            variant=Release
+          else
+            variant=Debug
+          fi
+          bash android/gradlew -p android ":app:assemble$variant"
+          mkdir -p apk
+          name=babylon5-gardens
+          if [[ "$variant" == Debug ]]; then name+=-debug; fi
+          cp "android/app/build/outputs/apk/${variant,,}/app-${variant,,}.apk" "apk/$name.apk"
+          "$ANDROID_HOME/build-tools/36.0.0/apksigner" verify --verbose "apk/$name.apk"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: babylon5-gardens-apk
+          path: apk/*.apk
+          if-no-files-found: error
+
+  attach:
+    if: github.event_name == 'release'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: babylon5-gardens-apk
+          path: apk
+      - name: Attach signed APK to the published release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$TAG" apk/babylon5-gardens.apk --repo "$GITHUB_REPOSITORY" --clobber

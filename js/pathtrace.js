@@ -55,47 +55,28 @@ let emitSaved = [], rimAdded = [], axisSaved = [];
    Дерево обхода считается на процессоре и занимает секунды. В главном потоке
    это замораживает интерфейс целиком: кнопки не отвечают, снимок не сделать.
 
-   Штатный worker библиотеки не подходит: worker НЕ наследует карту импортов
-   страницы, и `import 'three'` внутри него не разрешится. Поэтому собираем
-   свой — из строки, с АБСОЛЮТНЫМИ адресами тех же сборок, взятыми прямо из
-   карты импортов страницы. Интерфейс от него нужен ровно один: метод
-   generate(geometry), возвращающий обещание с готовым деревом.
+   Штатный worker библиотеки не подходит: он грузит свой файл по адресу
+   внутри пакета, которого в собранном сайте нет. Поэтому worker свой —
+   отдельный модуль js/pathtrace-bvh.worker.js. Сборщик узнаёт его по шаблону
+   `new Worker(new URL(...), import.meta.url)`, собирает вместе с 'three' и
+   'three-mesh-bvh' из node_modules и подставляет итоговый адрес. Интерфейс
+   от него нужен ровно один: метод generate(geometry), возвращающий обещание
+   с готовым деревом.
 
    Выборки пути в поток выносить незачем: вызов renderSample уходит на GPU за
    микросекунды, поток при этом свободен. Вязкость там от загруженной
    видеокарты, а не от занятого потока.
    ═══════════════════════════════════════════════════════════════════════════ */
 
-/** Абсолютный адрес модуля из карты импортов страницы */
-function resolveUrl(name) {
+/** Поднять поток постройки. Шаблон вызова записан БУКВАЛЬНО — только так
+    сборщик его распознаёт и кладёт worker в сборку. */
+function spawnBvhWorker() {
   try {
-    return new URL(import.meta.resolve(name), location.href).href;
+    return new Worker(new URL('./pathtrace-bvh.worker.js', import.meta.url), { type: 'module' });
   } catch {
     return null;
   }
 }
-
-const workerSource = (threeUrl, bvhUrl) => `
-import { BufferGeometry, BufferAttribute } from '${threeUrl}';
-import { MeshBVH, SAH } from '${bvhUrl}';
-
-self.onmessage = e => {
-  const { position, index, options } = e.data;
-  try {
-    const geo = new BufferGeometry();
-    geo.setAttribute('position', new BufferAttribute(position, 3));
-    if (index) geo.setIndex(new BufferAttribute(index, 1));
-    /* SAH — разбиение по площади поверхности: дерево строится дольше, но
-       обходится заметно быстрее, а строим мы его один раз за съёмку. */
-    const bvh = new MeshBVH(geo, { ...(options || {}), strategy: SAH });
-    const packed = MeshBVH.serialize(bvh, { cloneBuffers: false });
-    const move = [packed.index.buffer, ...packed.roots];
-    self.postMessage({ ok: true, packed }, move);
-  } catch (err) {
-    self.postMessage({ ok: false, error: String((err && err.message) || err) });
-  }
-};
-`;
 
 /** Настройки трассировщика. Отдельной функцией, потому что при откате на
     синхронную сборку он создаётся заново и настройки нужны те же. */
@@ -125,32 +106,45 @@ function applyTracerSettings(t, mobile, onComposite) {
 
 /** Обёртка с тем интерфейсом, который ждёт библиотека: generate(geometry) */
 function makeBvhWorker(MeshBVHClass) {
-  const threeUrl = resolveUrl('three');
-  const bvhUrl = resolveUrl('three-mesh-bvh');
-  if (!threeUrl || !bvhUrl || typeof Worker === 'undefined') return null;
-
-  const blob = new Blob([workerSource(threeUrl, bvhUrl)], { type: 'text/javascript' });
-  const url = URL.createObjectURL(blob);
-  const worker = new Worker(url, { type: 'module' });
-  URL.revokeObjectURL(url);
+  if (typeof Worker === 'undefined') return null;
+  const worker = spawnBvhWorker();
+  if (!worker) return null;
 
   return {
     running: false,
     generate(geometry, options = {}) {
       this.running = true;
+      /* Генератор библиотеки кладёт в параметры функцию onProgress. Функцию
+         через postMessage не передать — DataCloneError, и сборка в потоке
+         молча откатывалась в главный. Оставляем её здесь, а поток шлёт
+         доли готовности сообщениями. */
+      const { onProgress, ...cloneable } = options;
       return new Promise((resolve, reject) => {
         worker.onmessage = ev => {
+          if (ev.data.progress !== undefined) { onProgress?.(ev.data.progress); return; }
           this.running = false;
           if (!ev.data.ok) { reject(new Error(ev.data.error)); return; }
+          /* Буферы ушли в поток переносом, у геометрии на их месте пустые
+             (detached) массивы: возвращаем ей позиции и индекс из ответа,
+             иначе deserialize писал бы в пустой буфер. */
+          const { packed, position } = ev.data;
+          const posAttr = geometry.attributes.position;
+          posAttr.array = position;
+          posAttr.needsUpdate = true;
+          if (geometry.index && packed.index) {
+            geometry.index.array = packed.index;
+            geometry.index.needsUpdate = true;
+          }
           /* дерево возвращается упакованным — разворачиваем на месте */
-          resolve(MeshBVHClass.deserialize(ev.data.packed, geometry, { setIndex: true }));
+          resolve(MeshBVHClass.deserialize(packed, geometry, { setIndex: true }));
         };
         worker.onerror = err => { this.running = false; reject(err); };
 
         /* буферы уходят В worker без копирования: у нас их сотни мегабайт */
         const pos = geometry.attributes.position.array;
         const idx = geometry.index ? geometry.index.array : null;
-        worker.postMessage({ position: pos, index: idx, options }, [pos.buffer,
+        worker.postMessage({ position: pos, index: idx, options: cloneable,
+          progress: typeof onProgress === 'function' }, [pos.buffer,
           ...(idx ? [idx.buffer] : [])]);
       });
     },

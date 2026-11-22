@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PT view</title>
+  <link rel="icon" href="data:,">
+  <style>
+    :root { color-scheme: dark; }
+    body { margin: 0; padding: 12px; background: #0d0f12; color: #d8dde3; font: 13px/1.45 ui-monospace, Consolas, monospace; }
+    #wrap { position: relative; width: 100%; max-width: 1280px; }
+    canvas { display: block; width: 100%; height: auto; background: #000; }
+    #hud { position: absolute; left: 8px; top: 8px; padding: 4px 8px; background: rgba(0, 0, 0, 0.55); white-space: pre; pointer-events: none; }
+    #status { font-weight: bold; margin: 8px 0; }
+    #status.pass { color: #6fdc8c; }
+    #status.fail { color: #ff6b6b; }
+    pre { white-space: pre-wrap; word-break: break-word; max-width: 1280px; }
+  </style>
+</head>
+<body>
+  <div id="wrap">
+    <canvas id="view" width="960" height="540"></canvas>
+    <div id="hud">starting…</div>
+  </div>
+  <div id="status">running…</div>
+  <p>Query: <code>scene=station|furnace|tube</code>, <code>view=0..8</code>, <code>phase=0..3</code> (0 DAY, 1 DUSK, 2 NIGHT),
+    <code>spp=64</code>, <code>res=1</code> (× 960×540), <code>quality=HIGH</code>, <code>depth=6</code>, <code>budget=40</code> (ms per submit),
+    <code>exposure=1.22</code> (raster renderer exposure), <code>tone=aces-three|aces|linear</code>, <code>fov=62</code>,
+    <code>stub=1</code> (Lambert stub instead of the scene materials), <code>phys=core</code> (CORE_CONFIG.PHYS instead of the
+    calibrated PHYS_OVERRIDE), <code>tube=equiangular|uniformArea</code>, <code>lights=tree|alias|none</code>,
+    <code>noise=1</code> (second independent render → relative rms noise), <code>profile=1</code> (GPU ms per kernel),
+    experiments: <code>paths=N</code> (path capacity), <code>clamp=K</code>, <code>spread=rad</code>, <code>tubescale=k</code>,
+    <code>lightroles=bld,tower,…</code> (triangle lights of these roles only).</p>
+  <pre id="log"></pre>
+  <script type="module" src="./pt-view.ts"></script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+{
+  "extends": "C:/Users/fhnb16/AppData/Local/threert-portable/ThreeRT/Resources/sdk/engine/tsconfig.base.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "typeRoots": ["C:/Users/fhnb16/AppData/Local/threert-portable/ThreeRT/Resources/sdk/engine/node_modules/@types"],
+    "baseUrl": ".",
+    "paths": {
+      "@threert/scene": ["C:/Users/fhnb16/AppData/Local/threert-portable/ThreeRT/Resources/sdk/engine/packages/scene/src/index.ts"],
+      "@threert/gameplay": ["C:/Users/fhnb16/AppData/Local/threert-portable/ThreeRT/Resources/sdk/engine/packages/gameplay/src/index.ts"],
+      "@threert/net": ["C:/Users/fhnb16/AppData/Local/threert-portable/ThreeRT/Resources/sdk/engine/../packages/net/src/index.ts"]
+    }
+  },
+  "include": ["*.ts", "src/**/*.ts"]
+}

@@ -1,5 +1,6 @@
 import { CONFIG } from './config.js';
-import { clamp, zoneAt, D2R, TAU, inRanges } from './util.js';
+import { clamp, D2R } from '../core/math/scalar.ts';
+import { zoneAt } from '../core/layout/zones.ts';
 
 /* ═══════════════════════════════════════════════════════════════════════════
    ЗВУК — целиком синтезируется на WebAudio, ни одного сэмпла.

@@ -1,0 +1,12 @@
+{
+  "name": "babylon5-gardens-threert",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=24" },
+  "scripts": {
+    "bake": "node tools/bake.mjs",
+    "check": "node tools/qjs-check.mjs",
+    "shots": "node tools/shots.mjs",
+    "test": "vitest run --config vitest.config.ts"
+  }
+}
