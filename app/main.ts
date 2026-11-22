@@ -38,6 +38,31 @@ declare global {
   }
 }
 
+// Регистрируем до асинхронного запуска рендера: событие load может уже пройти.
+if (import.meta.env.PROD && !window.GardensAndroid && 'serviceWorker' in navigator) {
+  const status = $('offlineStatus');
+  status.hidden = false;
+  status.textContent = 'Загрузка для работы офлайн…';
+  const workers = navigator.serviceWorker;
+  const checkReady = () => {
+    if (!workers.controller) return;
+    const channel = new MessageChannel();
+    channel.port1.onmessage = event => {
+      if (event.data === 'ready') status.textContent = 'Готово к работе офлайн';
+      channel.port1.close();
+    };
+    workers.controller.postMessage('offline-status', [channel.port2]);
+  };
+  workers.addEventListener('controllerchange', checkReady);
+  checkReady();
+  workers.register('sw.js', { type: 'module', updateViaCache: 'none' }).then(reg => {
+    const installing = reg.installing;
+    installing?.addEventListener('statechange', () => {
+      if (installing.state === 'redundant' && !reg.active) status.textContent = 'Офлайн-загрузка не завершена. Откройте приложение ещё раз при наличии сети.';
+    });
+  }).catch(() => { status.textContent = 'Не удалось подготовить офлайн-режим'; });
+}
+
 app.tv = parseTvMode(location.search, prefs.get('tvMode', false));
 applyStoredWorld(app);
 
@@ -89,12 +114,6 @@ async function start() {
       '<b>Графический контекст потерян</b><br>Обновите страницу — сцена соберётся заново.';
   });
 
-  /* PWA: worker нужен только для критерия устанавливаемости, кеша в нём нет */
-  if (!window.GardensAndroid && 'serviceWorker' in navigator && location.protocol !== 'file:') {
-    /* воркер импортирует версию, значит регистрируется как модуль */
-    addEventListener('load', () => navigator.serviceWorker
-      .register('sw.js', { type: 'module' }).catch(() => {}));
-  }
 
   if (app.tv) startTvMode();
 

@@ -1,5 +1,6 @@
 import { defineConfig, build, type Plugin, type ResolvedConfig } from 'vite';
-import { cpSync, existsSync } from 'node:fs';
+import { cpSync, existsSync, readdirSync, readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { resolve } from 'node:path';
 
 /* ═══════════════════════════════════════════════════════════════════════════
@@ -38,7 +39,14 @@ function pwaFiles(): Plugin {
       if (existsSync(resolve(root, 'icons'))) {
         cpSync(resolve(root, 'icons'), resolve(outDir, 'icons'), { recursive: true });
       }
+      const files = readdirSync(outDir, { recursive: true, withFileTypes: true })
+        .filter(file => file.isFile())
+        .map(file => resolve(file.parentPath, file.name).slice(outDir.length + 1).replaceAll('\\', '/'))
+        .filter(path => path !== 'sw.js').sort()
+        .map(path => [path, 'sha256-' + createHash('sha256').update(readFileSync(resolve(outDir, path))).digest('base64')]);
+      const revision = createHash('sha256').update(JSON.stringify(files)).digest('hex');
       await build({
+        define: { __PWA_FILES__: JSON.stringify(files), __PWA_REVISION__: JSON.stringify(revision) },
         configFile: false,
         root,
         logLevel: 'warn',

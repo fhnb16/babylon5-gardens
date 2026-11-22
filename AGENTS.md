@@ -11,7 +11,7 @@ Babylon.js). R = 50, L = 300 units, **1 unit = 10 m**. Everything is
 procedural: Canvas2D textures, primitive-built structures, WebAudio sound —
 scene assets are generated. The packaged app also ships launcher artwork and licensed OIDN weights.
 
-Current state (v2.13.1): three.js r187. The app shell is TypeScript in `app/`
+Current state (v2.13.2): three.js r187. The app shell is TypeScript in `app/`
 (entry `app/main.ts`, loaded by `index.html`). **The world is built by
 `core/` `buildScene()` + `backends/three` `createThreeWorld()`**; the legacy
 `js/world.js`, `structures.js`, `textures.js`, `util.js` and `app/lights.ts`
@@ -53,7 +53,7 @@ Status: **now** = exists, **wip** = in progress, **planned** = later waves.
 | `app/tv-mode.ts`, `app/tv.ts` | now | TV/kiosk mode: pure part (`?mode=tv` parse, `TV` constants, overlay navigation) and DOM part (Wake Lock, auto-tour/cycle) |
 | `app/ui/{sheets,hud,teleport-menu,settings,help,tv-overlay}.ts` | now | UI sheets, HUD, teleport menu, settings, help, D-pad TV overlay |
 | `app/workers/{textures.worker,texturePool}.ts` | now | texture generation off the main thread |
-| `sw.js`, `manifest.webmanifest`, `icons/` | now (root) | PWA; SW imports `VERSION`, has **no cache**; `vite.config.ts` copies/builds them into `dist/` |
+| `sw.js`, `manifest.webmanifest`, `icons/` | now (root) | PWA; SW imports `VERSION`, precaches the complete production build; `vite.config.ts` copies/builds them into `dist/` |
 | `test.mjs`, `test/dom-stub.mjs`, `views.mjs` | now | legacy self-test (~70 blocks, the de-facto spec), DOM stub, viewpoint metrics; also enforces that `js/`, `app/`, `core/` and the adapter never import the old world or `test/legacy-oracle/` |
 | `test/legacy-oracle/{world,structures,textures,util}.js` | now | the **deleted legacy world code, kept only as test oracles** (parity of `core/` against the old output). Never imported by app code |
 | `test/actions.test.ts`, `test/flight.test.ts` | now | Vitest: action layer + TV-mode helpers; flight camera looks along the flight direction |
@@ -357,6 +357,5 @@ or rename code they check, update the test in the same change only if you own
   them. Lamps use separate material groups.
 - **`three-gpu-pathtracer` reads only standard material properties**;
   `onBeforeCompile` shader patches are invisible to it.
-- **The service worker must not cache** (`caches` / `respondWith` are
-  forbidden by a test).
+- The production service worker must precache the complete same-scope build for offline launch, including lazy chunks and OIDN weights.
 - **`up` is toward the station axis**, not world +Y; use the station-up basis.

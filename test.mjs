@@ -1290,8 +1290,8 @@ const fakeRenderer = { capabilities: { getMaxAnisotropy: () => 8 } };
   const sw = readFileSync(new URL('sw.js', here), 'utf8');
   ok(/addEventListener\(\s*'fetch'/.test(sw), 'Worker имеет обработчик fetch — без него Chrome не предложит установку');
   const swCode = sw.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '');
-  ok(!/caches|respondWith|CacheStorage/.test(swCode),
-     'В коде worker нет ни кеша, ни перехвата — всё идёт из сети');
+  ok(swCode.includes('cache.addAll(') && swCode.includes('event.respondWith('),
+     'Worker сохраняет файлы сборки и обслуживает их офлайн');
 
   const html = readFileSync(new URL('index.html', here), 'utf8');
   ok(html.includes('rel="manifest"'), 'Манифест подключён в разметке');
